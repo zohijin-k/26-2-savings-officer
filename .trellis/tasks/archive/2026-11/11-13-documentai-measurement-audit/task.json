@@ -3,7 +3,7 @@
   "name": "documentai-measurement-audit",
   "title": "Audit DocumentAI measurement validity before changes",
   "description": "Implement approved conservative paired-stage measurement, raw/normalized metrics and distinct n=5 corpus; preserve operating code/reports, validate all four regression branches and await final review.",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,11 +11,11 @@
   "creator": "codex",
   "assignee": "codex",
   "createdAt": "2026-11-13",
-  "completedAt": null,
+  "completedAt": "2026-11-13",
   "branch": "feat/documentai-measurement",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
+  "commit": "b91da45",
   "pr_url": null,
   "subtasks": [],
   "children": [],
@@ -29,6 +29,6 @@
     "engine_v2/tests/test_documentai_staged_report.py",
     "engine_v2/docs/documentai-staged-measurement.md"
   ],
-  "notes": "User approved local commit application with commit apply. Paired n=5 measurement completed with410 unique pairs and0 execution errors. Final engine1375/3, backend1252, scenarios18/1885/0 and frontend lint/build pass. Apply reviewed code/report commits, then archive and record the session.",
+  "notes": "User approved local commits. Reviewed implementation committed as b06bbbb and audit/n5 evidence as b91da45. Archived after410 unique paired cases with0 execution errors. Final engine1375/3, backend1252, scenarios18/1885/0 and frontend lint/build pass.",
   "meta": {}
 }

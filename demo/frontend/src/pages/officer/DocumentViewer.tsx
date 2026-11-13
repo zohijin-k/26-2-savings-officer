@@ -71,6 +71,7 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
   const pdfRef = useRef<pdfjs.PDFDocumentProxy | null>(null)
 
   const [pageCount, setPageCount] = useState(1)
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null)
   // 원본이 아직 안 열렸을 때 클릭한 근거가 몇 쪽인지 잃지 않도록 **자르지 않은**
   // 희망 쪽수를 들고 있다가, 실제 표시 쪽수는 렌더 때 총 쪽수로 자른다.
   const [desiredPage, setDesiredPage] = useState(1)
@@ -113,6 +114,7 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
         }
         pdfRef.current = pdf
         setPageCount(pdf.numPages)
+        setLoadedUrl(doc.file_url)
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
@@ -142,7 +144,7 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
     void render().catch((e: unknown) =>
       setError(e instanceof Error ? e.message : String(e)),
     )
-  }, [render, pageCount])
+  }, [render, pageCount, loadedUrl])
 
   // --- 하이라이트: 위 렌더 중 조정이 쪽을 옮겨두면 여기서 그 자리로 스크롤한다 (R4.3)
   useEffect(() => {

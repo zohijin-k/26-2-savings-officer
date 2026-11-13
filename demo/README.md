@@ -1,8 +1,8 @@
-# 데모 사이트 — 전북청년 두배적금 · 취업지원패키지 신청서류 자동 검토 시스템
+# 데모 사이트 — 두배적금 담당자 서류 검토
 
-신청자가 공고문 서식을 원본 PDF 위에서 온라인으로 작성·서명하고, 담당자가 원본 서류를
-화면에서 확인하며 심사하는 데모다. 두배적금 서식5는 스캔본 제출도 선택할 수
-있다. 사업 2종(두배적금 · 취업지원패키지)을 같은 파이프라인으로 처리한다.
+앱을 열면 두배적금 담당자 화면으로 바로 진입한다. 첫 화면의 **적합 서류**는 문서 상태 PASS, **확인 필요 서류**는 그 외 상태다. 항목을 선택하면 원본과 기존 사유를 2단으로 확인한다. 신청자 화면·사업 선택·취업지원 담당자 화면은 제공하지 않는다. 신청·서식·업로드·판정·취업지원 백엔드 API와 엔진은 회귀 검증을 위해 보존한다.
+
+아래 과거 요구사항·설계·시연 대본은 분리 전 기록이다. 현재 화면 범위는 [루트 안내](../README.md)를 따른다.
 
 - 요구사항: `.trellis/tasks/09-16-demo-site/prd.md`
 - 설계: `.trellis/tasks/09-16-demo-site/design.md`
@@ -10,8 +10,7 @@
 - **시연 대본**: [`docs/demo-script.md`](docs/demo-script.md)
 - 담당자 화면 목업 데이터의 옛 기록: [보관 문서](../docs/archive/officer-mock-data.md)
 
-> ⚠️ **PC 전용**이다. 서식 원형을 지키기 위해 폭 940px 고정 레이아웃을 쓴다(R8.6).
-> 좁은 화면에서는 셀을 재배치하지 않고 가로 스크롤만 생긴다.
+> 원본·사유를 나란히 확인하는 PC 화면을 기준으로 시연한다.
 
 > ⚠️ **더미 데이터만 쓴다.** 이름·주민등록번호·주소·계좌번호는 전부 가짜이고,
 > 실물 서류는 저장소에 두지 않는다(R7.1). 업로드 원본과 SQLite 파일은 커밋되지
@@ -25,12 +24,13 @@
 demo/
 ├── backend/            FastAPI — 신청·업로드·심사·담당자 API
 │   ├── main.py         엔트리 (uvicorn 대상)
-│   ├── reset.py        시연 초기화 (파괴적)
+│   ├── tools/seed_officer_demo.py  합성 시연 데이터 생성·자체 생성분 정리
+│   ├── reset.py        전체 초기화 (파괴적, 일반 시연에 사용하지 않음)
 │   ├── engine_adapter.py   engine/ 와의 유일한 접점
 │   ├── api/ ocr/ rules/    라우터 · 판독 3계층 · 업무 규칙
 │   ├── forms/          원본 PDF 위 입력·서명 렌더링 및 서식 응답
 │   └── tests/          P2\~P20 시나리오 검증 스크립트 (pytest 없이 실행)
-├── frontend/           React + Vite (신청자 화면 · 담당자 화면)
+├── frontend/           React + Vite (두배적금 담당자 화면)
 ├── fixtures/
 │   ├── make_samples.py 시연용 더미 서류 생성기
 │   ├── cut_templates.py     원본 공고 PDF에서 서식별 A4 쪽 템플릿 생성
@@ -53,7 +53,7 @@ demo/
 ## 2. 준비 (최초 1회)
 
 검증에 쓴 환경: **Python 3.14.0 · Node 22.19.0** (Windows 11).
-Python은 3.12 이상, Node는 20 이상이면 된다.
+Python은 3.12 이상, Node는 20.19 이상이면 된다.
 
 ```bash
 # 저장소 루트에서
@@ -63,7 +63,7 @@ cd demo/frontend
 npm install
 ```
 
-시연용 더미 서류를 만든다. `demo/fixtures/samples/`에 25개 PDF가 생긴다.
+시연용 더미 서류를 만든다. `demo/fixtures/samples/`에 가상 PDF가 생긴다.
 
 ```bash
 # 저장소 루트에서
@@ -85,7 +85,7 @@ PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python -m demo.fixtures.make_samples
 uvicorn demo.backend.main:app --reload --port 8000
 ```
 
-이번 제출에서는 전북AI를 사용하지 않는다(연동 코드는 있으나 이번 제출에서는 사용하지 않음). JBAI_* 설정은 비워 둔 채 실행한다. 데모 로컬 OCR은 macOS를 포함한 모든 환경에서 own이 기본이다. own 모델은 macOS에서도 설치해야 한다. 저장소 루트에서 `pip install -r engine_v2/requirements.txt`와 `python engine_v2/tools/fetch_own_models.py`를 실행한다. 모델 파일은 저장소에 포함되지 않는다.
+이번 제출에서는 전북AI를 사용하지 않는다(연동 코드는 있으나 이번 제출에서는 사용하지 않음). JBAI_* 설정은 비워 둔 채 실행한다. 데모 로컬 OCR은 macOS를 포함한 모든 환경에서 own이 기본이다. 합성 시연 고정 응답에는 모델 설치가 필요하지 않다. 로컬 OCR 자체를 쓰려면 모델을 설치한다. 저장소 루트에서 `pip install -r engine_v2/requirements.txt`와 `python engine_v2/tools/fetch_own_models.py`를 실행한다. 모델 파일은 저장소에 포함되지 않는다.
 
 ```bash
 # 터미널 2 — 프론트엔드
@@ -93,51 +93,26 @@ cd demo/frontend
 npm run dev
 ```
 
-브라우저에서 <http://localhost:5173> 을 연다. 상단 탭으로 **신청자 / 담당자** 화면을
-오간다. Vite가 `/api` 요청을 8000 포트로 프록시하므로 별도 설정은 없다.
+브라우저에서 <http://localhost:5173>을 열면 두배적금 담당자 화면이 나온다. Vite가 `/api` 요청을 8000 포트로 프록시하므로 별도 설정은 없다.
 
-### 서류 업로드 시험용 2단계 자동 입력
+### 담당자 시연 데이터 넣기
 
-화면에서 사람이 **1단계 본인인증까지** 마친 뒤, 저장소 루트에서 실행한다.
-기본 대상은 본인인증을 마친 초안 중 2단계가 미완료인 가장 최근 신청 한 건이다.
-
-시드한 신청은 2단계를 다시 저장하지 말 것.
+저장소 루트에서 실행한다.
 
 ```bash
-PYTHONPATH=. python -B -m demo.backend.tools.seed_application
-PYTHONPATH=. python -B -m demo.backend.tools.seed_application --application-id 123
-PYTHONPATH=. python -B -m demo.backend.tools.seed_application --address '전북특별자치도 익산시 가짜시험로 0 (SEED 가상주소)' --frontend-url http://localhost:5173
+python -m demo.fixtures.make_samples
+python -m demo.backend.tools.seed_officer_demo
 ```
 
-실행 후 출력대로 **1단계를 한 같은 탭 주소창에** `http://localhost:5173/apply/upload`를
-입력한다. 이 화면은 같은 탭의 `sessionStorage` 신청 ID를 복원한다. 새 탭이나 다른
-신청의 탭을 열면 도구가 고른 신청을 자동으로 선택하지 않는다. 화면이 이미 열려
-있다면 주소창에서 새로 이동해야 서버에 채운 값을 다시 읽는다.
-
-본인인증 값은 만들거나 바꾸지 않는다. 서식의 중복 성명·생년월일은 인증 값에서
-옮기고, 연락처·이메일·계좌·서명 등은 시험값을 넣는다. 기본 주소는 사업 설정의
-대상 시군에 속하는 가상 주소다. 주소는 실제 제출 심사의 시군 판정에 쓰이며,
-가짜 전입일·취업일·가구원 수는 배점에도 영향을 줄 수 있다. 이 도구는 시험용이다.
-
-근로유형은 **3단계에서 직접 선택**하므로 `--work-category` 옵션은 없다. 정상 연령의
-두배적금 신청에 기존 업로드가 없으면 실행 직후 최종 확인에는 필수 서류 미업로드와
-근로유형 미선택만 남는다. 기존 연령·서류 부적합 차단은 그대로 유지한다.
+로컬 데모 DB에 정상 1건(업로드 서류 전부 PASS), 확인 필요 1건(non-PASS 서류 포함)을 생성한다. 저장소의 합성 PDF만 읽고 기존 API 흐름으로 제출한다. 자체 생성 표시를 확인하므로 다시 실행해도 중복 생성하지 않는다. 화면을 새로고침하면 각 서류가 PASS 여부에 따라 두 목록에 나뉜다.
 
 ```bash
-# 이 도구가 표시한 신청과 관련 행·파일만 삭제 (나중에 올린 서류와 최초 인증 서약도 포함)
-PYTHONPATH=. python -B -m demo.backend.tools.seed_application --clean
-# 표시된 신청 한 건만 삭제
-PYTHONPATH=. python -B -m demo.backend.tools.seed_application --clean --application-id 123
+python -m demo.backend.tools.seed_officer_demo --clean
 ```
 
-이미 2단계를 마친 신청·미인증 신청은 변경하지 않는다. 이 저장소의 기존
-`demo/demo.db` 외의 DB는 거부하며, 오류 시 고정 코드만 출력한다. 정리 표시는
-`form1_json._seed_application`에 저장된다. 서식 내보내기·담당자 응답·검증 결과에는
-노출되지 않지만, 신청자용 원본 GET/PATCH 저장 응답은 기존 계약대로 JSON 전체를 반환한다.
+정리는 도구가 생성한 신청·관련 행과 소유 저장 파일만 대상으로 하며 다른 신청은 보존한다. 외부 DB·서류 경로를 받지 않는다. 기존 `seed_application.py`는 본인인증된 초안의 2단계만 채우는 보존 도구이며, 현재 화면 시연에 필요한 업로드·제출을 완성하지 않는다.
 
-접수된 신청 건이 하나도 없으면 담당자 화면은 **목업 데이터**로 채워진다(상단에 노란
-배너가 뜬다). `?mock=1`로 강제로 켜고 `?mock=0`으로 끈다 —
-[보관된 담당자 화면 목업 기록](../docs/archive/officer-mock-data.md).
+DB가 비어 있으면 빈 목록이 표시된다. `?mock=1`로 두배적금 전용 프런트 목업을 볼 수 있으며, 기본 동작에서 API 실패를 목업으로 숨기지 않는다. 목업은 DB에 저장되지 않는다.
 
 확인용 엔드포인트:
 
@@ -148,18 +123,13 @@ curl http://localhost:8000/api/programs   # 사업 2종 설정
 
 API 문서는 <http://localhost:8000/docs> (FastAPI 자동 생성).
 
-신청자 흐름은 **본인인증 → 서식 작성 → 서류 업로드 → 확인 및 제출**이다. 서식 화면은
-공고문 원본 PDF 위에서 온라인 작성·서명하며, 마이페이지는 상단 신청번호 옆 버튼으로
-언제든 연다. 서식 목록 위의 **다운로드** 메뉴에서는 작성한 서식 PDF 한 파일과 원본 HWP를
-받을 수 있다. 담당자 화면은 업로드 원본을 브라우저 안에서만 보고, 원본 파일 저장 기능은
-제공하지 않는다.
+담당자 화면은 업로드 원본을 브라우저 안에서만 보여 준다. 신청자용 서식·제출 API는 보존하지만 이 프런트엔드에서 신청서 작성 화면으로 이동하지 않는다.
 
 ---
 
 ## 4. 시연 초기화
 
-**시연 직전에 반드시 한 번 돌린다.** 이전 시연에서 만든 신청 건이 담당자 목록에
-남아 있으면 화면이 달라진다.
+**전체 초기화가 필요한 경우에만 사용한다.** 담당자 시연 데이터만 정리하려면 위의 `seed_officer_demo --clean`을 사용한다. 다음 도구는 다른 신청까지 지운다.
 
 ```bash
 # 무엇을 지울지 보기만 한다
@@ -168,7 +138,7 @@ PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python -m demo.backend.reset --dry-run
 # 확인을 묻고 지운다
 PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python -m demo.backend.reset
 
-# 확인 없이 지운다 (시연 직전)
+# 확인 없이 전체 삭제 (다른 신청까지 삭제됨)
 PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python -m demo.backend.reset --yes
 ```
 
@@ -216,7 +186,7 @@ for f in demo/backend/tests/run_p*_scenarios.py; do echo "== $f"; python -m demo
 확인한다. 기대값은 `fixtures/expected/S*.json`에 있다.
 
 `--live`를 주면 임시 폴더가 아니라 **진짜 `demo/`를 리셋하고** 거기서 돌린다.
-시연 직전 최종 점검용이며, 끝나면 다시 리셋된 상태로 정리된다.
+전체 초기화 동작을 검증하는 옵션이며, 끝나면 다시 리셋된 상태로 정리된다. 담당자 데이터 주입에는 사용하지 않는다.
 
 ```bash
 PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python -m demo.backend.tests.run_p6_scenarios --live
@@ -226,43 +196,22 @@ PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python -m demo.backend.tests.run_p6_scenario
 
 ```bash
 cd demo/frontend
-npx tsc -b && npx oxlint && npx vite build
+npm test  # 새 화면 회귀 시험: Node.js 22.18 이상
+npm run lint
+npm run build
 ```
 
 ---
 
-## 6. 신청 서식 온라인 작성·보관
+## 6. 보존된 서식 백엔드
 
-두배적금 서식1\~5와 취업지원패키지 신청서·동의서는 신청자가 원본 서식 PDF 위에서
-온라인으로 작성하고 서명한다. 회사가 작성하는 면접확인서도 같은 템플릿을 사용해
-화면에서 확인·인쇄할 수 있다. 화면 작성과 미리보기는 같은 서식 렌더링을 쓴다.
+신청·서식 작성·내보내기 API와 원본 서식 템플릿·좌표 맵은 보존한다. 이 저장소 프런트엔드에는 신청서 작성·전자서명·마이페이지·본인 보관용 메뉴가 없다. 담당자는 업로드 원본을 인라인으로 확인한다.
 
-서식 목록 위의 **다운로드** 메뉴에서 작성이 완료된 서식을 번호순으로 합친 PDF 한 파일과
-원본 HWP를 제공한다. 작성 PDF는 본인 보관용이고, 신청자 본인만 받을 수 있다. 제출 시
-작성값·서명·작성일을 고정하므로 제출 뒤에도 같은 서식 파일이 제공된다. 담당자 화면에는
-작성 서식과 업로드 원본을 브라우저 안에서 보여 주며, 원본 서류를 저장하는 경로는 없다.
-
-두배적금 서식5는 작성 방식을 온라인 작성과 스캔본 제출 중 고를 수 있다.
-스캔본 제출을 선택하면 상단 다운로드 메뉴에서 서식을 받을 수 있고, 서류 업로드 단계에
-「서식5 행정정보 공동이용 사전동의서(스캔본)」 칸이 필수로 추가된다. 업로드한 스캔본은 본문 제목으로 종류를
-판별하고, 성명·생년월일·동의 여부·서명 잉크를 확인한다. 손글씨 항목을 판독하지 못하면
-자동 부적합 대신 담당자 확인으로 보낸다.
-
-템플릿과 좌표 맵은 **원본 공고 PDF의 서식 쪽**에서 생성한다. 원본이 개정되면 저장소 루트에
-원본 PDF를 준비하고 다음 명령을 실행한다.
-
-```bash
-PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python -m demo.fixtures.cut_templates
-PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python -m demo.fixtures.build_form_coords
-```
-
-각 원본 쪽은 A4 세로 페이지이며, 생성기는 서식 제목을 확인한 뒤 해당 쪽을 템플릿으로 만든다.
+서식 렌더링과 API 계약은 P7/P14 시나리오로 계속 검증한다. 기존 템플릿·좌표 생성 도구도 그대로 유지한다.
 
 ### 서식 글꼴
 
-서식 위 입력 글자와 PDF 내보내기는 같은 Noto KR 글꼴을 사용한다. 입력 화면에는
-WOFF2, PDF 합성에는 TTF 서브셋을 사용하며, 각 글꼴 폴더에 SIL OFL `OFL.txt`를
-함께 둔다.
+보존된 PDF 서식 렌더링은 Noto KR TTF 서브셋을 사용한다. P14가 TTF·WOFF2·OFL을 함께 검사하므로 프런트 신청자 화면을 제거해도 글꼴 파일을 유지한다.
 
 - 고딕: `frontend/src/assets/fonts/NotoSansKR/` — [Noto Sans KR 원본·라이선스](https://github.com/google/fonts/tree/main/ofl/notosanskr)
 - 명조: `frontend/src/assets/fonts/NotoSerifKR/` — [Noto Serif KR 원본·라이선스](https://github.com/google/fonts/tree/main/ofl/notoserifkr)
@@ -288,7 +237,7 @@ WOFF2, PDF 합성에는 TTF 서브셋을 사용하며, 각 글꼴 폴더에 SIL 
   내려받을 수 있다. P4 시나리오는 담당자 화면·API와 원본 파일 경로를 검사하고, 신청자용
   서식 제공 파일만 명시적 허용 목록에 둔다.
 
-## 8. 취업지원패키지 기준 확인 (2026 공고)
+## 8. 보존된 취업지원 백엔드 기준 (화면 미제공, 2026 공고)
 
 - [2026년 전북청년 취업지원패키지 모집 공고](https://youth.wanju.go.kr/board/view.wanju?boardId=BBS_0000001&dataSid=77474&menuCd=DOM_000000114001000000&paging=ok&startPage=1)는 면접비·정장비 각 5만원 최대 2회, 사진비 2만원 1회, 응시료 5만원 최대 2회와 항목별 추가 서류를 안내한다. 공고 페이지는 한도 횟수가 신청서·연간·생애 중 어디에 누적되는지 명시하지 않는다. 현재 데모는 기준의 `count_scope`를 설정할 수 있게 하고 기본값은 기존 동작인 신청서 단위다. 운영 전 담당 기관 확인이 필요하다.
 - 공고는 면접비와 면접정장비 모두 면접확인서를 요구하지만, 정장 대여 회차를 특정 면접 회차와 연결하라고 정하지 않는다. 데모에서는 확인서 중복 업로드를 막도록 신청자가 연결 면접 회차를 고르게 하며, 이 연결 규칙은 접수서류 요구를 구현하기 위한 데모 가정이다.

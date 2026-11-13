@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "프런트 지침 진입점"}
+{"file": ".trellis/spec/backend/index.md", "reason": "보존할 백엔드 계약 지침 진입점"}
+{"file": ".trellis/spec/backend/seed-application.md", "reason": "기존 시드 도구 계약 보존"}
+{"file": ".trellis/spec/backend/document-form-contracts.md", "reason": "서식/원본/사유 계약 보존"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "화면과 API 호환 검토"}
+{"file": ".trellis/tasks/11-13-savings-officer-only/research/repository.md", "reason": "현재 화면과 API 증거"}
+{"file": ".trellis/tasks/11-13-savings-officer-only/research/demo-data.md", "reason": "합성 시연 데이터의 한계와 최소 제안"}
+{"file": ".trellis/tasks/11-13-savings-officer-only/research/test-impact.md", "reason": "기존 시험 삭제/변경 승인 대상"}
+{"file": ".trellis/tasks/11-13-savings-officer-only/research/baseline.md", "reason": "네 갈래 작업 전 기준선"}

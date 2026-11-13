@@ -1,0 +1,163 @@
+[
+  {
+    "module": "demo.backend.tests.run_p11_criteria_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "통과 38 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p11_criteria_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p12_subsidy_criteria_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "  [OK]   금액 판독 실패는 담당자 확인",
+      "  [OK]   금액 판독 실패 사유",
+      "통과 29 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p12_subsidy_criteria_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p13_household_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "[1-2] 가구원 수 판독 실패 시 소득은 담당자 재검토",
+      "  [OK]   소득 가구원 수 판독 실패 → 최종 재검토: NEEDS_REVIEW",
+      "통과 26 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p13_household_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p14_pdf_forms_scenarios",
+    "exit_code": 0,
+    "summary": [],
+    "log": "/tmp/savings-officer-baseline-run_p14_pdf_forms_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p15_jbai_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "  [OK]   판독 엔진 줄에 품질 대체 사유: 전북AI 판독 검증 실패: 주소 이력 없음",
+      "  [OK]   담당자 화면 엔진·대체 사유: ('fake', '전북AI 연결 실패')",
+      "통과 129 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p15_jbai_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p16_job_docs_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "  [OK]   판독검증: 9/9 통과",
+      "통과 96 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p16_job_docs_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p17_own_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "통과 75 / 실패 0 / SKIP 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p17_own_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p18_applicant_precheck_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "통과 180 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p18_applicant_precheck_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p19_nhis_history_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "통과 24 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p19_nhis_history_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p20_nhis_continuation_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "  [OK]   신뢰도 기준 통과: True",
+      "통과 7 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p20_nhis_continuation_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p2_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "통과 53 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p2_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p3_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "  [OK]   S2 최종 확인 통과: True",
+      "  [OK]   1단계(서류)는 통과: PASS",
+      "통과 186 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p3_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p4_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "통과 189 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p4_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p5_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "  [OK]   소득요건이 없어 2단계도 통과: PASS",
+      "통과 152 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p5_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p6_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "  [OK]   failed_item: 6",
+      "  [OK]   failed_item: 6",
+      "통과 261 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p6_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p7_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "  [OK]   서식5 값 왕복 실패: []",
+      "  [OK]   서식5 값 왕복 실패: []",
+      "통과 253 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p7_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p8_localocr_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "  [OK]   검증 실패 항목 노출: True",
+      "  [OK]   OCR 끔 → 판독 실패 계층: none",
+      "통과 89 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p8_localocr_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p9_identity_scenarios",
+    "exit_code": 0,
+    "summary": [
+      "  [OK]   같은 가입자 + 가구원 본인 → 자격확인서 통과: PASS",
+      "  [OK]   납부확인서 나중 → 두 서류 모두 통과: ['PASS', 'PASS']",
+      "통과 98 / 실패 0"
+    ],
+    "log": "/tmp/savings-officer-baseline-run_p9_identity_scenarios.log"
+  }
+]

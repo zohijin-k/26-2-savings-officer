@@ -78,3 +78,37 @@ Implemented own-only observation, private silver-reference safety and complete s
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: Apply paired DocumentAI audit and n5 measurement
+<!-- trellis-session: v=2 fp=54a1291a8a049559 -->
+
+**Date**: 2026-11-13
+**Task**: Apply paired DocumentAI audit and n5 measurement
+**Branch**: `feat/documentai-measurement`
+
+### Summary
+
+Applied the user-approved paired measurement tools and n5 audit evidence, then archived 11-13-documentai-measurement-audit.
+
+### Main Changes
+
+- Added paired text-layer and own measurement with raw and normalized metrics, explicit unextracted outcomes, groupwise verdict rates and complete error attribution.
+- Retained 410 unique paired cases and documented source decisions, selective truth replay and the final measurement report.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b06bbbb` | feat(tools): add paired DocumentAI measurement stages |
+| `b91da45` | docs: record paired n5 measurements and audit evidence |
+| `bd15727` | chore(task): archive 11-13-documentai-measurement-audit |
+
+### Testing
+
+- [OK] Engine 1,375 passed with 3 skipped. Backend 1,252 passed. All 18 scenarios exited successfully with 1,885 passed and 0 failed. Frontend lint and build passed.
+- [OK] 61 new focused tests passed and completed input uniqueness and attribution arithmetic were verified.
+
+### Status
+
+[OK] **Completed**

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 2
+- **Total Sessions**: 3
 - **Last Active**: 2026-11-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~80 | Active |
+| `journal-1.md` | ~114 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 3 | 2026-11-13 | Apply paired DocumentAI audit and n5 measurement | `b06bbbb`, `b91da45`, `bd15727` | `feat/documentai-measurement` |
 | 2 | 2026-11-13 | DocumentAI measurement and synthetic baseline | `58bc164`, `6593c96`, `47b6698`, `610e329` | `feat/documentai-measurement` |
 | 1 | 2026-11-13 | Complete savings officer repository split | `53c8954464060a50ceb55317679adf1d34b8c379` | `feat/savings-officer-only` |
 <!-- @@@/auto:session-history -->

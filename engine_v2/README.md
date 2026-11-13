@@ -389,7 +389,7 @@ OCR 엔진 점수만으로 정답 여부를 정하지 않는다. 실측에서 �
 
 ## 7. OCR 엔진 선택과 실행
 
-공통 어댑터는 `pipeline/ocr/`에 있고 `own.py` 등 엔진별 모듈이 `OcrWord(text, confidence, bbox_px)`를 반환한다. 엔진 비교 도구는 `tools/ocr_bench.py`다. 자체 엔진 설치·모델 출처·평가 범위는 [`docs/own-ocr.md`](docs/own-ocr.md)를 참고한다.
+공통 어댑터는 `pipeline/ocr/`에 있고 `own.py` 등 엔진별 모듈이 `OcrWord(text, confidence, bbox_px)`를 반환한다. 엔진 비교 도구는 `tools/ocr_bench.py`다. 5종 서류 × 7조건의 필드 정확도·CER·종류 판별·판정 오류율·처리 시간 측정은 [`DocumentAI measurement`](docs/documentai-measurement.md)의 `tools/documentai_bench.py`를 사용한다. 자체 엔진 설치·모델 출처·평가 범위는 [`docs/own-ocr.md`](docs/own-ocr.md)를 참고한다.
 
 `engine_v2.engine.run`과 CLI는 `ENGINE_V2_OCR`로 다음 엔진을 선택한다. 지정하지 않으면 macOS에서는 Apple Vision, 그 밖의 환경에서는 `own`을 사용한다. 데모 로컬 OCR은 macOS를 포함한 모든 환경에서 own이 기본이다.
 

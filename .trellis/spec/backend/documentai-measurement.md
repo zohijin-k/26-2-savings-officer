@@ -1,0 +1,13 @@
+# DocumentAI measurement contracts
+
+Apply to `engine_v2.tools.documentai_bench` and `documentai_synth`. Keep all OCR, extractor, classifier and verdict implementations unchanged. Observe original calls through scoped wrappers; own is explicit and fixture/remote engines are excluded. Reuse `read_document` postprocessing and `assess_upload`, not a parallel verdict implementation.
+
+Use independently authored synthetic field truth and content-based classification. Normal, defective and failed attempts have explicit denominators. Missing extraction is an exact mismatch; do not invoke an oracle extractor when content classification failed. Only final FAIL + FAIL-severity allowlisted reupload codes contribute to false rejection. NEEDS_REVIEW is neither PASS nor confirmed FAIL. Normal-content low-resolution tests may be legitimately quality-rejected; label that limitation.
+
+Exact semantic matching and NFC/whitespace CER are separate. Structured lists retain order. Exclude insurance evidence geometry/confidence from semantic comparisons, not semantic columns. Aggregate CER is summed edits over reference characters; missing empty fields still fail exact equality. Keep full type × condition × field numeric tables. Report normal-only processing timing separately from defects and failed attempts; exclude metric computation.
+
+Private mode uses `verify_cases` resolved external-or-ignored/untracked location policy for manifests, outputs and atomic siblings. Reject source/manifest output aliases including hardlinks. Every PDF page needs text-layer coverage. The reference and raster side must use identical production attachment scoping. Rasterize to 300dpi memory only; retain silver-reference missing-field counts and the limitation that agreement is not accuracy.
+
+Private output is positive-vocabulary identifiers plus numbers/O/X only; no values/raw/source names/paths/exception details. Reuse quiet/read-only assessment suppression for imports, reference and own measurement. Do not serialize transient result objects. Test with authored temporary PDFs and temporary Git repositories only, never existing private inputs. Generated images and raw run logs remain temporary/ignored. Value-free synthetic aggregate tables may be committed as explicitly requested reports.
+
+Required verification: new metric/denominator/privacy/location/write tests, all existing engine/backend tests and all scenario modules sequentially plus frontend lint/build. Preserve existing test files and compare explicit baseline counts.

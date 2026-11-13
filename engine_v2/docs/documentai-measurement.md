@@ -1,5 +1,7 @@
 # DocumentAI measurement
 
+This documents the historical v1 measurement. For the current approved paired-stage method, use [measurement v2](documentai-staged-measurement.md). V1 results are retained for reproducibility; their mixed-condition/uncalled-field percentages are not interchangeable with v2 metrics.
+
 This tool observes **own OCR → existing engine_v2 extractors → existing demo upload assessment**. It does not change any OCR, extractor, policy, confidence threshold or verdict logic. Run it sequentially: dependency suppression, read-only auditing and observation wrappers are process-global.
 
 ## Synthetic execution

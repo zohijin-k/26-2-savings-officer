@@ -1,0 +1,161 @@
+[
+  {
+    "module": "demo.backend.tests.run_p11_criteria_scenarios",
+    "exit_code": 0,
+    "counts": [
+      38,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p11_criteria_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p12_subsidy_criteria_scenarios",
+    "exit_code": 0,
+    "counts": [
+      29,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p12_subsidy_criteria_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p13_household_scenarios",
+    "exit_code": 0,
+    "counts": [
+      26,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p13_household_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p14_pdf_forms_scenarios",
+    "exit_code": 0,
+    "counts": null,
+    "log": "/tmp/savings-officer-final-run_p14_pdf_forms_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p15_jbai_scenarios",
+    "exit_code": 0,
+    "counts": [
+      129,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p15_jbai_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p16_job_docs_scenarios",
+    "exit_code": 0,
+    "counts": [
+      96,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p16_job_docs_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p17_own_scenarios",
+    "exit_code": 0,
+    "counts": [
+      75,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p17_own_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p18_applicant_precheck_scenarios",
+    "exit_code": 0,
+    "counts": [
+      180,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p18_applicant_precheck_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p19_nhis_history_scenarios",
+    "exit_code": 0,
+    "counts": [
+      24,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p19_nhis_history_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p20_nhis_continuation_scenarios",
+    "exit_code": 0,
+    "counts": [
+      7,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p20_nhis_continuation_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p2_scenarios",
+    "exit_code": 0,
+    "counts": [
+      53,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p2_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p3_scenarios",
+    "exit_code": 0,
+    "counts": [
+      186,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p3_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p4_scenarios",
+    "exit_code": 0,
+    "counts": [
+      189,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p4_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p5_scenarios",
+    "exit_code": 0,
+    "counts": [
+      152,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p5_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p6_scenarios",
+    "exit_code": 0,
+    "counts": [
+      261,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p6_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p7_scenarios",
+    "exit_code": 0,
+    "counts": [
+      253,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p7_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p8_localocr_scenarios",
+    "exit_code": 0,
+    "counts": [
+      89,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p8_localocr_scenarios.log"
+  },
+  {
+    "module": "demo.backend.tests.run_p9_identity_scenarios",
+    "exit_code": 0,
+    "counts": [
+      98,
+      0
+    ],
+    "log": "/tmp/savings-officer-final-run_p9_identity_scenarios.log"
+  }
+]

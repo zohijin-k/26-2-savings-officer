@@ -8,8 +8,7 @@
  * 항목을 클릭하면 좌측 원본이 그 근거 위치로 스크롤된다 (R4.3).
  *
  * 배점 출처: `docs/demo-site-dev-plan.md` 2.4절 (시행지침 서식6 원문 대조 확정본).
- * 신청자 화면과 같은 `FormSheet` 계열 컴포넌트를 쓴다 — 서식은 한 가지 방식으로만
- * 그린다.
+ * 원본 표 구조를 유지하는 `FormSheet` 계열 컴포넌트를 쓴다.
  */
 
 import { Cell, FormNote, FormSheet, FormTable, LabelCell } from '../../forms/FormSheet.tsx'

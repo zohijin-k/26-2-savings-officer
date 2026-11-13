@@ -17,6 +17,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
 | [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | To fill |
 | [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
+| [Savings officer document views](./officer-documents.md) | PASS-only view groups, exact document selection, fixed savings routes | Active |
 | [State Management](./state-management.md) | Local state, global state, server state | To fill |
 | [Applicant PDF Workspace](./pdf-form-workspace.md) | Original PDF rendering, public numbering, save transitions, signature lifecycle | Documented |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |

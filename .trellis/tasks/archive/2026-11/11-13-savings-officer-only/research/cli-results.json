@@ -1,0 +1,44 @@
+{
+  "create": {
+    "applications": {
+      "needs-review": {
+        "application_id": 2,
+        "needs_review": 1,
+        "pass": 4
+      },
+      "pass": {
+        "application_id": 1,
+        "needs_review": 0,
+        "pass": 5
+      }
+    },
+    "created": 2,
+    "existing": 0
+  },
+  "repeat": {
+    "applications": {
+      "needs-review": {
+        "application_id": 2,
+        "needs_review": 1,
+        "pass": 4
+      },
+      "pass": {
+        "application_id": 1,
+        "needs_review": 0,
+        "pass": 5
+      }
+    },
+    "created": 0,
+    "existing": 2
+  },
+  "clean": {
+    "deleted_applications": 2,
+    "deleted_files": 14,
+    "deleted_rows": 22
+  },
+  "clean-repeat": {
+    "deleted_applications": 0,
+    "deleted_files": 0,
+    "deleted_rows": 0
+  }
+}

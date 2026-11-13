@@ -1,40 +1,29 @@
-export type Mode = 'applicant' | 'officer'
-
-const NAVIGATION_PARAMS = [
-  'mode', 'application', 'stage', 'previous', 'from',
-  'o_role', 'o_region', 'o_town', 'o_program', 'o_status', 'o_ai_status',
-  'o_submitted_from', 'o_submitted_to', 'o_sort', 'o_page', 'o_page_size',
-  'o_open', 'o_slot', 'o_criteria', 'o_criteria_program',
-  'role', 'region', 'town', 'program', 'status', 'ai', 'submitted_from',
-  'submitted_to', 'sort', 'page', 'page_size', 'slot',
-] as const
-
-export function currentParams(): URLSearchParams {
-  return new URLSearchParams(window.location.search)
+export interface OfficerPage {
+  applicationId: number | null
+  documentId: number | null
+  slotKey: string | null
 }
 
-export function currentMode(): Mode {
-  if (window.location.pathname.startsWith('/officer')) return 'officer'
-  if (window.location.pathname.startsWith('/apply')) return 'applicant'
-  return currentParams().get('mode') === 'officer' ? 'officer' : 'applicant'
-}
-
-export function currentUrl(): string {
-  return `${window.location.pathname}${window.location.search}${window.location.hash}`
-}
-
-export function routeUrl(path: string, params: Record<string, string | null> = {}, replace = false): void {
-  const url = new URL(window.location.href)
-  url.pathname = path
-  for (const key of NAVIGATION_PARAMS) url.searchParams.delete(key)
-  for (const [key, value] of Object.entries(params)) {
-    if (value) url.searchParams.set(key, value)
+export function readOfficerPage(url: URL): OfficerPage {
+  const route = /^\/officer(?:\/province)?\/review\/([1-9]\d*)\/?$/.exec(url.pathname)
+  if (!route) return { applicationId: null, documentId: null, slotKey: null }
+  const applicationId = Number(route[1])
+  const document = url.searchParams.get('document')
+  const documentId = document && /^[1-9]\d*$/.test(document) ? Number(document) : null
+  return {
+    applicationId: Number.isSafeInteger(applicationId) ? applicationId : null,
+    documentId: Number.isSafeInteger(documentId) ? documentId : null,
+    slotKey: url.searchParams.get('slot'),
   }
-  if (url.href === window.location.href) return
-  const method = replace ? 'replaceState' : 'pushState'
-  window.history[method](null, '', `${url.pathname}${url.search}${url.hash}`)
 }
 
-export function goToHome(): void {
-  routeUrl('/')
+export function officerPageUrl(page: OfficerPage, mock: boolean): string {
+  const params = new URLSearchParams()
+  if (mock) params.set('mock', '1')
+  if (page.applicationId !== null) {
+    if (page.documentId !== null) params.set('document', String(page.documentId))
+    if (page.slotKey !== null) params.set('slot', page.slotKey)
+  }
+  const path = page.applicationId === null ? '/officer' : `/officer/review/${page.applicationId}`
+  return params.size ? `${path}?${params}` : path
 }

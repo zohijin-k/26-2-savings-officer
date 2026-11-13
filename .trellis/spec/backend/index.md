@@ -22,6 +22,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Income and age eligibility](./income-eligibility.md) | Tri-state membership, exact income bounds, age and final-review consistency | Active |
 | [Confirmed failure filtering](./failure-filtering.md) | Upload certainty, provisional continuity and submission blockers | Active |
 | [Document OCR and Form Contracts](./document-form-contracts.md) | Resident-number redaction, coordinate forms, arithmetic, identity and review boundaries | Active |
+| [Synthetic officer seeding](./officer-demo-seeding.md) | Fixed samples, demo-only ownership, idempotence and safe cleanup | Active |
 | [Demo stage-two seeding](./seed-application.md) | Guarded developer CLI, shared validation, ownership cleanup and same-tab upload restoration | Active |
 | [Private case verification](./verify-cases.md) | Shared upload assessments, ignored manifests, value-free snapshots and signed regression differences | Active |
 

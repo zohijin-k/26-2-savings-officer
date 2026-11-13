@@ -17,23 +17,8 @@ OCR은 서류 사진이나 PDF에서 글자를 읽는 기술입니다.
 
 ## 저장소와 브랜치
 
-저장소는 GitHub의 `zohijin-k/2026-2-capstone`입니다. 최종 통합본은 `main`이며, 다른 브랜치를 내려받을 필요는 없습니다. 기존 clone은 `git checkout main && git pull`로 갱신합니다. git을 쓰지 않으면 저장소 첫 화면에서 브랜치가 `main`인지 확인하고 Code → Download ZIP으로 받습니다.
+저장소는 [zohijin-k/26-2-savings-officer](https://github.com/zohijin-k/26-2-savings-officer)이며 두배적금 담당자 화면 전용입니다. 전체 프로젝트와 분리된 저장소 안내는 [26-2-capstone](https://github.com/zohijin-k/26-2-capstone)을 참고합니다. 기준 브랜치는 `main`입니다. 분리 전 통합 저장소의 브랜치 목록은 이 저장소의 현재 브랜치 안내로 사용하지 않습니다.
 
-브랜치 안내 (2026-11-12 기준, 원격 브랜치 및 `origin/main` 병합 여부):
-
-| 브랜치 | 상태 | 알려진 내용 |
-|---|---|---|
-| `main` | 기준 브랜치 | 원격 통합 브랜치 |
-| `feat/applicant-check` | 병합됨 | 신청자 사전 검사 작업 |
-| `feat/engine-v2` | 병합됨 | 엔진 v2 작업 |
-| `feat/job-docs-align` | 미병합 | 취업 서류 판독기 수정. 병합 순서와 충돌 확인 필요 |
-| `feat/job-docs-reader` | 미병합 | 내용 확인 중 |
-| `feat/merge-demo-dashboard` | 미병합 | 브랜치 이름 기준 데모·대시보드 병합 작업 |
-| `feat/own-default` | 병합됨 | own 기본 선택 작업 |
-| `feat/own-fix` | 병합됨 | own 수정 작업 |
-| `feat/own-ocr` | 병합됨 | 자체 OCR 작업 |
-
-상태는 `git branch -r`과 `git branch -r --merged origin/main` 결과에 맞췄습니다. 원격에 없는 브랜치는 표에 넣지 않았습니다.
 ## 협업 규칙
 
 1. 작업 전 `main`을 최신으로 받습니다: `git checkout main && git pull`.
@@ -47,7 +32,7 @@ OCR은 서류 사진이나 PDF에서 글자를 읽는 기술입니다.
 
 | 경로 | 내용 |
 |---|---|
-| [`demo/`](../demo/README.md) | 신청자·담당자 데모, FastAPI(Python 웹 API 도구) 백엔드, React(화면 구성 라이브러리) 화면, 시나리오 확인 스크립트 |
+| [`demo/`](../demo/README.md) | 두배적금 담당자 데모, 보존된 신청·판정 API와 FastAPI(Python 웹 API 도구) 백엔드, React(화면 구성 라이브러리) 화면, 시나리오 확인 스크립트 |
 | [`engine/`](../engine/README.md) | 기존 규칙 판정 엔진. 데모가 서류·자격 판정 파이프라인으로 사용합니다. |
 | [`engine_v2/`](../engine_v2/README.md) | OCR 파이프라인·서류 추출기·분류기·평가 도구. `own` 모델 파일은 `models/`에 내려받으며 커밋하지 않습니다. |
 | [`engine_v2/pipeline/ocr/`](../engine_v2/pipeline/ocr/) | OCR 공통 인터페이스와 엔진별 모듈 (`own.py` 포함) |
@@ -58,13 +43,12 @@ OCR은 서류 사진이나 PDF에서 글자를 읽는 기술입니다.
 | [`docs/archive/`](archive/) | 옛 기록 보관 문서 |
 | [`docs/`](./) | 기획·계획, 개발, 데모 환경 문서 |
 | [`.trellis/`](../.trellis/workflow.md), [`.claude/`](../.claude/), [`AGENTS.md`](../AGENTS.md) | 작업 흐름, 에이전트 설정, 저장소 작업 지침 |
-| `engine_v2/data/private/` | 실서류의 로컬 내부 평가용 보관 위치. 저장소에 커밋하지 않습니다. |
 
 `demo_run.py`는 기존 `engine/` 단독 실행 예제입니다. 시스템 전체는 데모 백엔드와 프론트엔드를 실행합니다.
 
 ## 개발 환경과 실행
 
-Python 3.12 이상, Node.js 20 이상이 필요합니다. macOS와 Linux에서 백엔드·프론트엔드를 실행할 수 있습니다. 데모 로컬 OCR은 macOS를 포함한 모든 환경에서 own이 기본이므로 macOS에서도 `python engine_v2/tools/fetch_own_models.py`로 모델을 설치해야 합니다.
+Python 3.12 이상, Node.js 20.19 이상이 필요합니다. macOS와 Linux에서 백엔드·프론트엔드를 실행할 수 있습니다. 합성 담당자 시연은 시연 고정 응답을 사용합니다. 로컬 OCR 자체를 사용할 때는 `python engine_v2/tools/fetch_own_models.py`로 모델을 설치합니다.
 
 저장소 루트에서 설치하고 시연 샘플을 생성합니다.
 
@@ -73,7 +57,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r demo/backend/requirements.txt
 python -m pip install -r engine_v2/requirements.txt
-python engine_v2/tools/fetch_own_models.py  # 모델은 저장소에 커밋하지 않음
 cd demo/frontend
 npm install
 cd ../..
@@ -95,7 +78,16 @@ cd demo/frontend
 npm run dev
 ```
 
-브라우저에서 <http://localhost:5173>을 엽니다. FastAPI 문서는 <http://localhost:8000/docs>입니다. 시연 전 데이터를 초기화할 때는 저장소 루트에서 `python -m demo.backend.reset`을 실행합니다.
+브라우저에서 <http://localhost:5173>을 열면 두배적금 담당자 화면으로 바로 진입합니다. 문서 상태 `PASS`와 그 외 상태를 두 목록으로 표시합니다. FastAPI 문서는 <http://localhost:8000/docs>입니다.
+
+합성 시연 데이터를 넣거나 그 데이터만 정리할 때는 저장소 루트에서 실행합니다.
+
+```bash
+python -m demo.backend.tools.seed_officer_demo
+python -m demo.backend.tools.seed_officer_demo --clean
+```
+
+정상·확인 필요 신청 각 한 건을 생성하며 재실행으로 중복 생성하지 않습니다. 다른 신청이나 판정은 수정하지 않습니다. 전체 DB 초기화는 필요하지 않습니다. 기존 `seed_application`은 인증된 초안의 2단계 보조 도구로 남아 있지만 이 저장소의 화면 시연 주입에는 사용하지 않습니다.
 
 ## OCR 판독 설정
 
@@ -108,12 +100,7 @@ npm run dev
 
 `fetch_synth_fonts.py`는 합성 평가용 글꼴을 받고 `make_synth_eval.py`는 가상 문서 평가 세트를 만듭니다. `ocr_bench`로 own·Apple Vision 등 OCR 엔진을 비교할 수 있습니다. OCR은 서류 사진이나 PDF에서 글자를 읽는 기술입니다. 평가 정의와 한계, 실서류 평가의 개인정보 보호 방식은 [own OCR 설명](../engine_v2/docs/own-ocr.md)을 참고합니다. `extract_diag --safe-issue`는 값·인식 텍스트·파일명·좌표를 출력하지 않습니다.
 
-```bash
-python engine_v2/tools/fetch_synth_fonts.py
-python engine_v2/tools/make_synth_eval.py
-python -m engine_v2.tools.ocr_bench --synth engine_v2/data/synth_eval/manifest.json --engines own applevision
-python -m engine_v2.tools.ocr_bench "<파일 경로>" --doc resident_abstract --engines own applevision
-```
+담당자 화면 정리 작업의 검증에는 저장소 합성 샘플과 임시 DB/storage만 사용합니다. OCR 평가 데이터 생성·모델 성능 평가는 이 작업의 범위 밖입니다.
 
 own의 현재 평가는 합성 서류 3종(주민등록초본·납부확인서·자격득실확인서 형태), 열화 조건과 ±2도 이내 회전을 포함합니다. 90도·180도 방향 보정은 없습니다. 기존 문서에서 보고한 실서류 관찰은 주민등록초본과 4대보험 가입내역에 한정되며 공개 안내에서는 식별정보와 수치 판독 결과를 공개하지 않습니다. 합성 자료 결과는 실제 서류 전반의 성능을 보장하지 않습니다.
 
@@ -126,15 +113,18 @@ own의 현재 평가는 합성 서류 3종(주민등록초본·납부확인서·
 ```bash
 for f in demo/backend/tests/run_p*_scenarios.py; do echo "== $f"; python -m demo.backend.tests.$(basename "$f" .py) || echo "FAILED $f"; done
 python -m pytest engine_v2/tests -q
+python -m pytest demo/backend/tests -q
 ```
 
-현재 실행 확인 결과 `engine_v2/tests`는 260개 통과, 3개 건너뜀입니다. 맥에는 합성 글꼴이 없어 일부 글꼴 의존 테스트가 건너뛰어질 수 있습니다. 시나리오 스크립트 18개를 실행해 1,776개 확인이 통과했습니다. 위 반복문은 한 시나리오가 실패해도 나머지를 계속 실행합니다. 파일 이름 순서상 P11\~P15가 P2\~P9보다 먼저 실행되므로, 앞에서 멈추면 뒤 시나리오 결과를 확인할 수 없습니다.
+2026-11-13 작업 전 기준선은 엔진 1,264개 통과·3개 건너뜀, 백엔드 1,227개 통과, 시나리오 18개 모듈 1,885개 통과·실패 0입니다. 새 시드·화면 연동 시험은 백엔드 기준선에 별도 가산합니다. 신청자·취업지원 프런트는 제거해도 보존된 API·엔진 회귀 시험은 유지합니다. 위 반복문은 한 시나리오가 실패해도 나머지를 계속 실행합니다.
 
 프론트엔드 타입 검사·린트·빌드는 다음과 같습니다.
 
 ```bash
 cd demo/frontend
-npx tsc -b && npx oxlint && npx vite build
+npm test  # 새 화면 회귀 시험: Node.js 22.18 이상
+npm run lint
+npm run build
 ```
 
 하위 폴더별 기능과 추가 실행 방법은 [데모](../demo/README.md), [기존 엔진](../engine/README.md), [엔진 v2](../engine_v2/README.md), 대시보드 코드와 [대시보드 옛 안내](archive/dashboard-README.md)를 확인합니다.
@@ -145,7 +135,7 @@ npx tsc -b && npx oxlint && npx vite build
 
 - 실제 서류는 로컬 내부 평가용 보관 위치에만 두고 저장소에 커밋하지 않습니다.
 - 판정은 공고문에 근거한 규칙으로 합니다. OCR·모델은 문서를 읽는 데 씁니다.
-- 신청자 화면에 배점·내부 판단 정보·서류 속 타인의 이름을 노출하지 않습니다.
+- 보존된 신청 API의 배점·내부 판단 정보·타인 이름 비공개 계약을 유지합니다.
 - 파일 이름이 아니라 서류 내용으로 종류와 판정 근거를 판단합니다.
 - 담당자는 신청자가 올린 원본 서류를 내려받지 않고 화면으로만 확인합니다. 신청자는 본인이 작성한 서식만 내려받을 수 있으며 P4 시나리오가 이 경계를 확인합니다.
 - 값을 출력하는 점검 도구는 이름·주소·번호를 가립니다.

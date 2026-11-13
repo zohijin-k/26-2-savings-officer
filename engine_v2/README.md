@@ -389,7 +389,7 @@ OCR 엔진 점수만으로 정답 여부를 정하지 않는다. 실측에서 �
 
 ## 7. OCR 엔진 선택과 실행
 
-공통 어댑터는 `pipeline/ocr/`에 있고 `own.py` 등 엔진별 모듈이 `OcrWord(text, confidence, bbox_px)`를 반환한다. 엔진 비교 도구는 `tools/ocr_bench.py`다. 자체 엔진 설치·모델 출처·평가 범위는 [`docs/own-ocr.md`](docs/own-ocr.md)를 참고한다.
+공통 어댑터는 `pipeline/ocr/`에 있고 `own.py` 등 엔진별 모듈이 `OcrWord(text, confidence, bbox_px)`를 반환한다. 엔진 비교 도구는 `tools/ocr_bench.py`다. 5종 서류 × 7조건의 필드 정확도·CER·종류 판별·판정 오류율·처리 시간 측정은 [`DocumentAI measurement`](docs/documentai-measurement.md)의 `tools/documentai_bench.py`를 사용한다. 자체 엔진 설치·모델 출처·평가 범위는 [`docs/own-ocr.md`](docs/own-ocr.md)를 참고한다.
 
 `engine_v2.engine.run`과 CLI는 `ENGINE_V2_OCR`로 다음 엔진을 선택한다. 지정하지 않으면 macOS에서는 Apple Vision, 그 밖의 환경에서는 `own`을 사용한다. 데모 로컬 OCR은 macOS를 포함한 모든 환경에서 own이 기본이다.
 
@@ -484,3 +484,7 @@ python -m engine_v2.tools.inspect_pdf "<실서류 경로>"
 - 텍스트 레이어 유무, 페이지 수, 이미지 수, 암호화 여부를 알려준다.
 - 숫자는 전부 마스킹해서 출력하므로 결과를 팀에 공유해도 된다.
 - `--dump` 옵션은 단어별 좌표를 파일로 저장하므로 공개 저장소에 추가하지 않는다.
+
+### 단계별 합성 측정 v2
+
+글자층 정답 입력과 own OCR을 같은 이미지·운영 경로에서 비교하는 n=5 측정은 [`documentai_staged`](docs/documentai-staged-measurement.md)를 사용한다. 원시·정규화 정확도, 판별 실패로 미추출, OCR 추가 손실, 정상·스트레스·화질 결함을 분리하며 기존 보고서는 보존한다.

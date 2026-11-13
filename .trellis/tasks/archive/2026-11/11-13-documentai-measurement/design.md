@@ -1,0 +1,9 @@
+# Design
+
+Measurement lives only under engine_v2/tools plus new tests/documentation. Reuse synth_bench CER normalization, private_bench rasterization/suppression, engine_v2 extractors, LocalOcr conversion and upload_assessment. Classification must not be supplied from truth. Own is explicit; remote OCR and fixture filename recognition are excluded. Any instrumentation delegates original functions unchanged and is scoped to this single-threaded CLI.
+
+Synthetic truth is authored from fictitious source constants, not extracted from the engine. Reuse existing synthetic rendering/degradation and fixture vocabulary. Validate normal source content with coordinate/text-layer checks separately from measured own OCR. Seven conditions, one initial sample each; increase only if runtime supports it. Low resolution remains normal *content* and can legitimately be quality-rejected: report this qualification.
+
+Private mode accepts only a strict manifest at a resolved external or ignored/untracked location, checks outputs independently and prevents source/output collision. Every PDF page must have a usable text layer; compare the text-layer extracted fields with own reads of 300dpi renderings in memory. That measures agreement with a silver reference, not independent truth. Output positive-vocabulary identifiers and numeric/O/X metrics only. No values, filenames, source paths, raw text, exception details, DB writes or external OCR.
+
+A failed measurement stays in attempted denominators and is reported separately; never silently omit failures or treat NEEDS_REVIEW as PASS/FAIL. Empty reference fields are counted in exact match but CER details distinguish absence. Aggregate CER uses summed edits/reference characters, with an explicit empty-reference insertion rule. Type/condition rankings use comparable normal cases.

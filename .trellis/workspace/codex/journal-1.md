@@ -42,3 +42,73 @@ Implemented and committed the user-approved savings officer UI, synthetic demo s
 ### Next Steps
 
 - Push or open a PR only when requested.
+
+
+## Session 2: DocumentAI measurement and synthetic baseline
+<!-- trellis-session: v=2 fp=0e018b9396ec2160 -->
+
+**Date**: 2026-11-13
+**Task**: DocumentAI measurement and synthetic baseline
+**Branch**: `feat/documentai-measurement`
+
+### Summary
+
+Implemented own-only observation, private silver-reference safety and complete synthetic type/condition/field reports without production logic changes.
+
+### Main Changes
+
+- Measured 35 normal-content and 42 defective synthetic cases twice; all non-timing results identical. Retained only isolated final run: 98/266 exact fields, CER 0.7122, type 23/35, confirmed normal reupload 5/35, defective PASS 0/42, 1.3413 seconds/page.
+- Added strict private manifest/output location and alias protection, in-memory 300dpi comparison, fixed-vocabulary output and read-only/native-log suppression. No real source or private dataset was opened.
+- Recorded conservative decisions, weak rankings and candidate-only improvements. Local commits only; main and remote state unchanged.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `58bc164` | docs: plan DocumentAI measurement and privacy boundaries |
+| `6593c96` | feat(tools): measure own DocumentAI fields and upload verdicts |
+| `47b6698` | docs: record synthetic DocumentAI measurements and regression results |
+| `610e329` | chore(task): archive 11-13-documentai-measurement |
+
+### Testing
+
+- [OK] Engine 1314 passed/3 skipped (+50 measurement tests); backend1252 passed; all18 scenarios exit0 and1885 passed/0failed; frontend lint/build passed.
+- [OK] Independent review50 passed; all38 authored truth fields preflighted; full35-cell and266 field/cell arithmetic independently verified.
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 3: Apply paired DocumentAI audit and n5 measurement
+<!-- trellis-session: v=2 fp=54a1291a8a049559 -->
+
+**Date**: 2026-11-13
+**Task**: Apply paired DocumentAI audit and n5 measurement
+**Branch**: `feat/documentai-measurement`
+
+### Summary
+
+Applied the user-approved paired measurement tools and n5 audit evidence, then archived 11-13-documentai-measurement-audit.
+
+### Main Changes
+
+- Added paired text-layer and own measurement with raw and normalized metrics, explicit unextracted outcomes, groupwise verdict rates and complete error attribution.
+- Retained 410 unique paired cases and documented source decisions, selective truth replay and the final measurement report.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b06bbbb` | feat(tools): add paired DocumentAI measurement stages |
+| `b91da45` | docs: record paired n5 measurements and audit evidence |
+| `bd15727` | chore(task): archive 11-13-documentai-measurement-audit |
+
+### Testing
+
+- [OK] Engine 1,375 passed with 3 skipped. Backend 1,252 passed. All 18 scenarios exited successfully with 1,885 passed and 0 failed. Frontend lint and build passed.
+- [OK] 61 new focused tests passed and completed input uniqueness and attribution arithmetic were verified.
+
+### Status
+
+[OK] **Completed**

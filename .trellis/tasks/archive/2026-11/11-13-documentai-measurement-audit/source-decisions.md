@@ -1,0 +1,23 @@
+# Source decisions for the approved v2 run
+
+No original geometric layout, label, purpose marking, table column or font was corrected. The previous insurance proximity and payment layout can occur as real variations; ambiguity is preserved. New condition layout_variant retains every character with bounded row offsets and is always stress, never a repaired normal sample.
+
+| ID | Change/retention | Evidence | Rationale |
+|---|---|---|---|
+| S01 | Retain original cell positions/font sizes and `확인용` | `documentai_synth.sources`, `nhis_form_samples.insurance_portal_cells`, existing portal extraction tests | Neither proximity nor table variation is proven impossible; user requires conservative retention. New corpus tests compare original positions, size and all source cell counts. |
+| S02 | Replace only fictitious name/issue-date parameter selection with five unique sets | Legacy `documentai_synth.sources(sample)` selects `sample % 4`; audit proved definitions0 and4 equal | A repeated loop entry is a corpus-generation duplication, not a real-document feature. Input hashes now also prove five different submitted inputs per type/condition. No existing source/helper/test is changed. |
+| S03 | Vary accompanying insurance output date together with issue date | `nhis_form_samples.insurance_portal_cells` prints output one day after issuance | Preserve that existing relationship in newly authored dated samples; original layout/labels remain. Qualification request/validity remain on their original, compatible dates. |
+| S04 | Derive negative-case date truth from the varied printed date | Legacy `documentai_synth.defects` replaces printed years but hardcodes March03 in truth | Truth must describe the generated page. A varied March07 issue cannot have a March03 GT label. All printed-year mutations are reflected in authored truth, including qualification request dates, not only the issue field. Only benchmark truth is corrected; printed negative case and production rules stay intact. |
+| S05 | Retain/add bounded layout stress | Existing `p2_form_samples.page` scale/jitter/skew and `test_p2_payment` geometry coverage | Separate stress input augmentation, not an original fix. All labels/cells survive unchanged; no PASS tuning. |
+| S06 | Make deliberately invalid file bytes unique and check actual input hashes | Independent review found the same invalid literal repeated despite unique source parameters | Generic sample/type suffixes preserve invalidity while satisfying five distinct submitted samples. No private value enters the bytes or report. |
+| S07 | Author VALID/negative cohorts before measuring | Legacy transform 24% resolution, 400px explicit defect, severely blurred source, existing negative mutations | Normal original25, stress150, quality75, content-negative160 =410 pairs; 820 stage evaluations. Low-resolution FAIL is desired quality behavior, not false rejection. |
+
+Reference words come from each generated PDF text layer and are geometrically transformed with the same rotation/scale/homography as the bitmap. Both stages then use the same image metadata and production path. Perfect reference confidence and OCR word segmentation/bounds are differences included in operational OCR contribution; this is not a glyph-only causal experiment. Deliberately invalid input is excluded from main weakness attribution, retained for verdict rates.
+
+Final results will be presented for the user's requested approval. New code/report commits are held for that final review; no remote/main operation is authorized.
+
+## S08 — final negative-truth integrity repair
+
+During the long n=5 run, final source/GT review found that the qualification negative issue-year mutation also changes the printed request year, while initial v2 had corrected only issue truth. This is a definite GT/source disagreement, not a real-document layout feature. The corpus now mirrors every printed year change in authored truth. Only ten qualification early/future pairs need a selective replay with unchanged input hashes; all original/stress/quality input and measurement rows are unaffected. Preserve the initial as-run report and publish the reviewed report with these replayed pairs, not an overwrite. Warm the replay model before timing so those originally warm cases do not acquire an extra cold-start contribution.
+
+S08 completion: all10 selective pairs completed in13.60seconds, with identical submitted hashes, verdict/type/invocation and non-request field metrics. Reviewed final logical sample count remains410; the initial820 stage evaluations and20 selective stage replays are not pooled as extra samples.

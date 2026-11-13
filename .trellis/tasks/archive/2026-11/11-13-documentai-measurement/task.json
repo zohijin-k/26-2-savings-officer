@@ -1,0 +1,32 @@
+{
+  "id": "documentai-measurement",
+  "name": "documentai-measurement",
+  "title": "Measure DocumentAI synthetic and text-layer agreement",
+  "description": "Add measurement-only own OCR, extraction and verdict benchmarks; execute synthetic matrix and report regression baselines without private inputs.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "codex",
+  "assignee": "codex",
+  "createdAt": "2026-11-13",
+  "completedAt": "2026-11-13",
+  "branch": "feat/documentai-measurement",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "engine_v2/tools/documentai_bench.py",
+    "engine_v2/tools/documentai_synth.py",
+    "engine_v2/tests/test_documentai_bench.py",
+    "engine_v2/tests/test_documentai_synth.py",
+    "engine_v2/docs/documentai-measurement.md"
+  ],
+  "notes": "Measurement only; all four regression branches pass. Synthetic-only execution; no private inputs, production logic changes or remote Git actions. Results, conservative decisions and candidate-only improvements are retained in task artifacts.",
+  "meta": {}
+}

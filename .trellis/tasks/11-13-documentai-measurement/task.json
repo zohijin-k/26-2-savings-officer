@@ -20,7 +20,13 @@
   "subtasks": [],
   "children": [],
   "parent": null,
-  "relatedFiles": [],
-  "notes": "",
+  "relatedFiles": [
+    "engine_v2/tools/documentai_bench.py",
+    "engine_v2/tools/documentai_synth.py",
+    "engine_v2/tests/test_documentai_bench.py",
+    "engine_v2/tests/test_documentai_synth.py",
+    "engine_v2/docs/documentai-measurement.md"
+  ],
+  "notes": "Measurement only; all four regression branches pass. Synthetic-only execution; no private inputs, production logic changes or remote Git actions. Results, conservative decisions and candidate-only improvements are retained in task artifacts.",
   "meta": {}
 }

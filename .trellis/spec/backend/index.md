@@ -25,6 +25,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Synthetic officer seeding](./officer-demo-seeding.md) | Fixed samples, demo-only ownership, idempotence and safe cleanup | Active |
 | [Demo stage-two seeding](./seed-application.md) | Guarded developer CLI, shared validation, ownership cleanup and same-tab upload restoration | Active |
 | [Private case verification](./verify-cases.md) | Shared upload assessments, ignored manifests, value-free snapshots and signed regression differences | Active |
+| [Value-free batch assessment](./batch-assess.md) | Resumable per-document JSONL, local engines, policy-separated summaries and synthetic-only verification | Active |
 | [DocumentAI measurement](./documentai-measurement.md) | Own-only observation, exact/CER denominators, synthetic matrix and private silver-reference safety | Active |
 
 ---

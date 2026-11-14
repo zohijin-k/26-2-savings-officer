@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/index.md","reason":"Full-scope backend verification entry point"}
+{"file":".trellis/spec/backend/batch-assess.md","reason":"Unchanged batch behavior, closed schemas, resume and privacy requirements"}
+{"file":".trellis/spec/backend/documentai-measurement.md","reason":"Denominators, independent classification and unchanged operating code"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Masking, engine import compatibility and ignored model artifacts"}
+{"file":".trellis/tasks/11-15-ocr-baseline/research/current-behavior.md","reason":"Audit measurement boundaries and tracked-source-only synthetic regression setup"}

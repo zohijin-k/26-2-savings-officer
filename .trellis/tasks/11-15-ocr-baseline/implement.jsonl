@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend scope and quality entry point"}
+{"file":".trellis/spec/backend/batch-assess.md","reason":"Selection, resume, private output and existing behavior contracts"}
+{"file":".trellis/spec/backend/documentai-measurement.md","reason":"Reference-relative field measurement and synthetic-only validation"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"OCR compatibility, local CPU models and masking preservation"}
+{"file":".trellis/tasks/11-15-ocr-baseline/research/current-behavior.md","reason":"Reviewed reusable adapters, privacy observation, table coverage and regression isolation"}

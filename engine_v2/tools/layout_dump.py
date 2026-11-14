@@ -10,13 +10,15 @@
 from __future__ import annotations
 
 import argparse
+import sys
+sys.dont_write_bytecode = True
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from ..pipeline.ocr import default_engine
-
-from ..pipeline.ocr import OcrWord, run_ocr
-from ..pipeline.preprocess import PageSource, preprocess
 from .privacy import mask_text
+
+if TYPE_CHECKING:
+    from ..pipeline.ocr import OcrWord
 
 # 양식에 고정으로 찍히는 문구만. 개인을 특정할 수 있는 단어(시군·동 이름 등)는 넣지 않는다.
 LABELS = sorted({
@@ -59,16 +61,34 @@ def group_lines(words: list[OcrWord], tol: float = 0.6) -> list[list[OcrWord]]:
     return [sorted(l, key=lambda w: w.bbox_px[0]) for l in lines]
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
+class _SafeParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise ValueError("Invalid layout dump arguments")
+
+
+def main(argv=None):
+    ap = _SafeParser(prog="layout_dump")
     ap.add_argument("file", type=Path)
-    ap.add_argument("--engine", default=default_engine())
-    args = ap.parse_args()
+    ap.add_argument("--engine")
+    ap.add_argument("--out", type=Path, help="Write a masked three-engine structure JSON")
+    try:
+        args = ap.parse_args(argv)
+        if args.out is not None:
+            if args.engine is not None:
+                raise ValueError("Single engine conflicts with structure mode")
+            from .structure_dump import run
+            return run(args.file, args.out)
+    except Exception:
+        print('{"ok":false,"code":"ARGUMENT_ERROR"}')
+        return 2
+    from ..pipeline.ocr import default_engine, run_ocr
+    from ..pipeline.preprocess import PageSource, preprocess
+    engine = args.engine if args.engine is not None else default_engine()
 
     for p in preprocess(args.file):
         if p.source == PageSource.TEXT_LAYER:
             continue
-        r = run_ocr(args.engine, p.png, p.pixel_size)
+        r = run_ocr(engine, p.png, p.pixel_size)
         if r.error:
             raise SystemExit(mask_text(r.error))
         W, H = p.pixel_size
@@ -82,4 +102,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

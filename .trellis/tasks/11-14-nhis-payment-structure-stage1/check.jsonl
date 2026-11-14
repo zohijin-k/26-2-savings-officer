@@ -1,0 +1,9 @@
+{"file":".trellis/spec/backend/index.md","reason":"Review all affected backend/tool contracts."}
+{"file":".trellis/spec/backend/verify-cases.md","reason":"Verify location, alias, atomic write and value/path non-leakage."}
+{"file":".trellis/spec/backend/batch-assess.md","reason":"Verify unchanged no-flag behavior, resume, closed metadata and summary semantics."}
+{"file":".trellis/spec/backend/document-form-contracts.md","reason":"Confirm operating code/test preservation and upstream redaction limitations."}
+{"file":".trellis/spec/backend/documentai-measurement.md","reason":"Review synthetic-only evidence and full four-branch result reporting."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Review justified reuse without modifying incompatible shared masks."}
+{"file":".trellis/tasks/11-14-nhis-payment-structure-stage1/research/input-granularity.md","reason":"Check word order/geometry/confidence evidence and bounded causal claims."}
+{"file":".trellis/tasks/11-14-nhis-payment-structure-stage1/research/tooling-and-selection.md","reason":"Review selected-only processing, privacy and synthetic suite isolation."}
+{"file": ".trellis/spec/backend/payment-structure-dump.md", "reason": "Check exact labels, geometry, diagnostic privacy and safe output"}

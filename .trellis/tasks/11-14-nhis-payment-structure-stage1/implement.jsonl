@@ -1,0 +1,9 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend scope and applicable contract routing."}
+{"file":".trellis/spec/backend/verify-cases.md","reason":"Resolved private location, alias, fixed error and output suppression policy."}
+{"file":".trellis/spec/backend/batch-assess.md","reason":"Preserve batch inventory, closed schemas, resume, groups and synthetic-only guarantees."}
+{"file":".trellis/spec/backend/document-form-contracts.md","reason":"Payment geometry, word redaction and unchanged operating boundaries."}
+{"file":".trellis/spec/backend/documentai-measurement.md","reason":"Synthetic/text-reference limitations and four-branch validation requirements."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Extend existing layout tooling and reuse safe engine/location components."}
+{"file":".trellis/tasks/11-14-nhis-payment-structure-stage1/research/input-granularity.md","reason":"Source-backed granularity findings, competing causes and label vocabulary evidence."}
+{"file":".trellis/tasks/11-14-nhis-payment-structure-stage1/research/tooling-and-selection.md","reason":"Tool reuse, exact-mask differences, IDs selection and validation isolation."}
+{"file": ".trellis/spec/backend/payment-structure-dump.md", "reason": "Structured dump and diagnostic projection contracts"}

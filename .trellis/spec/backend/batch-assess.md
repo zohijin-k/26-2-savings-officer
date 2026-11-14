@@ -60,3 +60,16 @@ Before commit report new focused tests plus full engine/backend/scenario/fronten
 Wrong: choose an extractor from a guessed slot, use the global fallback chain, dump `fields`, retry completed errors implicitly or suppress date-policy findings. Correct: classify independently, call existing algorithms under a bounded in-memory adapter, project reviewed metadata, retain terminal rows and group date-policy reasons separately in summary.
 
 Wrong: repair arbitrary invalid JSONL or append an error while summarizing. Correct: recover only an incomplete tail during an explicit batch resume and keep summary strictly read-only.
+
+## 8. Explicit ID selection
+
+Signature: `python -B -m engine_v2.tools.batch_assess --root FAKE-input --out FAKE-output --ids FAKE-selection.txt [--engines own applevision]`. All example paths are fictitious. `--summarize --ids` is an argument error.
+
+- Read UTF-8 LF/CRLF lines as exact root-relative POSIX IDs; preserve spaces/case and remove line endings only. Ignore empty lines. Apply `_private_location` to the actual list path outside the processing guard. Reject a list within the output tree and aliases/hardlinks to output metadata/records/lock before mkdir, lock acquisition or tail repair. Do not mutate the selection file.
+- Deduplicate repeated entries; count/exclude absolute/traversal IDs as outside-root. Count/exclude noncanonical, hidden, unsupported and other invalid entries, and missing inventory members (including ignored symlinks). Process only valid unique listed entries. No valid entry means no document processing.
+- Emit only fixed selection labels with numeric `selected`, `not_listed`, `duplicates`, `outside_root`, `missing`, `invalid` counts. Never print list names, entries, source paths or validation exception details. `not_listed` is the eligible inventory outside the valid selected set.
+- Metadata-only full inventory still owns extension exclusions and stable group assignment. Filter after inventory without reading unselected document contents. Keep original inventory order, rather than list order.
+- Selection is per invocation, not resume identity: keep VERSION/POLICY, closed run/result schemas, lock/fsync/tail-repair, root/engine binding, completed success/error skipping and full-run summary/error behavior unchanged. Previously completed unselected rows remain byte-for-byte. No-flag calls keep their original behavior and console format.
+- New synthetic tests must cover count-only output, exact Unicode/spaced IDs, no unselected content reads, duplicates/outside/missing/invalid entries, empty selection, changed/expanded selection with resume, stable groups/schemas, location/alias rejection and old-test preservation.
+
+Good: select two synthetic IDs, count one duplicate and one outside-root entry, process the two valid entries, then skip both on resume. Base: no --ids retains the original four-number progress. Bad: open unselected PDFs, print rejected entries, bind selection to a new metadata schema or rewrite completed records.

@@ -231,6 +231,55 @@ def inventory(root):
     return files, dict(sorted(excluded.items()))
 
 
+def _ids_selection(root, path, out, files):
+    """Read exact relative IDs and project selection issues to counts only.
+
+    The list is private input, never run identity. Keeping it outside the
+    output tree also protects every atomic sibling, not just current filenames.
+    """
+    actual = _location(path)
+    if not actual.is_file() or actual.is_relative_to(out):
+        _fail("LOCATION_REJECTED")
+    for target in (out / ".lock", out / "run.json", out / "results.jsonl"):
+        if target.exists() and os.path.samefile(actual, target):
+            _fail("INPUT_OUTPUT_OVERLAP")
+    try:
+        with actual.open("r", encoding="utf-8", newline="") as stream:
+            text = stream.read()
+    except (OSError, UnicodeError):
+        _fail("INPUT_UNAVAILABLE")
+    available = {item.relative_to(root).as_posix() for item in files}
+    selected, seen = set(), set()
+    counts = dict(selected=0, not_listed=0, duplicates=0, outside_root=0, missing=0, invalid=0)
+    # splitlines would also split characters legal in a filename, such as vertical tabs
+    # and Unicode line separators. Only LF/CRLF are list delimiters.
+    for raw in text.split("\n"):
+        value = raw[:-1] if raw.endswith("\r") else raw
+        if not value:
+            continue
+        if value in seen:
+            counts["duplicates"] += 1
+            continue
+        seen.add(value)
+        parts = value.split("/")
+        if Path(value).is_absolute() or ".." in parts:
+            counts["outside_root"] += 1
+        elif ("\x00" in value or "\\" in value or any(part in {"", "."} for part in parts)
+              or any(part.startswith(".") for part in parts) or Path(value).suffix.lower() not in EXTENSIONS):
+            counts["invalid"] += 1
+        elif value not in available:
+            counts["missing"] += 1
+        else:
+            selected.add(value)
+    counts["selected"] = len(selected)
+    counts["not_listed"] = len(available - selected)
+    return [item for item in files if item.relative_to(root).as_posix() in selected], counts
+
+
+def _selection_progress(counts):
+    print("ids " + " ".join(f"{key} {value}" for key, value in counts.items()), flush=True)
+
+
 def _member(value, allowed):
     return isinstance(value, str) and value in allowed
 
@@ -706,7 +755,7 @@ def _progress(done, skipped, total, started):
     print(f"{done} {skipped} {total} {time.perf_counter() - started:.1f}", flush=True)
 
 
-def run(root, out, engines=("own",)):
+def run(root, out, engines=("own",), ids=None):
     started = time.perf_counter()
     root = Path(root).resolve(strict=True)
     if not root.is_dir():
@@ -717,6 +766,13 @@ def run(root, out, engines=("own",)):
     out = _location(requested)
     if out.is_relative_to(root) or root.is_relative_to(out):
         _fail("INPUT_OUTPUT_OVERLAP")
+    # Validate private selection input before mkdir/locking/tail repair. No-ID
+    # runs retain their original inventory and mutation order.
+    selected = None
+    if ids is not None:
+        inventory_files, excluded = inventory(root)
+        selected, counts = _ids_selection(root, ids, out, inventory_files)
+        _selection_progress(counts)
     out.mkdir(mode=0o700, parents=True, exist_ok=True)
     _location(out)
     lock_path = _target(out / ".lock")
@@ -727,7 +783,9 @@ def run(root, out, engines=("own",)):
         except BlockingIOError:
             _fail("OUTPUT_LOCKED")
         meta_path, records = _target(out / "run.json"), _target(out / "results.jsonl")
-        files, excluded = inventory(root)
+        if ids is None:
+            inventory_files, excluded = inventory(root)
+        files = inventory_files if selected is None else selected
         meta = {"schema_version": VERSION, "policy": POLICY, "root": str(root),
                 "engines": list(engines), "groups": {}, "excluded": excluded}
         if meta_path.exists():
@@ -742,7 +800,8 @@ def run(root, out, engines=("own",)):
         for row in rows:
             parts = Path(row["id"]).parts
             _require(row["group"] == (meta["groups"].get(parts[0]) if len(parts) > 1 else 0))
-        for path in files:
+        # Full inventory determines groups, independently of selection order.
+        for path in inventory_files:
             parts = path.relative_to(root).parts
             if len(parts) > 1 and parts[0] not in meta["groups"]:
                 meta["groups"][parts[0]] = max(meta["groups"].values(), default=0) + 1
@@ -853,6 +912,7 @@ def parser():
     result.add_argument("--out", required=True)
     result.add_argument("--engines", nargs="+", default=["own"])
     result.add_argument("--summarize", action="store_true")
+    result.add_argument("--ids", help="Private UTF-8 list of root-relative IDs; report counts only")
     return result
 
 
@@ -860,9 +920,9 @@ def main(argv=None):
     args = None
     try:
         args = parser().parse_args(argv)
-        if args.engines not in [["own"], ["own", "applevision"]] or (not args.summarize and not args.root) or (args.summarize and args.root):
+        if args.engines not in [["own"], ["own", "applevision"]] or (not args.summarize and not args.root) or (args.summarize and (args.root or args.ids is not None)):
             _fail("ARGUMENT_ERROR")
-        return summarize(args.out) if args.summarize else run(args.root, args.out, args.engines)
+        return summarize(args.out) if args.summarize else run(args.root, args.out, args.engines, ids=args.ids)
     except KeyboardInterrupt:
         return 130
     except Exception:

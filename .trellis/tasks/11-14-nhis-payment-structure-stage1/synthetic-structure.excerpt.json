@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "masking_policy": "nhis_payment_exact_constants_v1",
+  "page_count": 1,
+  "engines": {
+    "text_layer": {
+      "pages": [
+        {
+          "page": 0,
+          "state": "OK",
+          "code": "NONE",
+          "page_size_pt": [
+            595.0,
+            842.0
+          ],
+          "pixel_size": [
+            2480,
+            3509
+          ],
+          "coordinate_units": "px",
+          "words": [
+            {
+              "word_index": 0,
+              "text": "가가가가가가:9999-9999-9999-99999",
+              "bbox_px": [
+                415.3954823811849,
+                117.66021251678467,
+                1023.650042215983,
+                165.61177571614584
+              ],
+              "width_px": 608.2545598347981,
+              "height_px": 47.951563199361175,
+              "confidence": 1.0
+            },
+            {
+              "word_index": 1,
+              "text": "가가가",
+              "bbox_px": [
+                735.9463373819987,
+                493.35562388102215,
+                898.2918421427408,
+                564.0841801961263
+              ],
+              "width_px": 162.3455047607422,
+              "height_px": 70.72855631510419,
+              "confidence": 1.0
+            }
+          ]
+        }
+      ],
+      "diagnostics": {
+        "state": "OK",
+        "code": "NONE",
+        "scope": "PAYMENT_DIAGNOSTIC",
+        "reader": "government_payment",
+        "recognized_headers": [
+          "건강보험료",
+          "고지금액",
+          "납부금액",
+          "보수외소득월액(건강)",
+          "보수외소득월액(요양)",
+          "월별",
+          "장기요양보험료"
+        ],
+        "header_group_count": 9,
+        "header_groups_expected": 9,
+        "header_groups_matched": 9,
+        "header_count_scope": "GOVERNMENT_TABLE",
+        "month_count": 12,
+        "month_count_scope": "GOVERNMENT_TABLE",
+        "table_months_missing": false,
+        "failed_validations": [],
+        "missing_billing_months": false,
+        "billing_cause": "NONE",
+        "billing_severity": "NONE"
+      }
+    },
+    "own": {
+      "pages": [
+        {
+          "page": 0,
+          "state": "OK",
+          "code": "NONE",
+          "page_size_pt": [
+            595.0,
+            842.0
+          ],
+          "pixel_size": [
+            2480,
+            3509
+          ],
+          "coordinate_units": "px",
+          "words": [
+            {
+              "word_index": 0,
+              "text": "가가가가가 가:9999-9999-9999-99999",
+              "bbox_px": [
+                418.2469787597656,
+                124.7575454711914,
+                1023.2529296875,
+                162.54183959960938
+              ],
+              "width_px": 605.0059509277344,
+              "height_px": 37.78429412841797,
+              "confidence": 0.9863825440406799
+            },
+            {
+              "word_index": 1,
+              "text": "가가가 가가·가가가가가가가 가가가가가",
+              "bbox_px": [
+                736.636962890625,
+                503.70556640625,
+                1694.6483154296875,
+                557.7669677734375
+              ],
+              "width_px": 958.0113525390625,
+              "height_px": 54.0614013671875,
+              "confidence": 0.9986968040466309
+            }
+          ]
+        }
+      ],
+      "diagnostics": {
+        "state": "OK",
+        "code": "NONE",
+        "scope": "PAYMENT_DIAGNOSTIC",
+        "reader": "legacy_payment",
+        "recognized_headers": [
+          "건강보험료",
+          "고지금액",
+          "납부금액",
+          "보수외소득월액(건강)",
+          "보수외소득월액(요양)",
+          "월별",
+          "장기요양",
+          "장기요양보험료"
+        ],
+        "header_group_count": 9,
+        "header_groups_expected": 9,
+        "header_groups_matched": 7,
+        "header_count_scope": "GOVERNMENT_RECOGNITION",
+        "month_count": 12,
+        "month_count_scope": "LEGACY_TABLE",
+        "table_months_missing": false,
+        "failed_validations": [
+          "monthly_total_matches"
+        ],
+        "missing_billing_months": true,
+        "billing_cause": "PERIOD_UNCERTAIN_OR_MISSING",
+        "billing_severity": "NEEDS_REVIEW"
+      }
+    },
+    "applevision": {
+      "pages": [
+        {
+          "page": 0,
+          "state": "OK",
+          "code": "NONE",
+          "page_size_pt": [
+            595.0,
+            842.0
+          ],
+          "pixel_size": [
+            2480,
+            3509
+          ],
+          "coordinate_units": "px",
+          "words": [
+            {
+              "word_index": 0,
+              "text": "가가 가가가가:9999-9999-9999-99999",
+              "bbox_px": [
+                413.3333456615691,
+                121.96524151112878,
+                1030.7818930248504,
+                168.3095915266008
+              ],
+              "width_px": 617.4485473632812,
+              "height_px": 46.34435001547202,
+              "confidence": 1.0
+            },
+            {
+              "word_index": 1,
+              "text": "가가가 가가",
+              "bbox_px": [
+                199.01234875348555,
+                606.8270659372156,
+                413.33333264020433,
+                663.0377906200372
+              ],
+              "width_px": 214.32098388671878,
+              "height_px": 56.21072468282159,
+              "confidence": 0.5
+            }
+          ]
+        }
+      ],
+      "diagnostics": {
+        "state": "OK",
+        "code": "NONE",
+        "scope": "PAYMENT_DIAGNOSTIC",
+        "reader": "government_payment",
+        "recognized_headers": [
+          "건강보험료",
+          "고지금액",
+          "납부금액",
+          "보수외소득월액(건강)",
+          "보수외소득월액(요양)",
+          "월별",
+          "장기요양보험료"
+        ],
+        "header_group_count": 9,
+        "header_groups_expected": 9,
+        "header_groups_matched": 9,
+        "header_count_scope": "GOVERNMENT_TABLE",
+        "month_count": 12,
+        "month_count_scope": "GOVERNMENT_TABLE",
+        "table_months_missing": false,
+        "failed_validations": [
+          "monthly_amounts_numeric",
+          "monthly_total_matches",
+          "numeric_cell_corrections",
+          "payment_billing_absence_certain",
+          "payment_column_1_sum",
+          "payment_column_2_sum",
+          "payment_column_3_sum",
+          "payment_column_4_sum",
+          "payment_column_5_sum",
+          "payment_column_6_sum",
+          "payment_column_7_sum",
+          "payment_column_8_sum",
+          "payment_information_cells",
+          "발급일_consistent"
+        ],
+        "missing_billing_months": false,
+        "billing_cause": "NONE",
+        "billing_severity": "NONE"
+      }
+    }
+  }
+}

@@ -1,0 +1,197 @@
+{
+  "pytest": [
+    {
+      "suite": "engine",
+      "exit": 0,
+      "passed": 1535,
+      "skipped": 3,
+      "failed": 0,
+      "error": 0,
+      "seconds": 31.51
+    },
+    {
+      "suite": "backend",
+      "exit": 0,
+      "passed": 1296,
+      "skipped": 0,
+      "failed": 0,
+      "error": 0,
+      "seconds": 86.54
+    }
+  ],
+  "scenarios": {
+    "modules": 18,
+    "exit_failures": 0,
+    "passed": 1885,
+    "failed": 0,
+    "rows": [
+      {
+        "module": "run_p2_scenarios",
+        "exit": 0,
+        "passed": 53,
+        "failed": 0,
+        "seconds": 1.11
+      },
+      {
+        "module": "run_p3_scenarios",
+        "exit": 0,
+        "passed": 186,
+        "failed": 0,
+        "seconds": 1.42
+      },
+      {
+        "module": "run_p4_scenarios",
+        "exit": 0,
+        "passed": 189,
+        "failed": 0,
+        "seconds": 2.21
+      },
+      {
+        "module": "run_p5_scenarios",
+        "exit": 0,
+        "passed": 152,
+        "failed": 0,
+        "seconds": 1.36
+      },
+      {
+        "module": "run_p6_scenarios",
+        "exit": 0,
+        "passed": 261,
+        "failed": 0,
+        "seconds": 2.96
+      },
+      {
+        "module": "run_p7_scenarios",
+        "exit": 0,
+        "passed": 253,
+        "failed": 0,
+        "seconds": 7.37
+      },
+      {
+        "module": "run_p8_localocr_scenarios",
+        "exit": 0,
+        "passed": 89,
+        "failed": 0,
+        "seconds": 4.16
+      },
+      {
+        "module": "run_p9_identity_scenarios",
+        "exit": 0,
+        "passed": 98,
+        "failed": 0,
+        "seconds": 5.22
+      },
+      {
+        "module": "run_p11_criteria_scenarios",
+        "exit": 0,
+        "passed": 38,
+        "failed": 0,
+        "seconds": 0.7
+      },
+      {
+        "module": "run_p12_subsidy_criteria_scenarios",
+        "exit": 0,
+        "passed": 29,
+        "failed": 0,
+        "seconds": 0.83
+      },
+      {
+        "module": "run_p13_household_scenarios",
+        "exit": 0,
+        "passed": 26,
+        "failed": 0,
+        "seconds": 0.61
+      },
+      {
+        "module": "run_p14_pdf_forms_scenarios",
+        "exit": 0,
+        "passed": null,
+        "failed": null,
+        "seconds": 2.34
+      },
+      {
+        "module": "run_p15_jbai_scenarios",
+        "exit": 0,
+        "passed": 129,
+        "failed": 0,
+        "seconds": 17.49
+      },
+      {
+        "module": "run_p16_job_docs_scenarios",
+        "exit": 0,
+        "passed": 96,
+        "failed": 0,
+        "seconds": 3.07
+      },
+      {
+        "module": "run_p17_own_scenarios",
+        "exit": 0,
+        "passed": 75,
+        "failed": 0,
+        "seconds": 2.96
+      },
+      {
+        "module": "run_p18_applicant_precheck_scenarios",
+        "exit": 0,
+        "passed": 180,
+        "failed": 0,
+        "seconds": 7.7
+      },
+      {
+        "module": "run_p19_nhis_history_scenarios",
+        "exit": 0,
+        "passed": 24,
+        "failed": 0,
+        "seconds": 1.16
+      },
+      {
+        "module": "run_p20_nhis_continuation_scenarios",
+        "exit": 0,
+        "passed": 7,
+        "failed": 0,
+        "seconds": 1.09
+      }
+    ]
+  },
+  "frontend": {
+    "lint_exit": 0,
+    "build_exit": 0,
+    "existing_large_chunk_advisory": true
+  },
+  "native": {
+    "exit": 0,
+    "value_sentinels": 10,
+    "leaks": 0,
+    "console": "{\"ok\":true,\"pages\":1,\"engines\":3}",
+    "stderr_empty": true
+  },
+  "native_engines": {
+    "text_layer": {
+      "words": 127,
+      "clusters": 9,
+      "matched": 9,
+      "months": 12,
+      "failed_validation_count": 0,
+      "billing_cause": "NONE"
+    },
+    "own": {
+      "words": 107,
+      "clusters": 9,
+      "matched": 7,
+      "months": 12,
+      "failed_validation_count": 1,
+      "billing_cause": "PERIOD_UNCERTAIN_OR_MISSING"
+    },
+    "applevision": {
+      "words": 103,
+      "clusters": 9,
+      "matched": 9,
+      "months": 12,
+      "failed_validation_count": 14,
+      "billing_cause": "NONE"
+    }
+  },
+  "new_tests": 87,
+  "protected_files": 206,
+  "protected_changed": 0
+}

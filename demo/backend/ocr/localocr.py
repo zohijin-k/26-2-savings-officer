@@ -361,7 +361,7 @@ def _from_business_proof(ex, pages, classification_evidence="") -> OcrResult:
 
 
 def _from_nhis(ex, pages, v2types, classification_evidence: str = "",
-               detected_override: DocType | None = None) -> OcrResult:
+               detected_override: DocType | None = None, *, payment_page_count: int | None = None) -> OcrResult:
     """engine_v2 건강보험 판독 결과를 신청자·담당자 화면 계약으로 옮긴다."""
     fields: dict[str, str] = {}
     bboxes: dict[str, BBox] = {}
@@ -400,6 +400,13 @@ def _from_nhis(ex, pages, v2types, classification_evidence: str = "",
         from engine_v2.extractors.payment_period import FIELD, collect
 
         fields[FIELD] = json.dumps(collect(pages, ex), ensure_ascii=False, separators=(",", ":"))
+        from engine_v2.extractors import payment_paging, payment_completeness
+
+        fields[payment_paging.FIELD] = json.dumps(
+            payment_paging.collect(pages, uploaded_page_count=payment_page_count),
+            ensure_ascii=False, separators=(",", ":"))
+        fields[payment_completeness.FIELD] = json.dumps(
+            payment_completeness.collect(pages, ex), ensure_ascii=False, separators=(",", ":"))
 
         if has_failed_payment_validation(fields):
             confidence = min(confidence, .4)
@@ -517,8 +524,11 @@ def _from_insurance4(ex, pages, classification_evidence: str = "") -> OcrResult:
 def _from_supported_form(extractor, pages, v2types, evidence, detected):
     from engine_v2.extractors.attached_pages import extract_form
     ex, scoped = extract_form(extractor.extract, pages)
-    result = (_from_insurance4(ex, scoped, evidence) if detected == DocType.INSURANCE_4
-              else _from_nhis(ex, scoped, v2types, evidence, detected))
+    if detected == DocType.NHIS_PAYMENT:
+        result = _from_nhis(ex, scoped, v2types, evidence, detected, payment_page_count=len(pages))
+    else:
+        result = (_from_insurance4(ex, scoped, evidence) if detected == DocType.INSURANCE_4
+                  else _from_nhis(ex, scoped, v2types, evidence, detected))
     result.page_count = len(pages)
     result.engine = _pages_engine(scoped)
     return result

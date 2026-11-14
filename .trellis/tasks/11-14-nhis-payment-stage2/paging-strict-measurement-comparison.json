@@ -1,0 +1,706 @@
+{
+  "candidate": "STRICT_GUARD_BEFORE_TABLE_PROPOSAL",
+  "pairs": 410,
+  "stages": 820,
+  "input_fingerprints_equal": true,
+  "stages_comparison": {
+    "own": [
+      {
+        "subset": "all",
+        "groups": {
+          "all": {
+            "before": {
+              "status_counts": {
+                "NEEDS_REVIEW": 255,
+                "FAIL": 125,
+                "PASS": 30
+              },
+              "false_pass": 0,
+              "negative_count": 235,
+              "false_reject": 0,
+              "valid_count": 175
+            },
+            "after": {
+              "status_counts": {
+                "NEEDS_REVIEW": 232,
+                "FAIL": 135,
+                "PASS": 43
+              },
+              "false_pass": 0,
+              "negative_count": 235,
+              "false_reject": 0,
+              "valid_count": 175
+            },
+            "new_reviews": [
+              "s1_nhis_payment_low_resolution",
+              "s2_nhis_payment_low_resolution",
+              "s3_nhis_payment_low_resolution",
+              "s4_nhis_payment_low_resolution",
+              "s5_nhis_payment_low_resolution"
+            ],
+            "removed_reviews": [
+              "s1_nhis_payment_original",
+              "s1_nhis_payment_monochrome",
+              "s1_nhis_payment_layout_variant",
+              "s1_nhis_payment_issued_too_early",
+              "s1_nhis_payment_issued_after_application",
+              "s1_nhis_payment_pages_incomplete",
+              "s2_nhis_payment_original",
+              "s2_nhis_payment_monochrome",
+              "s2_nhis_payment_layout_variant",
+              "s2_nhis_payment_issued_too_early",
+              "s2_nhis_payment_issued_after_application",
+              "s2_nhis_payment_pages_incomplete",
+              "s3_nhis_payment_original",
+              "s3_nhis_payment_monochrome",
+              "s3_nhis_payment_issued_too_early",
+              "s3_nhis_payment_issued_after_application",
+              "s3_nhis_payment_pages_incomplete",
+              "s4_nhis_payment_original",
+              "s4_nhis_payment_monochrome",
+              "s4_nhis_payment_issued_too_early",
+              "s4_nhis_payment_issued_after_application",
+              "s4_nhis_payment_pages_incomplete",
+              "s5_nhis_payment_original",
+              "s5_nhis_payment_monochrome",
+              "s5_nhis_payment_layout_variant",
+              "s5_nhis_payment_issued_too_early",
+              "s5_nhis_payment_issued_after_application",
+              "s5_nhis_payment_pages_incomplete"
+            ],
+            "corrected_existing_false_pass": []
+          },
+          "content_defect": {
+            "before": {
+              "status_counts": {
+                "FAIL": 80,
+                "NEEDS_REVIEW": 80
+              },
+              "false_pass": 0,
+              "negative_count": 160,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "after": {
+              "status_counts": {
+                "FAIL": 95,
+                "NEEDS_REVIEW": 65
+              },
+              "false_pass": 0,
+              "negative_count": 160,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "new_reviews": [],
+            "removed_reviews": [
+              "s1_nhis_payment_issued_too_early",
+              "s1_nhis_payment_issued_after_application",
+              "s1_nhis_payment_pages_incomplete",
+              "s2_nhis_payment_issued_too_early",
+              "s2_nhis_payment_issued_after_application",
+              "s2_nhis_payment_pages_incomplete",
+              "s3_nhis_payment_issued_too_early",
+              "s3_nhis_payment_issued_after_application",
+              "s3_nhis_payment_pages_incomplete",
+              "s4_nhis_payment_issued_too_early",
+              "s4_nhis_payment_issued_after_application",
+              "s4_nhis_payment_pages_incomplete",
+              "s5_nhis_payment_issued_too_early",
+              "s5_nhis_payment_issued_after_application",
+              "s5_nhis_payment_pages_incomplete"
+            ],
+            "corrected_existing_false_pass": []
+          },
+          "normal_baseline": {
+            "before": {
+              "status_counts": {
+                "NEEDS_REVIEW": 15,
+                "PASS": 10
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 25
+            },
+            "after": {
+              "status_counts": {
+                "NEEDS_REVIEW": 10,
+                "PASS": 15
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 25
+            },
+            "new_reviews": [],
+            "removed_reviews": [
+              "s1_nhis_payment_original",
+              "s2_nhis_payment_original",
+              "s3_nhis_payment_original",
+              "s4_nhis_payment_original",
+              "s5_nhis_payment_original"
+            ],
+            "corrected_existing_false_pass": []
+          },
+          "quality_defect": {
+            "before": {
+              "status_counts": {
+                "NEEDS_REVIEW": 30,
+                "FAIL": 45
+              },
+              "false_pass": 0,
+              "negative_count": 75,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "after": {
+              "status_counts": {
+                "NEEDS_REVIEW": 35,
+                "FAIL": 40
+              },
+              "false_pass": 0,
+              "negative_count": 75,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "new_reviews": [
+              "s1_nhis_payment_low_resolution",
+              "s2_nhis_payment_low_resolution",
+              "s3_nhis_payment_low_resolution",
+              "s4_nhis_payment_low_resolution",
+              "s5_nhis_payment_low_resolution"
+            ],
+            "removed_reviews": [],
+            "corrected_existing_false_pass": []
+          },
+          "stress": {
+            "before": {
+              "status_counts": {
+                "NEEDS_REVIEW": 130,
+                "PASS": 20
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 150
+            },
+            "after": {
+              "status_counts": {
+                "NEEDS_REVIEW": 122,
+                "PASS": 28
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 150
+            },
+            "new_reviews": [],
+            "removed_reviews": [
+              "s1_nhis_payment_monochrome",
+              "s1_nhis_payment_layout_variant",
+              "s2_nhis_payment_monochrome",
+              "s2_nhis_payment_layout_variant",
+              "s3_nhis_payment_monochrome",
+              "s4_nhis_payment_monochrome",
+              "s5_nhis_payment_monochrome",
+              "s5_nhis_payment_layout_variant"
+            ],
+            "corrected_existing_false_pass": []
+          }
+        }
+      },
+      {
+        "subset": "nhis_payment",
+        "groups": {
+          "all": {
+            "before": {
+              "status_counts": {
+                "NEEDS_REVIEW": 65,
+                "FAIL": 20
+              },
+              "false_pass": 0,
+              "negative_count": 50,
+              "false_reject": 0,
+              "valid_count": 35
+            },
+            "after": {
+              "status_counts": {
+                "PASS": 13,
+                "NEEDS_REVIEW": 42,
+                "FAIL": 30
+              },
+              "false_pass": 0,
+              "negative_count": 50,
+              "false_reject": 0,
+              "valid_count": 35
+            },
+            "new_reviews": [
+              "s1_nhis_payment_low_resolution",
+              "s2_nhis_payment_low_resolution",
+              "s3_nhis_payment_low_resolution",
+              "s4_nhis_payment_low_resolution",
+              "s5_nhis_payment_low_resolution"
+            ],
+            "removed_reviews": [
+              "s1_nhis_payment_original",
+              "s1_nhis_payment_monochrome",
+              "s1_nhis_payment_layout_variant",
+              "s1_nhis_payment_issued_too_early",
+              "s1_nhis_payment_issued_after_application",
+              "s1_nhis_payment_pages_incomplete",
+              "s2_nhis_payment_original",
+              "s2_nhis_payment_monochrome",
+              "s2_nhis_payment_layout_variant",
+              "s2_nhis_payment_issued_too_early",
+              "s2_nhis_payment_issued_after_application",
+              "s2_nhis_payment_pages_incomplete",
+              "s3_nhis_payment_original",
+              "s3_nhis_payment_monochrome",
+              "s3_nhis_payment_issued_too_early",
+              "s3_nhis_payment_issued_after_application",
+              "s3_nhis_payment_pages_incomplete",
+              "s4_nhis_payment_original",
+              "s4_nhis_payment_monochrome",
+              "s4_nhis_payment_issued_too_early",
+              "s4_nhis_payment_issued_after_application",
+              "s4_nhis_payment_pages_incomplete",
+              "s5_nhis_payment_original",
+              "s5_nhis_payment_monochrome",
+              "s5_nhis_payment_layout_variant",
+              "s5_nhis_payment_issued_too_early",
+              "s5_nhis_payment_issued_after_application",
+              "s5_nhis_payment_pages_incomplete"
+            ],
+            "corrected_existing_false_pass": []
+          },
+          "content_defect": {
+            "before": {
+              "status_counts": {
+                "NEEDS_REVIEW": 25,
+                "FAIL": 10
+              },
+              "false_pass": 0,
+              "negative_count": 35,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "after": {
+              "status_counts": {
+                "FAIL": 25,
+                "NEEDS_REVIEW": 10
+              },
+              "false_pass": 0,
+              "negative_count": 35,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "new_reviews": [],
+            "removed_reviews": [
+              "s1_nhis_payment_issued_too_early",
+              "s1_nhis_payment_issued_after_application",
+              "s1_nhis_payment_pages_incomplete",
+              "s2_nhis_payment_issued_too_early",
+              "s2_nhis_payment_issued_after_application",
+              "s2_nhis_payment_pages_incomplete",
+              "s3_nhis_payment_issued_too_early",
+              "s3_nhis_payment_issued_after_application",
+              "s3_nhis_payment_pages_incomplete",
+              "s4_nhis_payment_issued_too_early",
+              "s4_nhis_payment_issued_after_application",
+              "s4_nhis_payment_pages_incomplete",
+              "s5_nhis_payment_issued_too_early",
+              "s5_nhis_payment_issued_after_application",
+              "s5_nhis_payment_pages_incomplete"
+            ],
+            "corrected_existing_false_pass": []
+          },
+          "normal_baseline": {
+            "before": {
+              "status_counts": {
+                "NEEDS_REVIEW": 5
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 5
+            },
+            "after": {
+              "status_counts": {
+                "PASS": 5
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 5
+            },
+            "new_reviews": [],
+            "removed_reviews": [
+              "s1_nhis_payment_original",
+              "s2_nhis_payment_original",
+              "s3_nhis_payment_original",
+              "s4_nhis_payment_original",
+              "s5_nhis_payment_original"
+            ],
+            "corrected_existing_false_pass": []
+          },
+          "quality_defect": {
+            "before": {
+              "status_counts": {
+                "FAIL": 10,
+                "NEEDS_REVIEW": 5
+              },
+              "false_pass": 0,
+              "negative_count": 15,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "after": {
+              "status_counts": {
+                "NEEDS_REVIEW": 10,
+                "FAIL": 5
+              },
+              "false_pass": 0,
+              "negative_count": 15,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "new_reviews": [
+              "s1_nhis_payment_low_resolution",
+              "s2_nhis_payment_low_resolution",
+              "s3_nhis_payment_low_resolution",
+              "s4_nhis_payment_low_resolution",
+              "s5_nhis_payment_low_resolution"
+            ],
+            "removed_reviews": [],
+            "corrected_existing_false_pass": []
+          },
+          "stress": {
+            "before": {
+              "status_counts": {
+                "NEEDS_REVIEW": 30
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 30
+            },
+            "after": {
+              "status_counts": {
+                "PASS": 8,
+                "NEEDS_REVIEW": 22
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 30
+            },
+            "new_reviews": [],
+            "removed_reviews": [
+              "s1_nhis_payment_monochrome",
+              "s1_nhis_payment_layout_variant",
+              "s2_nhis_payment_monochrome",
+              "s2_nhis_payment_layout_variant",
+              "s3_nhis_payment_monochrome",
+              "s4_nhis_payment_monochrome",
+              "s5_nhis_payment_monochrome",
+              "s5_nhis_payment_layout_variant"
+            ],
+            "corrected_existing_false_pass": []
+          }
+        }
+      }
+    ],
+    "reference": [
+      {
+        "subset": "all",
+        "groups": {
+          "all": {
+            "before": {
+              "status_counts": {
+                "NEEDS_REVIEW": 250,
+                "FAIL": 95,
+                "PASS": 65
+              },
+              "false_pass": 20,
+              "negative_count": 235,
+              "false_reject": 0,
+              "valid_count": 175
+            },
+            "after": {
+              "status_counts": {
+                "NEEDS_REVIEW": 250,
+                "FAIL": 100,
+                "PASS": 60
+              },
+              "false_pass": 15,
+              "negative_count": 235,
+              "false_reject": 0,
+              "valid_count": 175
+            },
+            "new_reviews": [],
+            "removed_reviews": [],
+            "corrected_existing_false_pass": [
+              "s1_nhis_payment_pages_incomplete",
+              "s2_nhis_payment_pages_incomplete",
+              "s3_nhis_payment_pages_incomplete",
+              "s4_nhis_payment_pages_incomplete",
+              "s5_nhis_payment_pages_incomplete"
+            ]
+          },
+          "content_defect": {
+            "before": {
+              "status_counts": {
+                "FAIL": 85,
+                "NEEDS_REVIEW": 70,
+                "PASS": 5
+              },
+              "false_pass": 5,
+              "negative_count": 160,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "after": {
+              "status_counts": {
+                "FAIL": 90,
+                "NEEDS_REVIEW": 70
+              },
+              "false_pass": 0,
+              "negative_count": 160,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "new_reviews": [],
+            "removed_reviews": [],
+            "corrected_existing_false_pass": [
+              "s1_nhis_payment_pages_incomplete",
+              "s2_nhis_payment_pages_incomplete",
+              "s3_nhis_payment_pages_incomplete",
+              "s4_nhis_payment_pages_incomplete",
+              "s5_nhis_payment_pages_incomplete"
+            ]
+          },
+          "normal_baseline": {
+            "before": {
+              "status_counts": {
+                "NEEDS_REVIEW": 10,
+                "PASS": 15
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 25
+            },
+            "after": {
+              "status_counts": {
+                "NEEDS_REVIEW": 10,
+                "PASS": 15
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 25
+            },
+            "new_reviews": [],
+            "removed_reviews": [],
+            "corrected_existing_false_pass": []
+          },
+          "quality_defect": {
+            "before": {
+              "status_counts": {
+                "NEEDS_REVIEW": 50,
+                "PASS": 15,
+                "FAIL": 10
+              },
+              "false_pass": 15,
+              "negative_count": 75,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "after": {
+              "status_counts": {
+                "NEEDS_REVIEW": 50,
+                "PASS": 15,
+                "FAIL": 10
+              },
+              "false_pass": 15,
+              "negative_count": 75,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "new_reviews": [],
+            "removed_reviews": [],
+            "corrected_existing_false_pass": []
+          },
+          "stress": {
+            "before": {
+              "status_counts": {
+                "NEEDS_REVIEW": 120,
+                "PASS": 30
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 150
+            },
+            "after": {
+              "status_counts": {
+                "NEEDS_REVIEW": 120,
+                "PASS": 30
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 150
+            },
+            "new_reviews": [],
+            "removed_reviews": [],
+            "corrected_existing_false_pass": []
+          }
+        }
+      },
+      {
+        "subset": "nhis_payment",
+        "groups": {
+          "all": {
+            "before": {
+              "status_counts": {
+                "PASS": 25,
+                "NEEDS_REVIEW": 40,
+                "FAIL": 20
+              },
+              "false_pass": 10,
+              "negative_count": 50,
+              "false_reject": 0,
+              "valid_count": 35
+            },
+            "after": {
+              "status_counts": {
+                "PASS": 20,
+                "NEEDS_REVIEW": 40,
+                "FAIL": 25
+              },
+              "false_pass": 5,
+              "negative_count": 50,
+              "false_reject": 0,
+              "valid_count": 35
+            },
+            "new_reviews": [],
+            "removed_reviews": [],
+            "corrected_existing_false_pass": [
+              "s1_nhis_payment_pages_incomplete",
+              "s2_nhis_payment_pages_incomplete",
+              "s3_nhis_payment_pages_incomplete",
+              "s4_nhis_payment_pages_incomplete",
+              "s5_nhis_payment_pages_incomplete"
+            ]
+          },
+          "content_defect": {
+            "before": {
+              "status_counts": {
+                "FAIL": 20,
+                "NEEDS_REVIEW": 10,
+                "PASS": 5
+              },
+              "false_pass": 5,
+              "negative_count": 35,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "after": {
+              "status_counts": {
+                "FAIL": 25,
+                "NEEDS_REVIEW": 10
+              },
+              "false_pass": 0,
+              "negative_count": 35,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "new_reviews": [],
+            "removed_reviews": [],
+            "corrected_existing_false_pass": [
+              "s1_nhis_payment_pages_incomplete",
+              "s2_nhis_payment_pages_incomplete",
+              "s3_nhis_payment_pages_incomplete",
+              "s4_nhis_payment_pages_incomplete",
+              "s5_nhis_payment_pages_incomplete"
+            ]
+          },
+          "normal_baseline": {
+            "before": {
+              "status_counts": {
+                "PASS": 5
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 5
+            },
+            "after": {
+              "status_counts": {
+                "PASS": 5
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 5
+            },
+            "new_reviews": [],
+            "removed_reviews": [],
+            "corrected_existing_false_pass": []
+          },
+          "quality_defect": {
+            "before": {
+              "status_counts": {
+                "NEEDS_REVIEW": 10,
+                "PASS": 5
+              },
+              "false_pass": 5,
+              "negative_count": 15,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "after": {
+              "status_counts": {
+                "NEEDS_REVIEW": 10,
+                "PASS": 5
+              },
+              "false_pass": 5,
+              "negative_count": 15,
+              "false_reject": 0,
+              "valid_count": 0
+            },
+            "new_reviews": [],
+            "removed_reviews": [],
+            "corrected_existing_false_pass": []
+          },
+          "stress": {
+            "before": {
+              "status_counts": {
+                "PASS": 10,
+                "NEEDS_REVIEW": 20
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 30
+            },
+            "after": {
+              "status_counts": {
+                "PASS": 10,
+                "NEEDS_REVIEW": 20
+              },
+              "false_pass": 0,
+              "negative_count": 0,
+              "false_reject": 0,
+              "valid_count": 30
+            },
+            "new_reviews": [],
+            "removed_reviews": [],
+            "corrected_existing_false_pass": []
+          }
+        }
+      }
+    ]
+  }
+}

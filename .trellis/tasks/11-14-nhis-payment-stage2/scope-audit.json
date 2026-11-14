@@ -1,0 +1,30 @@
+{
+  "existing_changed": [
+    ".trellis/spec/backend/document-form-contracts.md",
+    "engine_v2/docs/payment-structure-dump.md",
+    "engine_v2/extractors/nhis_payment_gov.py"
+  ],
+  "existing_tests_changed": [],
+  "new_test_cases": {
+    "engine": 49,
+    "backend": 18
+  },
+  "recognition_function_unchanged": true,
+  "period_collector_unchanged": true,
+  "other_runtime_files_changed": [],
+  "new_files": [
+    ".trellis/tasks/11-14-nhis-payment-stage2/check.jsonl",
+    ".trellis/tasks/11-14-nhis-payment-stage2/design.md",
+    ".trellis/tasks/11-14-nhis-payment-stage2/implement.jsonl",
+    ".trellis/tasks/11-14-nhis-payment-stage2/implement.md",
+    ".trellis/tasks/11-14-nhis-payment-stage2/prd.md",
+    ".trellis/tasks/11-14-nhis-payment-stage2/research/findings.md",
+    ".trellis/tasks/11-14-nhis-payment-stage2/review.md",
+    ".trellis/tasks/11-14-nhis-payment-stage2/task.json",
+    ".trellis/tasks/11-14-nhis-payment-stage2/validation-results.json",
+    ".trellis/tasks/11-14-nhis-payment-stage2/validation.md",
+    "demo/backend/tests/test_payment_stage2_routes.py",
+    "engine_v2/tests/payment_stage2_samples.py",
+    "engine_v2/tests/test_payment_stage2_structure.py"
+  ]
+}

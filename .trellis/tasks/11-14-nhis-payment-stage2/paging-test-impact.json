@@ -1,0 +1,184 @@
+[
+  {
+    "node": "engine_v2/tests/test_p2_payment_headers.py::test_group_header_glyphs_on_four_lines_still_require_the_ordered_eight_columns",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "engine_v2/tests/test_p2_shape3.py::test_exact_shape_is_complete_with_required_issue_date[payment-\\uac74\\uac15\\ubcf4\\ud5d8\\ub8cc\\ub0a9\\ubd80\\ud655\\uc778\\uc11c]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_income_extracted_review.py::test_extracted_ab_survives_renaming_validation_storage_and_real_review[blank-blank-FAIL]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_income_extracted_review.py::test_extracted_ab_survives_renaming_validation_storage_and_real_review[present-present-PASS]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_income_extracted_review.py::test_extracted_ab_survives_renaming_validation_storage_and_real_review[present-blank-NEEDS_REVIEW]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_income_extracted_review.py::test_extracted_ab_survives_renaming_validation_storage_and_real_review[unreadable-blank-NEEDS_REVIEW]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_p2_payment_facts.py::test_complete_matching_payment_preserves_income_scoring[False]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_p2_payment_facts.py::test_complete_matching_payment_preserves_income_scoring[True]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_p2_payment_facts.py::test_complete_matching_payment_keeps_pipeline_pass[True]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_p2_payment_uploads.py::test_payment_upload_matches_identity_and_persists_all_corrections[False-False]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_p2_payment_uploads.py::test_payment_upload_matches_identity_and_persists_all_corrections[False-True]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_p2_payment_uploads.py::test_payment_upload_matches_identity_and_persists_all_corrections[True-False]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_p2_payment_uploads.py::test_payment_upload_matches_identity_and_persists_all_corrections[True-True]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_p2_payment_uploads.py::test_payment_text_layer_upload_keeps_same_financial_field_contract",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_payment_failure_certainty.py::test_normal_period_and_annual_zero_placeholders_remain_pass",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_payment_failure_certainty.py::test_uncertain_annual_zero_placeholders_do_not_change_other_requested_months",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_payment_failure_certainty.py::test_proven_ocr_corrections_of_annual_zeros_preserve_normal_pass[False]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_payment_failure_certainty.py::test_proven_ocr_corrections_of_annual_zeros_preserve_normal_pass[True]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_payment_stage2_routes.py::test_repaired_shapes_traverse_actual_image_upload_without_changing_average[adjustment]",
+    "existing_on_main": false,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_payment_stage2_routes.py::test_repaired_shapes_traverse_actual_image_upload_without_changing_average[clipped]",
+    "existing_on_main": false,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_payment_stage2_routes.py::test_repaired_shapes_traverse_actual_image_upload_without_changing_average[fused]",
+    "existing_on_main": false,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_review_regressions.py::test_legacy_payment_sum_failure_controls_direct_verdict_and_financial_trust[False-legacy]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_review_regressions.py::test_legacy_payment_sum_failure_controls_direct_verdict_and_financial_trust[False-month-only]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_review_regressions.py::test_legacy_payment_sum_failure_reaches_actual_text_layer_upload[False-month-only]",
+    "existing_on_main": true,
+    "before_unchanged_input": "PASS",
+    "after_unchanged_input": "NEEDS_REVIEW",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_verify_upload.py::test_income_uses_three_real_synthetic_files[normal-MET-X]",
+    "existing_on_main": true,
+    "before_unchanged_input": "income_status: MET",
+    "after_unchanged_input": "income_status: UNDETERMINED; blockers: X",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  },
+  {
+    "node": "demo/backend/tests/test_verify_upload.py::test_income_uses_three_real_synthetic_files[excess-OVER_LIMIT-O]",
+    "existing_on_main": true,
+    "before_unchanged_input": "income_status: OVER_LIMIT; blockers: O",
+    "after_unchanged_input": "income_status: UNDETERMINED; blockers: X",
+    "cause": "No printed folio and no independent markerless-form policy; fresh evidence is UNRESOLVED/ABSENT."
+  }
+]

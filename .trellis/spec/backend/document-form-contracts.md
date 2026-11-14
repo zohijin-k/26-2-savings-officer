@@ -143,7 +143,58 @@ Associate an isolated ordinal with a law-change annotation only when adjacency i
 - Markerless legacy JSON retains prior true booleans and positive date recalculation, including old empty-period representations. New evidence is recalculated for the actual requested year count where its basis is a period or rows. Missing/malformed/contradictory evidence must not become stricter than the prior result or establish an automatic rejection.
 - Regression checks must cover complete recent history with one gap/current blank loss, missing/out-of-table/ambiguous markers, malformed structure, insufficient/readable and unreadable explicit periods, old positive text/image histories, old JSON and low-confidence short periods. Keep prior snapshot digests for pre-existing fields while separately asserting additive JSON keys.
 
+## 15. Payment adjustment and header recovery
+
+- Government payment adjustment separation requires exactly one whole label equal to `nhis_payment_gov.SETTLEMENT_LABEL` (`연말정산`), in a distinct bounded row after month twelve and before the observed sum. Require certain label/cell observations, all required health/care cells, valid optional cells and no unexplained row words. Unknown, duplicate, partially read or misplaced adjustments remain incomplete. Whitespace variants and substring matches are not exact label evidence.
+- Keep adjustments internal. Their eight component values contribute only to the corresponding column equations and paid grand total. They never enter `월별납부내역`, monthly billed maps, the three-month premium average or missing-month replacement. A nonzero adjustment cannot establish a missing monthly cell or override independent period conflict.
+- Header-edge recovery (C2) is held by user direction. Retain the original top-edge component band. Do not restore center-based overlap selection merely because independent paging exists.
+- Split at most one proximity-fused component pair. Require all nine full expected labels in order, certain observations and exactly one whole-fragment assignment whose centers agree with independently observed persistent body corridors. Missing/extra/swapped labels, true merged observations, competing assignments and missing/ambiguous corridors remain incomplete. Do not change shared layout tolerances, infer labels or fall back from an incomplete government form to legacy.
+- Preserve `payment_period.collect`, independent conflict/unreadable evidence and arithmetic-backed zero correction. Do not discard low-confidence out-of-range positives. Normal text uploads and forced batch OCR use different word sources; text references are not merged into batch verdicts.
+- Required regressions: exact/unknown adjustment labels; nonzero/zero adjustment arithmetic and unchanged monthly averages; missing required adjustment/month cells; individual arithmetic/grand-total faults; clipped/fused headers at multiple scales; ambiguous/absent corridors; actual image-PDF uploads; text/forced-own routing and complete-table period-conflict precedence. Add authored fixtures, never private dumps or copied source coordinates.
+
 
 ## 12. Independent file quality
 
 Reading/identity/history uncertainty does not downgrade a separately measured original-resolution defect. The demo upload boundary treats LOW_IMAGE_QUALITY as FAIL while keeping LOW_OCR_CONFIDENCE review-only. Scalable text pages and unknown measurements cannot establish that defect. Preserve additional-page form scope and all other certain findings; see failure-filtering.md sections10–11 for daily selected-history completeness, quality provenance and full blocker-message contracts. This does not modify engine/ rules or income/age/work thresholds.
+
+
+## 16. Payment paging and table-completeness fallback
+
+### Scope / trigger
+
+NHIS_PAYMENT only, in both own and text conversion through `_from_nhis`. Preserve other extractors, period reconciliation, income semantics and upload persistence. C1 exact adjustment and C3 unique cluster splitting remain; C2 stays held.
+
+### Signatures
+
+`payment_paging.collect(pages, uploaded_page_count=...)` emits `납부쪽표기자료`; `payment_completeness.collect(pages, extraction)` emits `납부표완전성자료`. `_check_payment_paging` validates them at `check_document` after ordinary assessment and before quality finalization. No new request parameter or database migration.
+
+### Contracts
+
+- Folios use only whole source observations in bounded upper/lower margin cells outside the table. Support slash/fullwidth-slash positive counters, optional spaces and split tokens, no leading zero, one unique candidate and source confidence at least .85. Dates, periods, money and body fractions are not adopted. Identify connected whole-row date/money token runs before horizontal division; never turn a split date suffix into a counter. A distant independent counter on the same row must remain eligible. If the table ending is unreadable, do not search a purported footer below it.
+- A folio never establishes PASS, including 1/1. Excluding the paging-review finding requires a READABLE nonconflicting printed query range, every requested and printed-range month, actually observed printed total(s), existing arithmetic validations, and issue information read from the received source.
+- Completeness evidence binds the original monthly map, issue date and controlled financial-field representations (including observed totals). Validate digit-string values and require current fields to match the source proof; stale arithmetic flags cannot authorize changed/corrupt amounts or dates. Government proof requires all eight column sums, paid total, headers/columns, sum row and numeric checks. Legacy arithmetic's vacuous `not totals` success is insufficient; require an observed billed total, and validate an observed paid total too.
+- Both inspected codebases retain exactly one replacement file per explicit slot. That file is the slot's complete received set. Complete, high-confidence, consistent printed totals greater than physical file pages establish PAGES_INCOMPLETE FAIL, independently of table/issue success. A later upload replaces the first and is judged from the remaining file. Never aggregate a batch folder into that set. Conflicting totals, invalid metadata or uncertain counters retain REVIEW. Selected same-form counts remain separate for attachment/fallback safety.
+- Missing historical paging evidence preserves compatibility; fresh malformed/unknown evidence retains review. Paging review is manual-inspection only and is not essential-field/quality failure evidence. Existing unrelated confirmed failures survive.
+
+### Validation / error matrix
+
+| Evidence | Payment paging outcome |
+| --- | --- |
+| Full table + confirmed period + printed matching totals + read issue fields; marker absent/unreadable/1/1 | No paging finding; retain all other checks |
+| 1/1 but incomplete table | REVIEW |
+| Missing/conflicting period, missing target month, absent/mismatching total or unread issue fields | REVIEW |
+| Reliable consistent printed total exceeds physical pages in retained slot file | PAGES_INCOMPLETE FAIL, never waived by complete table |
+| Conflicting totals / duplicate current markers / malformed metadata | REVIEW |
+| Date/period/money/body fraction | Not adopted as a counter |
+
+### Good / base / bad cases
+
+Good: a markerless balanced table with confirmed range and source issue date retains its previous assessment. Base: the unchanged synthetic split-page defect is PAGES_INCOMPLETE FAIL in both native own and reference. Bad: waive uncertain query dates with twelve rows, use 1/1 as completeness, or use files from a batch directory as one applicant's received set.
+
+### Required tests
+
+`test_payment_paging_refinement.py` in engine/backend covers expanded margins, formats, dates/money/body exclusion, unknown table ending, required issue-only last-page omission, misread 1/1, split-file non-FAIL, period conflict/unreadability, totals conflicts, missing printed sum, stale amount/date proof and actual own/text PDFs. Preserve prior tests pending an exact approved expectation-impact list. Run all four regression groups plus unchanged 410-pair original-baseline comparison; any new negative PASS stops work.
+
+### Wrong versus correct
+
+Wrong: aggregate unrelated batch-folder files into an upload slot. Correct: the explicit-slot replacement contract makes its retained file the complete received set; require reliable consistent printed excess before FAIL. Wrong: existing arithmetic_complete=True survives changed monthly fields. Correct: validate and bind original source-derived monthly values and issue date before excluding paging review.

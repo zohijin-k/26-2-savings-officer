@@ -41,3 +41,15 @@ The summary reads saved artifacts only. It separates **기준일 정책 사유**
 Per-engine timing covers recognition/classification/extraction/postprocessing once, excluding inventory, comparison and output writing. Per-page distributions include actual successfully processed pages; failed/zero-page attempts are reported separately. Decoder failures, including unsupported HEIC capability, produce fixed error rows and do not stop other files.
 
 Exit codes: 0 completed without processing errors (document FAIL/review and optional unavailable Apple are observations), 1 completed with per-file errors, 2 setup/arguments/location/resume/output errors, 130 interrupted. Run-level failures use the nonzero exit as the signal, without writing an error artifact or printing arguments, paths or exception messages. Summary is read-only on success and failure.
+
+
+## Payment page-counter summary
+
+New successful NHIS_PAYMENT route records optionally retain only `payment_paging` O/X and buckets. `--summarize` prints own, applevision and text_layer adoption counts, total buckets (`1`, `2`, `3_PLUS`, `UNREADABLE`) and `FILE_LOCAL_MISMATCH` counts. The denominator is the route's successful payment records; historical missing evidence and unavailable/error routes are separate. Old result files remain readable without reprocessing or migration.
+
+A mismatch compares the printed total with selected payment pages in that file. It does not aggregate a batch directory into an applicant submission. Both upload codebases retain one replacement file per explicit slot; a reliable consistent printed total greater than the retained file's physical pages produces PAGES_INCOMPLETE FAIL through the shared assessment. A page counter also never proves PASS: the payment range, monthly table, observed totals and source issue information must independently be complete. Run private reassessments yourself with `--ids`; development verification uses synthetic documents only.
+
+
+`QUERY_PERIOD_UNCERTAIN_WAIVER_BLOCKED` counts successful payment files whose source period cannot satisfy the necessary confirmed-period exemption condition. Other incomplete conditions may coexist; the counter does not claim period uncertainty is the sole cause. Historical missing proof is UNREADABLE. No period values are printed.
+
+Same-kind multiple-file folder tables report by route and canonical kind: nonzero first-level folders with two or more successful files of that kind, plus distinct folders with any such duplication. Root files (group0) and error/unavailable/unclassified records are separate. A folder is not verified applicant identity; these counts never combine files for assessment.

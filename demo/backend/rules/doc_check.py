@@ -56,6 +56,7 @@ CODE_NHIS_SUBSCRIBER_IDENTITY_REVIEW = "NHIS_SUBSCRIBER_IDENTITY_REVIEW"
 CODE_PAGES_INCOMPLETE = "PAGES_INCOMPLETE"
 CODE_PAGES_UNREADABLE = "PAGES_UNREADABLE"
 CODE_PAGES_DUPLICATED = "PAGES_DUPLICATED"
+CODE_PAYMENT_PAGING_UNCERTAIN = "NHIS_PAYMENT_PAGING_UNCERTAIN"
 CODE_IMAGE_RESOLUTION_TOO_LOW = "IMAGE_RESOLUTION_TOO_LOW"
 CODE_MISSING_ADDRESS_DATES = "MISSING_ADDRESS_DATES"
 CODE_DAILY_RECORDS_PARTIALLY_SELECTED = "DAILY_RECORDS_PARTIALLY_SELECTED"
@@ -77,6 +78,7 @@ QUALITY_REVIEW_GUIDANCE = "재업로드 없이 이대로 제출할 수 있습니
 #: 사유 코드 → 해결 방법. 공고문 문구와 발급 절차를 그대로 옮긴 것이다.
 #: "무엇이 잘못됐는지"만 말하면 신청자는 또 전화한다. 해결 방법이 같이 있어야 한다.
 HOW_TO_FIX: dict[str, str] = {
+    CODE_PAYMENT_PAGING_UNCERTAIN: "현재 서류는 담당자가 원본과 전체 쪽수를 확인합니다.",
     CODE_DAILY_RECORDS_PARTIALLY_SELECTED: "전체 이력을 선택해 다시 발급받아 올려 주세요",
     CODE_IMAGE_RESOLUTION_TOO_LOW: "선명한 원본(원본 PDF 또는 고해상도 스캔)으로 다시 올려 주세요",
     CODE_MISSING_ADDRESS_DATES: "정부24에서 초본을 발급할 때 주소 변동 사항의 발생일·신고일이 표시되도록 선택해 다시 발급받아 주세요",
@@ -145,6 +147,7 @@ def _has_final_consonant(value: str) -> bool:
 #: NEEDS_REVIEW로만 보내는 코드. 나머지는 확정 부적합(FAIL)이다.
 #: 화면캡처는 오탐 시 신청자가 억울해지므로 자동 반려하지 않는다.
 REVIEW_ONLY_CODES = {
+    CODE_PAYMENT_PAGING_UNCERTAIN,
     "LOW_OCR_CONFIDENCE",
     "NHIS_HISTORY_PERIOD_UNREADABLE",
     CODE_RESIDENT_APPLICANT_UNREADABLE,
@@ -927,6 +930,36 @@ def _check_document(
     return CheckResult(status=status, findings=findings)
 
 
+def _check_payment_paging(ocr: OcrResult, req: DocRequirement) -> list[CheckFinding]:
+    from engine_v2.extractors import payment_paging, payment_completeness
+
+    if ocr.is_encrypted or ocr.detected_doc_type is not DocType.NHIS_PAYMENT:
+        return []
+    raw = ocr.fields.get(payment_paging.FIELD)
+    if raw is None:
+        return []  # Historical rows without new evidence cannot prove an omission.
+    try:
+        data = json.loads(raw)
+        state = payment_paging.assess(data)
+        file_count_valid = (type(ocr.page_count) is int and ocr.page_count > 0 and
+                            isinstance(data, dict) and data.get("uploaded_page_count") == ocr.page_count)
+        # Explicit upload slots replace the previous file. The current file is
+        # the complete submission for that slot; never add files from a folder.
+        if state == "INCOMPLETE" and file_count_valid and data["expected_total"] > ocr.page_count:
+            return [_finding(CODE_PAGES_INCOMPLETE,
+                "납부확인서에 표시된 전체 쪽수보다 받은 쪽이 적습니다. 빠진 쪽까지 모두 올려 주세요.", req)]
+        table = json.loads(ocr.fields.get(payment_completeness.FIELD, "null"))
+        complete = (payment_paging.fallback_allowed(data, ocr.page_count) and
+                    payment_completeness.confirmed(table, ocr.fields, ocr.issue_date, req.premium_months))
+    except (TypeError, ValueError):
+        complete = False
+    if not complete:
+        return [_finding(CODE_PAYMENT_PAGING_UNCERTAIN,
+            "납부확인서의 쪽수 표시 또는 조회기간·월별 표·발급 정보를 확실히 확인하지 못했습니다. "
+            "담당자가 원본을 확인합니다.", req)]
+    return []
+
+
 def check_document(
     req: DocRequirement,
     ocr: OcrResult,
@@ -936,9 +969,12 @@ def check_document(
     related_nhis_docs: list[tuple[str, dict[str, str]]] | None = None,
     suggested_slot_label: str | None = None,
 ) -> CheckResult:
-    """Combine measured quality with the existing essential-field assessment."""
+    """Combine independent payment paging, essential fields and file quality."""
     result = _check_document(req, ocr, declared_issue_date, file_format, identity,
                              related_nhis_docs, suggested_slot_label)
+    for finding in _check_payment_paging(ocr, req):
+        if not any(f.code == finding.code and f.severity == finding.severity for f in result.findings):
+            result.findings.append(finding)
     return finalize_image_quality(req, ocr, result, file_format)
 
 

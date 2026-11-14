@@ -1,0 +1,32 @@
+[
+  {
+    "stage": "own",
+    "input_fingerprint_equal": true,
+    "status": "FAIL",
+    "codes": [
+      {
+        "code": "LOW_OCR_CONFIDENCE",
+        "severity": "NEEDS_REVIEW"
+      },
+      {
+        "code": "MISSING_BILLING_MONTHS",
+        "severity": "NEEDS_REVIEW"
+      },
+      {
+        "code": "PAGES_INCOMPLETE",
+        "severity": "FAIL"
+      }
+    ]
+  },
+  {
+    "stage": "reference",
+    "input_fingerprint_equal": true,
+    "status": "FAIL",
+    "codes": [
+      {
+        "code": "PAGES_INCOMPLETE",
+        "severity": "FAIL"
+      }
+    ]
+  }
+]

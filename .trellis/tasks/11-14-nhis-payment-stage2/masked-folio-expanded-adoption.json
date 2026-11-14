@@ -1,0 +1,120 @@
+{
+  "scope": "MASKED_SHAPE_ONLY_NO_PAGE_VALUES_INTERPRETED",
+  "rows": [
+    {
+      "document": "p001_d02",
+      "engines": {
+        "text_layer": [
+          {
+            "input_available": false,
+            "shape_adopted": "X"
+          }
+        ],
+        "own": [
+          {
+            "input_available": true,
+            "shape_adopted": "X"
+          }
+        ],
+        "applevision": [
+          {
+            "input_available": true,
+            "shape_adopted": "X"
+          }
+        ]
+      }
+    },
+    {
+      "document": "p002_d02",
+      "engines": {
+        "text_layer": [
+          {
+            "input_available": false,
+            "shape_adopted": "X"
+          }
+        ],
+        "own": [
+          {
+            "input_available": true,
+            "shape_adopted": "O"
+          }
+        ],
+        "applevision": [
+          {
+            "input_available": true,
+            "shape_adopted": "O"
+          }
+        ]
+      }
+    },
+    {
+      "document": "p005_d03",
+      "engines": {
+        "text_layer": [
+          {
+            "input_available": false,
+            "shape_adopted": "X"
+          }
+        ],
+        "own": [
+          {
+            "input_available": true,
+            "shape_adopted": "O"
+          }
+        ],
+        "applevision": [
+          {
+            "input_available": true,
+            "shape_adopted": "O"
+          }
+        ]
+      }
+    },
+    {
+      "document": "p006_d01",
+      "engines": {
+        "text_layer": [
+          {
+            "input_available": true,
+            "shape_adopted": "O"
+          }
+        ],
+        "own": [
+          {
+            "input_available": true,
+            "shape_adopted": "O"
+          }
+        ],
+        "applevision": [
+          {
+            "input_available": true,
+            "shape_adopted": "O"
+          }
+        ]
+      }
+    },
+    {
+      "document": "p010_d02",
+      "engines": {
+        "text_layer": [
+          {
+            "input_available": true,
+            "shape_adopted": "O"
+          }
+        ],
+        "own": [
+          {
+            "input_available": true,
+            "shape_adopted": "O"
+          }
+        ],
+        "applevision": [
+          {
+            "input_available": true,
+            "shape_adopted": "O"
+          }
+        ]
+      }
+    }
+  ]
+}

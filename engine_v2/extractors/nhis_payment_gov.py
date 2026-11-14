@@ -19,6 +19,7 @@ COMPONENTS = ("건강보험료", "장기요양보험료", "보수외소득월액
 HEADERS = ("월별", *COMPONENTS, *COMPONENTS)
 OPTIONAL_COLUMNS = (3, 4, 7, 8)
 GROUPS = ("고지금액", "납부금액")
+SETTLEMENT_LABEL = "연말정산"
 
 
 def recognizes(pages) -> bool:
@@ -131,10 +132,9 @@ def _header_clusters(words):
     return clusters
 
 
-def _header_columns(words, expected=HEADERS):
-    clusters = _header_clusters(words)
+def _headers_match(clusters, expected):
     if len(clusters) != len(expected):
-        return None
+        return False
     for index, (cluster, label) in enumerate(zip(clusters, expected)):
         value = squash("".join(line_text(row) for row in common.group_lines(cluster, tol=.25)))
         if expected == HEADERS and index == 0:
@@ -142,8 +142,42 @@ def _header_columns(words, expected=HEADERS):
         else:
             valid = value == label
         if not valid:
-            return None
-    return clusters
+            return False
+    return True
+
+
+def _header_columns(words, expected=HEADERS):
+    clusters = _header_clusters(words)
+    return clusters if _headers_match(clusters, expected) else None
+
+
+def _separate_headers(views, body):
+    """Recover one fused pair only with unique labels and observed body corridors."""
+    candidates = {}
+    for words in views:
+        if any(word.conf < .85 for word in words):
+            continue
+        clusters = _header_clusters(words)
+        if len(clusters) != len(HEADERS) - 1:
+            continue
+        for index, cluster in enumerate(clusters):
+            if index == 0:  # The month anchor cannot supply a component heading.
+                continue
+            ordered = sorted(cluster, key=lambda word: (word.x0 + word.x1) / 2)
+            for split in range(1, len(ordered)):
+                proposed = clusters[:index] + [ordered[:split], ordered[split:]] + clusters[index + 1:]
+                if not _headers_match(proposed, HEADERS):
+                    continue
+                boundaries = forms.table_columns(proposed, [body], optional_columns=OPTIONAL_COLUMNS,
+                                                  minimum_gap_ratio=.5)
+                if boundaries is None or any(
+                    not boundaries[column] < (word.x0 + word.x1) / 2 < boundaries[column + 1]
+                    for column, group in enumerate(proposed) for word in group
+                ):
+                    continue
+                key = tuple(tuple(sorted(id(word) for word in group)) for group in proposed)
+                candidates[key] = proposed
+    return next(iter(candidates.values())) if len(candidates) == 1 else None
 
 
 def _money_cell(words, *, allow_correction, row, column, corrections):
@@ -156,6 +190,34 @@ def _money_cell(words, *, allow_correction, row, column, corrections):
     if categories:
         corrections.append({"row": row, "column": column, "categories": list(categories)})
     return int(normalized.replace(",", "")), True
+
+
+def _settlement_row(body, months, sums, boundaries, *, allow_correction, corrections):
+    """Separate one certain, exactly labeled adjustment; never supply month values."""
+    labels = [word for word in body if word.text == SETTLEMENT_LABEL]
+    if len(labels) != 1:
+        return body, None, not labels
+    label = labels[0]
+    pitch = min(b.cy - a.cy for a, b in zip(months, months[1:]))
+    sum_y = sum(word.cy for word in sums) / len(sums)
+    if (label.conf < .85 or label.cy <= months[-1].cy + pitch * .45 or
+            label.cy >= sum_y - max(word.y1 - word.y0 for word in sums) * .8):
+        return body, None, False
+    band = [word for word in body if abs(word.cy - label.cy) <= pitch * .45]
+    top, bottom = (months[-1].cy + label.cy) / 2, (label.cy + sum_y) / 2
+    cells = forms.column_cells(band, boundaries)
+    if (cells is None or _text(cells[0]) != SETTLEMENT_LABEL or
+            any(word.y0 < top or word.y1 > bottom or word.conf < .85 for word in band)):
+        return body, None, False
+    values = []
+    for column, cell in enumerate(cells[1:], 1):
+        amount, numeric = _money_cell(cell, allow_correction=allow_correction,
+                                      row=SETTLEMENT_LABEL, column=column, corrections=corrections)
+        if not numeric or (amount is None and column not in OPTIONAL_COLUMNS):
+            return body, None, False
+        values.append(amount)
+    selected = {id(word) for word in band}
+    return [word for word in body if id(word) not in selected], values, True
 
 
 def _monthly_table(lines, *, allow_correction, metadata_bottom):
@@ -182,15 +244,18 @@ def _monthly_table(lines, *, allow_correction, metadata_bottom):
     sums = _unique_label(lines, "합계")
     sum_y = sum(word.cy for word in sums) / len(sums) if sums else float('inf')
     first_y = min((word.y0 for word in months), default=float('-inf'))
+    sum_height = max((word.y1 - word.y0 for word in sums), default=0)
+    body = [word for word in words if first_y <= word.cy <= sum_y + sum_height * .8]
     header_words = [word for word in words if word.y0 > group_bottom and word.cy < first_y]
     headers = _header_columns(header_words) if group_ok and months else None
+    views = [header_words]
+    if headers is None and group_ok and months and sums:
+        headers = _separate_headers(views, body)
     alignment = headers is not None and all(
         min(word.x0 for word in headers[start]) < sum((word.x0 + word.x1) / 2 for word in group) / len(group)
         < max(word.x1 for word in headers[end])
         for group, start, end in zip(groups, (1, 5), (4, 8)))
     checks.append(common.Validation("payment_component_headers", bool(alignment)))
-    sum_height = max((word.y1 - word.y0 for word in sums), default=0)
-    body = [word for word in words if first_y <= word.cy <= sum_y + sum_height * .8]
     boundaries = forms.table_columns(headers, [body], optional_columns=OPTIONAL_COLUMNS,
                                      minimum_gap_ratio=.5) if headers and sums else None
     checks.append(common.Validation("payment_columns", boundaries is not None))
@@ -198,10 +263,12 @@ def _monthly_table(lines, *, allow_correction, metadata_bottom):
     if not months_ok or boundaries is None or not sums or sum_y <= months[-1].cy:
         return [], [], corrections, checks, {}
 
+    body, settlement, settlement_ok = _settlement_row(
+        body, months, sums, boundaries, allow_correction=allow_correction, corrections=corrections)
     row_height = min(b.cy - a.cy for a, b in zip(months, months[1:]))
     bands = [[] for _ in months]
     sum_words = []
-    rows_ok = True
+    rows_ok = settlement_ok
     for word in body:
         if abs(word.cy - sum_y) <= max(item.y1 - item.y0 for item in sums) * .8:
             sum_words.append(word)
@@ -251,6 +318,8 @@ def _monthly_table(lines, *, allow_correction, metadata_bottom):
     absence_matches = []
     for column in range(8):
         observed = [row[column] for row in values]
+        if settlement is not None:
+            observed.append(settlement[column])
         total = totals[column] if len(totals) == 8 else None
         empty = not any(value is not None for value in observed)
         matches.append(total_numeric and rows_ok and len(values) == 12 and

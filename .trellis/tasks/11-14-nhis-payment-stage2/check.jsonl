@@ -1,0 +1,11 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend entry point and final verification"}
+{"file": ".trellis/spec/backend/document-form-contracts.md", "reason": "Bounded payment structure, arithmetic and conservative evidence"}
+{"file": ".trellis/spec/backend/payment-structure-dump.md", "reason": "Masking boundaries and diagnostic limitations; stage-1 runtime freeze does not forbid approved stage-2 fixes"}
+{"file": ".trellis/spec/backend/documentai-measurement.md", "reason": "Frozen paired-v2 measurement and false-pass denominators"}
+{"file": ".trellis/tasks/11-14-nhis-payment-stage2/research/findings.md", "reason": "Investigated causes, synthetic probes and limits"}
+{"file": ".trellis/tasks/11-14-nhis-payment-stage2/paging-design.md", "reason": "Superseding paging plan, independent evidence, markerless limits and dual rate gates"}
+{"file": ".trellis/tasks/11-14-nhis-payment-stage2/paging-investigation.md", "reason": "Causal ablation, original reason codes and held control"}
+{"file": ".trellis/spec/backend/failure-filtering.md", "reason": "Independent defects and review-only paging must not create new quality rejections"}
+{"file": ".trellis/spec/backend/verify-cases.md", "reason": "Safe finding-code vocabulary and shared assessment contracts"}
+{"file": ".trellis/tasks/11-14-nhis-payment-stage2/paging-refinement-review.md", "reason": "Preserve 26 unchanged assertions, positive omission FAIL precedence, no final full-suite claim from isolated experiment"}
+{"file": ".trellis/tasks/11-14-nhis-payment-stage2/paging-single-file-upload-audit.md", "reason": "Single-file omission proof, approved19 test adjustments, whole-row date exclusion and source financial binding"}

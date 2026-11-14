@@ -1,0 +1,232 @@
+[
+  {
+    "document": "p001_d02",
+    "engines": {
+      "text_layer": [
+        {
+          "word_input_available": false,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": []
+        }
+      ],
+      "own": [
+        {
+          "word_input_available": true,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": []
+        }
+      ],
+      "applevision": [
+        {
+          "word_input_available": true,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": []
+        }
+      ]
+    }
+  },
+  {
+    "document": "p002_d02",
+    "engines": {
+      "text_layer": [
+        {
+          "word_input_available": false,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": []
+        }
+      ],
+      "own": [
+        {
+          "word_input_available": true,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": [
+            {
+              "token_count": 1,
+              "upper_margin": false,
+              "upper_right_band": true,
+              "confident": true
+            }
+          ]
+        }
+      ],
+      "applevision": [
+        {
+          "word_input_available": true,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": [
+            {
+              "token_count": 1,
+              "upper_margin": false,
+              "upper_right_band": true,
+              "confident": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "document": "p005_d03",
+    "engines": {
+      "text_layer": [
+        {
+          "word_input_available": false,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": []
+        }
+      ],
+      "own": [
+        {
+          "word_input_available": true,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": [
+            {
+              "token_count": 1,
+              "upper_margin": false,
+              "upper_right_band": true,
+              "confident": true
+            }
+          ]
+        }
+      ],
+      "applevision": [
+        {
+          "word_input_available": true,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": [
+            {
+              "token_count": 1,
+              "upper_margin": false,
+              "upper_right_band": true,
+              "confident": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "document": "p006_d01",
+    "engines": {
+      "text_layer": [
+        {
+          "word_input_available": true,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": [
+            {
+              "token_count": 1,
+              "upper_margin": false,
+              "upper_right_band": true,
+              "confident": true
+            }
+          ]
+        }
+      ],
+      "own": [
+        {
+          "word_input_available": true,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": [
+            {
+              "token_count": 1,
+              "upper_margin": false,
+              "upper_right_band": true,
+              "confident": true
+            }
+          ]
+        }
+      ],
+      "applevision": [
+        {
+          "word_input_available": true,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": [
+            {
+              "token_count": 1,
+              "upper_margin": false,
+              "upper_right_band": true,
+              "confident": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "document": "p010_d02",
+    "engines": {
+      "text_layer": [
+        {
+          "word_input_available": true,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": [
+            {
+              "token_count": 1,
+              "upper_margin": false,
+              "upper_right_band": true,
+              "confident": true
+            }
+          ]
+        }
+      ],
+      "own": [
+        {
+          "word_input_available": true,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": [
+            {
+              "token_count": 1,
+              "upper_margin": false,
+              "upper_right_band": true,
+              "confident": true
+            }
+          ]
+        }
+      ],
+      "applevision": [
+        {
+          "word_input_available": true,
+          "complete_marker_shape_count": 0,
+          "confident_unique_shape": false,
+          "observations": [],
+          "whole_token_shapes_anywhere": [
+            {
+              "token_count": 1,
+              "upper_margin": false,
+              "upper_right_band": true,
+              "confident": true
+            }
+          ]
+        }
+      ]
+    }
+  }
+]

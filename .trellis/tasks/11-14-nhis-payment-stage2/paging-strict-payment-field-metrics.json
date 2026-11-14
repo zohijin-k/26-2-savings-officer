@@ -1,0 +1,48 @@
+[
+  {
+    "stage": "own",
+    "before": {
+      "raw_correct": 492,
+      "normalized_correct": 492,
+      "called": 910,
+      "raw_cer": 0.7084249084249085,
+      "normalized_cer": 0.6914473684210526,
+      "missing": 365,
+      "unextracted": 195,
+      "errors": 0
+    },
+    "after": {
+      "raw_correct": 668,
+      "normalized_correct": 668,
+      "called": 910,
+      "raw_cer": 0.22490842490842491,
+      "normalized_cer": 0.22828947368421051,
+      "missing": 189,
+      "unextracted": 195,
+      "errors": 0
+    }
+  },
+  {
+    "stage": "reference",
+    "before": {
+      "raw_correct": 765,
+      "normalized_correct": 765,
+      "called": 845,
+      "raw_cer": 0.1339031339031339,
+      "normalized_cer": 0.13107287449392713,
+      "missing": 80,
+      "unextracted": 260,
+      "errors": 0
+    },
+    "after": {
+      "raw_correct": 765,
+      "normalized_correct": 765,
+      "called": 845,
+      "raw_cer": 0.1339031339031339,
+      "normalized_cer": 0.13107287449392713,
+      "missing": 80,
+      "unextracted": 260,
+      "errors": 0
+    }
+  }
+]

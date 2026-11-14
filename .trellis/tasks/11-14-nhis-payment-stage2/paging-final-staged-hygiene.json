@@ -1,0 +1,16 @@
+{
+  "staged_files_expected": 63,
+  "secret_key_pattern_matches": 0,
+  "literal_key_prefix_matches": 0,
+  "private_source_paths_staged": 0,
+  "masked_input_paths_staged": 0,
+  "private_source_path_mentions": 0,
+  "masked_input_path_mentions": 0,
+  "masked_inputs_count": 5,
+  "masked_inputs_ignored_count": 5,
+  "masked_inputs_tracked_count": 0,
+  "real_document_provenance": "Only authorized masked structures inspected; no original real documents read, no masked values or source coordinates copied. Test values are authored synthetic.",
+  "applicant_checkout_modified": false,
+  "commit_created": false,
+  "verification": "Rechecked against staged blob bytes after staging this report; final counts recorded in ignored operator evidence."
+}

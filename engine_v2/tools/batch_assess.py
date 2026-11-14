@@ -315,8 +315,19 @@ def _engine_record(state="NOT_REQUESTED", code="ENGINE_NOT_REQUESTED", exception
             "fields": {}, "seconds": 0.0, "processed_pages": 0, "seconds_per_page": None}
 
 
+def _validate_payment_paging(value):
+    _require(isinstance(value, dict) and set(value) == {"adopted", "total_bucket", "count_mismatch"})
+    _require(_member(value["adopted"], {"O", "X"}) and
+             _member(value["total_bucket"], {"1", "2", "3_PLUS", "UNREADABLE"}) and
+             _member(value["count_mismatch"], {"O", "X", "UNREADABLE"}))
+    _require((value["total_bucket"] == value["count_mismatch"] == "UNREADABLE")
+             if value["adopted"] == "X" else
+             value["total_bucket"] != "UNREADABLE" and value["count_mismatch"] != "UNREADABLE")
+
+
 def _validate_engine(value):
-    _require(isinstance(value, dict) and set(value) == set(_engine_record()))
+    required = set(_engine_record())
+    _require(isinstance(value, dict) and required <= set(value) <= required | {"payment_paging", "payment_period_waiver"})
     _require(_member(value["state"], STATES) and _member(value["code"], CODES))
     _require(_member(value["detected_type"], KINDS))
     _require(value["exception"] is None or (isinstance(value["exception"], str) and
@@ -326,6 +337,12 @@ def _validate_engine(value):
     _require(per is None if value["processed_pages"] == 0 else _number(per) and
              math.isclose(per, value["seconds"] / value["processed_pages"], rel_tol=1e-9))
     _field_map(value["fields"], value["detected_type"], value["state"] == "OK")
+    if "payment_paging" in value:
+        _require(value["state"] == "OK" and value["detected_type"] == "NHIS_PAYMENT")
+        _validate_payment_paging(value["payment_paging"])
+    if "payment_period_waiver" in value:
+        _require(value["state"] == "OK" and value["detected_type"] == "NHIS_PAYMENT" and
+                 _member(value["payment_period_waiver"], {"O", "X", "UNREADABLE"}))
 
 
 def _comparison(code="NOT_APPLICABLE"):
@@ -601,6 +618,20 @@ def _engine(path, pages, engine, reference=None):
         record["detected_type"] = kind
         values = _field_values(kind, raw)
         record["fields"] = {key: "O" if key in values else "X" for key in FIELDS.get(kind, ())}
+        if kind == "NHIS_PAYMENT":
+            from engine_v2.extractors import payment_completeness, payment_paging
+            try:
+                paging = json.loads(ocr.fields.get(payment_paging.FIELD, ""))
+            except (TypeError, ValueError):
+                paging = None
+            record["payment_paging"] = payment_paging.statistics(paging)
+            _validate_payment_paging(record["payment_paging"])
+            try:
+                completeness = json.loads(ocr.fields.get(payment_completeness.FIELD, ""))
+            except (TypeError, ValueError):
+                completeness = None
+            record["payment_period_waiver"] = payment_completeness.period_statistics(completeness)
+            _require(_member(record["payment_period_waiver"], {"O", "X", "UNREADABLE"}))
         return record, ocr, values
     except Exception as exc:
         optional_missing = engine == "applevision" and stage == "OCR_ERROR" and isinstance(exc, (ImportError, NotImplementedError))
@@ -856,6 +887,52 @@ def summarize(out):
     for engine in ("own", "applevision"):
         states = Counter(r["engines"][engine]["state"] for r in rows)
         _table("엔진 상태 " + engine, [(key, _rate(states[key], total)) for key in ("OK", "SKIPPED", "ERROR", "NOT_REQUESTED")])
+    for route in ("own", "applevision", "text_layer"):
+        records = [row["text_reference"] if route == "text_layer" else row["engines"][route] for row in rows]
+        eligible = [record for record in records
+                    if record["state"] == "OK" and record["detected_type"] == "NHIS_PAYMENT"]
+        unknown = {"adopted": "X", "total_bucket": "UNREADABLE", "count_mismatch": "UNREADABLE"}
+        projections = [record.get("payment_paging", unknown) for record in eligible]
+        count = len(eligible)
+        states = Counter(record["state"] for record in records)
+        # These projections do not mutate assessment. The shared consumer applies
+        # the application's one-file slot contract independently.
+        _table("납부확인서 쪽수 표시 " + route,
+               [("PAYMENT_OK", _rate(count, total)),
+                ("EVIDENCE_ABSENT", _rate(sum("payment_paging" not in record for record in eligible), count)),
+                ("PERIOD_EVIDENCE_ABSENT", _rate(sum("payment_period_waiver" not in record for record in eligible), count))] +
+               [(label, _rate(sum(record.get("payment_period_waiver", "UNREADABLE") == mark
+                                 for record in eligible), count))
+                for label, mark in (("QUERY_PERIOD_UNCERTAIN_WAIVER_BLOCKED", "O"),
+                                    ("QUERY_PERIOD_READABLE", "X"), ("QUERY_PERIOD_UNREADABLE", "UNREADABLE"))] +
+               [("ADOPTED_" + mark, _rate(sum(p["adopted"] == mark for p in projections), count))
+                for mark in ("O", "X")] +
+               [("TOTAL_" + bucket, _rate(sum(p["total_bucket"] == bucket for p in projections), count))
+                for bucket in ("1", "2", "3_PLUS", "UNREADABLE")] +
+               [("FILE_LOCAL_MISMATCH_" + mark, _rate(sum(p["count_mismatch"] == mark for p in projections), count))
+                for mark in ("O", "X", "UNREADABLE")] +
+               [(state, _rate(states[state], total))
+                for state in ("SKIPPED", "ERROR", "NOT_REQUESTED", "NOT_APPLICABLE")])
+    for route in ("own", "applevision", "text_layer"):
+        classified = []
+        folders = defaultdict(Counter)
+        for row in rows:
+            record = row["text_reference"] if route == "text_layer" else row["engines"][route]
+            if record["state"] != "OK" or record["detected_type"] == "X":
+                continue
+            classified.append(row["group"])
+            if row["group"] > 0:
+                folders[row["group"]][record["detected_type"]] += 1
+        # Numeric group IDs identify first-level folders only. They establish no
+        # applicant relationship, and root files cannot form a duplicate group.
+        kinds = sorted({kind for counts in folders.values() for kind in counts})
+        _table("폴더별 동일 종류 복수 파일 " + route,
+               [("DUPLICATE_GROUPS", _rate(sum(any(n >= 2 for n in counts.values())
+                                               for counts in folders.values()), len(folders))),
+                ("ROOT_CLASSIFIED_FILES", _rate(classified.count(0), len(classified))),
+                ("EXCLUDED_ERROR_OR_UNCLASSIFIED_FILES", _rate(total - len(classified), total))] +
+               [(kind, _rate(sum(counts[kind] >= 2 for counts in folders.values()),
+                             sum(counts[kind] >= 1 for counts in folders.values()))) for kind in kinds])
     reasons = Counter(reason["code"] for row in rows for reason in {item["code"]: item for item in row["reasons"]}.values())
     for title, selected in (("기준일 정책 사유", DATE_CODES), ("판독 품질 사유", QUALITY_CODES),
                             ("기타 서류 단위 사유", set(reasons) - DATE_CODES - QUALITY_CODES)):

@@ -1,0 +1,47 @@
+{
+  "focused": {
+    "passed": 107
+  },
+  "engine": {
+    "passed": 1748,
+    "skipped": 3,
+    "xfailed": 3,
+    "baseline_passed": 1641,
+    "added": 107
+  },
+  "backend": {
+    "passed": 1410,
+    "xfailed": 2
+  },
+  "scenarios": {
+    "modules": 18,
+    "checks": 1885,
+    "failures": 0
+  },
+  "frontend": {
+    "tsc_exit": 0,
+    "oxlint_exit": 0,
+    "vite_exit": 0
+  },
+  "synthetic_smoke": {
+    "documents": 1,
+    "pages": 1,
+    "engines": 2,
+    "variants": 3,
+    "successes": 6,
+    "processing_seconds": 15.149907335639,
+    "wall_seconds": 16.693370915949345
+  },
+  "old_test_changes": 0,
+  "operating_code_changes": 0,
+  "commits": 0,
+  "staged_scan": {
+    "api_key_prefix": 0,
+    "private_storage": 0,
+    "masked_dump": 0,
+    "real_input_path": 0,
+    "real_output_path": 0,
+    "absolute_home_paths": 0
+  },
+  "staged_files": 22
+}

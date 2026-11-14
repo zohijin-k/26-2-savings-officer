@@ -28,6 +28,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Value-free batch assessment](./batch-assess.md) | Resumable per-document JSONL, local engines, policy-separated summaries and synthetic-only verification | Active |
 | [Payment structure dump](./payment-structure-dump.md) | Exact constant-label masking, provider geometry, scoped value-free diagnostics and synthetic verification | Active |
 | [DocumentAI measurement](./documentai-measurement.md) | Own-only observation, exact/CER denominators, synthetic matrix and private silver-reference safety | Active |
+| [OCR baseline measurement](./ocr-baseline.md) | Page OCR/field agreement, symmetric masking, payment tables and private resumable metrics | Active |
 
 ---
 

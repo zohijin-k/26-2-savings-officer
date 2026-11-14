@@ -64,6 +64,10 @@ class Document:
     declared_issue_date: Optional[date] = None  # 사용자가 업로드 시 직접 입력한 발급일
     extracted_fields: dict = field(default_factory=dict)  # {"성명": "...", "생년월일": "...", ...}
     is_encrypted_or_corrupted: bool = False
+    classification_succeeded: Optional[bool] = None
+    required_fields_readable: Optional[bool] = None
+    # Preserve a separately confirmed document defect when quality needs review.
+    has_confirmed_document_failure: bool = False
 
 
 @dataclass

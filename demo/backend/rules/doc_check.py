@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 from datetime import date
 import json
 
-from ..engine_adapter import engine_check_single_document, engine_config, engine_models
+from ..engine_adapter import (IMAGE_QUALITY_REVIEW_MESSAGE, engine_check_single_document,
+                              engine_config, engine_image_quality_status, engine_models)
 from ..ocr.base import OcrResult
 from .doc_types import DocType
 from .identity import Identity, compare, nhis_subscriber_assessment
@@ -70,6 +71,8 @@ QUALITY_REUPLOAD_GUIDANCE = (
     "발급처에서 PDF로 받아 그대로 올리는 것이 가장 확실합니다. "
     "사진은 서류 전체가 똑바로, 밝고 선명하게 나오게 다시 찍어 올려 주세요."
 )
+
+QUALITY_REVIEW_GUIDANCE = "재업로드 없이 이대로 제출할 수 있습니다. 담당자가 원본을 확인합니다."
 
 #: 사유 코드 → 해결 방법. 공고문 문구와 발급 절차를 그대로 옮긴 것이다.
 #: "무엇이 잘못됐는지"만 말하면 신청자는 또 전화한다. 해결 방법이 같이 있어야 한다.
@@ -154,6 +157,17 @@ REVIEW_ONLY_CODES = {
     CODE_UNKNOWN_DOCUMENT_TYPE,
     CODE_RECEIPT_AMOUNT_UNREADABLE,
     CODE_REQUIRED_FIELD_UNREADABLE,
+}
+
+ESSENTIAL_FIELD_UNREADABLE_CODES = {
+    CODE_REQUIRED_FIELD_UNREADABLE,
+    CODE_RESIDENT_APPLICANT_UNREADABLE,
+    CODE_RECEIPT_AMOUNT_UNREADABLE,
+    "RECEIPT_OCR_UNAVAILABLE",
+    "NHIS_HISTORY_PERIOD_UNREADABLE",
+    "ADMIN_CONSENT_IDENTITY_UNREADABLE",
+    "ADMIN_CONSENT_MARK_UNREADABLE",
+    "ADMIN_CONSENT_SIGNATURE_UNREADABLE",
 }
 
 
@@ -922,17 +936,41 @@ def check_document(
     related_nhis_docs: list[tuple[str, dict[str, str]]] | None = None,
     suggested_slot_label: str | None = None,
 ) -> CheckResult:
-    """Keep objective file quality independent of reading/identity uncertainty."""
+    """Combine measured quality with the existing essential-field assessment."""
     result = _check_document(req, ocr, declared_issue_date, file_format, identity,
                              related_nhis_docs, suggested_slot_label)
+    return finalize_image_quality(req, ocr, result, file_format)
+
+
+def finalize_image_quality(
+    req: DocRequirement,
+    ocr: OcrResult,
+    result: CheckResult,
+    file_format: str = "pdf",
+) -> CheckResult:
+    """Apply the shared quality policy after required-field observations settle."""
     if not ocr.is_encrypted:
-        # The reader measures original source resolution independently of OCR.
-        # Apply this after all early returns and identity-related downgrades.
         result.findings[:] = [f for f in result.findings if f.code != "LOW_IMAGE_QUALITY"]
         specific_resolution = any(f.code == CODE_IMAGE_RESOLUTION_TOO_LOW for f in result.findings)
-        if ocr.image_quality < engine_config.IMAGE_QUALITY_THRESHOLD and not specific_resolution:
-            result.findings.append(_finding("LOW_IMAGE_QUALITY",
-                "이미지가 흐리거나 작아 읽을 수 없습니다.", req))
+        required_fields_unreadable = any(
+            f.code in ESSENTIAL_FIELD_UNREADABLE_CODES
+            or f.code == CODE_MISSING_BILLING_MONTHS and f.severity == "NEEDS_REVIEW"
+            or f.code == CODE_NHIS_SUBSCRIBER_IDENTITY_REVIEW
+            and not str(ocr.fields.get("성명") or ocr.fields.get("가입자성명") or "").strip()
+            for f in result.findings
+        )
+        quality_status = engine_image_quality_status(
+            ocr.image_quality,
+            classification_succeeded=ocr.detected_doc_type is not None,
+            required_fields_readable=not required_fields_unreadable,
+        )
+        if quality_status != engine_models.Status.PASS and not specific_resolution:
+            finding = _finding("LOW_IMAGE_QUALITY", "이미지가 흐리거나 작아 읽을 수 없습니다.", req)
+            finding.severity = quality_status.value
+            if quality_status == engine_models.Status.NEEDS_REVIEW:
+                finding.message = IMAGE_QUALITY_REVIEW_MESSAGE
+                finding.how_to_fix = QUALITY_REVIEW_GUIDANCE
+            result.findings.append(finding)
         result.status = ("FAIL" if any(f.severity == "FAIL" for f in result.findings) else
                          "NEEDS_REVIEW" if any(f.severity == "NEEDS_REVIEW" for f in result.findings) else "PASS")
     if file_format.lower() == "pdf":

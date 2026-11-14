@@ -15,6 +15,23 @@ from .models import (
 from .reason_messages import render
 
 
+IMAGE_QUALITY_REVIEW_MESSAGE = "화질이 권장 기준에 미달하여 담당자가 원본을 확인합니다."
+
+
+def image_quality_status(
+    image_quality_score: float,
+    *,
+    classification_succeeded: bool | None = None,
+    required_fields_readable: bool | None = None,
+) -> Status:
+    """Grade measured quality using the existing document-reading assessment."""
+    if not image_quality_score < config.IMAGE_QUALITY_THRESHOLD:
+        return Status.PASS
+    if classification_succeeded is True and required_fields_readable is True:
+        return Status.NEEDS_REVIEW
+    return Status.FAIL
+
+
 def _find_confusion_group(doc_type: str) -> set[str] | None:
     for group in config.DOCUMENT_TYPE_CONFUSION_GROUPS:
         if doc_type in group:
@@ -31,9 +48,16 @@ def check_single_document(doc: Document, spec) -> list[Finding]:
                                  doc_type=spec.doc_type))
         return findings  # 파일을 못 열면 이후 검사는 의미 없음
 
-    if doc.image_quality_score < config.IMAGE_QUALITY_THRESHOLD:
+    quality_status = image_quality_status(
+        doc.image_quality_score,
+        classification_succeeded=doc.classification_succeeded,
+        required_fields_readable=doc.required_fields_readable,
+    )
+    if quality_status != Status.PASS:
+        message = (IMAGE_QUALITY_REVIEW_MESSAGE if quality_status == Status.NEEDS_REVIEW else
+                   render(ReasonCode.LOW_IMAGE_QUALITY, doc_type=spec.doc_type))
         findings.append(Finding(ReasonCode.LOW_IMAGE_QUALITY,
-                                 render(ReasonCode.LOW_IMAGE_QUALITY, doc_type=spec.doc_type),
+                                 message,
                                  doc_type=spec.doc_type))
 
     if spec.requires_signature and doc.has_signature is False:
@@ -81,10 +105,23 @@ def check_single_document(doc: Document, spec) -> list[Finding]:
 def run_stage1(applicant: Applicant, documents: list[Document], required_documents=None) -> StageResult:
     specs = required_documents if required_documents is not None else config.REQUIRED_DOCUMENTS.get(applicant.program, [])
     submitted_by_type = {d.doc_type: d for d in documents}
+    quality_checks = [
+        (doc, image_quality_status(
+            doc.image_quality_score,
+            classification_succeeded=doc.classification_succeeded,
+            required_fields_readable=doc.required_fields_readable,
+        ))
+        for doc in documents
+        if doc.classification_succeeded is not None or doc.required_fields_readable is not None
+    ]
 
     findings: list[Finding] = []
-    hard_fail = False       # 확정 부적합 (서류 누락, 오분류 등)
-    needs_review = False    # 애매함 (OCR 신뢰도 낮음)
+    hard_fail = any(
+        status == Status.FAIL or status == Status.NEEDS_REVIEW and doc.has_confirmed_document_failure
+        for doc, status in quality_checks
+    )
+    needs_review = any(status == Status.NEEDS_REVIEW for _, status in quality_checks)
+    checked_documents: set[int] = set()
 
     for spec in specs:
         doc = submitted_by_type.get(spec.doc_type)
@@ -109,13 +146,26 @@ def run_stage1(applicant: Applicant, documents: list[Document], required_documen
             hard_fail = True
             continue
 
+        checked_documents.add(id(doc))
         doc_findings = check_single_document(doc, spec)
+        quality_status = image_quality_status(
+            doc.image_quality_score,
+            classification_succeeded=doc.classification_succeeded,
+            required_fields_readable=doc.required_fields_readable,
+        )
         for f in doc_findings:
             findings.append(f)
-            if f.code in (ReasonCode.LOW_OCR_CONFIDENCE, ReasonCode.DECLARED_DATE_UNCERTAIN):
+            if (f.code in (ReasonCode.LOW_OCR_CONFIDENCE, ReasonCode.DECLARED_DATE_UNCERTAIN)
+                    or f.code == ReasonCode.LOW_IMAGE_QUALITY and quality_status == Status.NEEDS_REVIEW):
                 needs_review = True
             else:
                 hard_fail = True
+
+    for doc, quality_status in quality_checks:
+        if id(doc) not in checked_documents and quality_status != Status.PASS:
+            message = (IMAGE_QUALITY_REVIEW_MESSAGE if quality_status == Status.NEEDS_REVIEW else
+                       render(ReasonCode.LOW_IMAGE_QUALITY, doc_type=doc.doc_type))
+            findings.append(Finding(ReasonCode.LOW_IMAGE_QUALITY, message, doc_type=doc.doc_type))
 
     if hard_fail:
         status = Status.FAIL

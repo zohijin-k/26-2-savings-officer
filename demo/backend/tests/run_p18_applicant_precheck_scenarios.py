@@ -46,11 +46,11 @@ def review(name, result, code):
     check(name + " 재촬영 안내", all(bool(f.how_to_fix) for f in result.findings), True)
 
 
-def quality_rejection(name, result):
-    check(name + " 상태", result.status, "FAIL")
+def quality_review(name, result):
+    check(name + " 상태", result.status, "NEEDS_REVIEW")
     check(name + " 사유", "LOW_IMAGE_QUALITY" in result.codes, True)
-    check(name + " 확정 화질 FAIL", any(f.code == "LOW_IMAGE_QUALITY" and f.severity == "FAIL" for f in result.findings), True)
-    check(name + " PDF 재발급 안내", any("PDF로 받아" in f.how_to_fix for f in result.findings if f.code == "LOW_IMAGE_QUALITY"), True)
+    check(name + " 담당자 화질 확인", any(f.code == "LOW_IMAGE_QUALITY" and f.severity == "NEEDS_REVIEW" for f in result.findings), True)
+    check(name + " 제출 후 원본 확인 안내", any("이대로 제출" in f.how_to_fix for f in result.findings if f.code == "LOW_IMAGE_QUALITY"), True)
 
 
 def resident_words(marker="1/1", *, name=IDENTITY.name, birth="1999-01-01", index=0):
@@ -159,7 +159,7 @@ def test_uncertainty(complete):
     history = DocRequirement("nhis_acquisition_loss", DocType.NHIS_ACQUISITION_LOSS, "자격득실확인서", recent_years=5)
     review("조회기간 미판독", check_document(history, OcrResult(DocType.NHIS_ACQUISITION_LOSS, 1.0, fields={"자격이력자료": "읽기실패"})), "NHIS_HISTORY_PERIOD_UNREADABLE")
     review("조회기간 자료 없음", check_document(history, OcrResult(DocType.NHIS_ACQUISITION_LOSS, 1.0)), "NHIS_HISTORY_PERIOD_UNREADABLE")
-    quality_rejection("저화질", check_document(req, replace(complete, image_quality=engine_config.IMAGE_QUALITY_THRESHOLD - 0.01), identity=IDENTITY))
+    quality_review("저화질", check_document(req, replace(complete, image_quality=engine_config.IMAGE_QUALITY_THRESHOLD - 0.01), identity=IDENTITY))
     for field in ("초본신청인성명", "초본신청인생년월일"):
         fields = dict(complete.fields)
         fields.pop(field)

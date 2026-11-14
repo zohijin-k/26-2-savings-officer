@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend package entry and quality scope"}
+{"file": ".trellis/spec/backend/failure-filtering.md", "reason": "Confirmed failure, essential unreadability, applicant filtering and blockers"}
+{"file": ".trellis/spec/backend/document-form-contracts.md", "reason": "Existing form evidence and grade boundaries"}
+{"file": ".trellis/spec/backend/documentai-measurement.md", "reason": "Synthetic-only paired measurement and stable denominators"}
+{"file": ".trellis/spec/frontend/officer-documents.md", "reason": "Officer grade rendering and non-PASS grouping"}
+{"file": ".trellis/tasks/11-14-quality-fail-calibration/research/quality-flow.md", "reason": "Current ordering, postprocessing, submission recheck and screen findings"}
+{"file": ".trellis/tasks/11-14-quality-fail-calibration/research/test-impact.md", "reason": "Exact existing expectation approval inventory and preserved regressions"}
+{"file": ".trellis/tasks/11-14-quality-fail-calibration/research/validation.md", "reason": "Final full-suite, scenario and independent review evidence"}
+{"file": ".trellis/tasks/11-14-quality-fail-calibration/research/measurement-comparison.md", "reason": "Final paired before/after verdict safety gate and case changes"}

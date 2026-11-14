@@ -13,7 +13,7 @@ from typing import Any
 from .ocr import read_document
 from .models import Document
 from .ocr.base import BBox, OcrResult
-from .rules.doc_check import CheckFinding, CheckResult, check_document
+from .rules.doc_check import CheckFinding, CheckResult, check_document, finalize_image_quality
 from .rules.doc_types import DocType
 from .rules.identity import Identity
 from .rules.required_docs import DocRequirement, find_slot
@@ -130,7 +130,7 @@ def assess_upload(
             if result.status == "PASS":
                 result.status = "NEEDS_REVIEW"
 
-    return ocr, result
+    return ocr, finalize_image_quality(req, ocr, result, path.suffix.lstrip(".").lower())
 
 
 

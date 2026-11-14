@@ -277,4 +277,5 @@ def document_fact(d: Document) -> dict[str, Any]:
         "bboxes": ocr.get("bboxes") or {},
         "is_encrypted": bool(ocr.get("is_encrypted")),
         "status": d.stage1_status,
+        "findings": mask_data(d.findings_json or []),
     }

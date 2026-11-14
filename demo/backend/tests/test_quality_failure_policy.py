@@ -8,7 +8,7 @@ import pytest
 from demo.backend import upload_assessment
 from demo.backend.api.review import document_blockers
 from demo.backend.ocr.base import OcrResult
-from demo.backend.rules.doc_check import (check_document, QUALITY_REUPLOAD_GUIDANCE,
+from demo.backend.rules.doc_check import (check_document, QUALITY_REUPLOAD_GUIDANCE, QUALITY_REVIEW_GUIDANCE,
                                            REVIEW_ONLY_CODES, CODE_SCREEN_CAPTURE)
 from demo.backend.rules.doc_types import DocType
 from demo.backend.rules.required_docs import DocRequirement
@@ -36,11 +36,12 @@ def test_quality_fail_survives_confidence_and_every_early_return(confidence, pat
     read = OcrResult(kind, confidence, image_quality=.55, fields=fields, tier="localocr")
     result = check_document(DocRequirement("work_proof", kind or DocType.FARM_BIZ_CERT, "가짜 서류"),
                             read, file_format="jpg")
-    assert result.status == "FAIL"
+    expected = "NEEDS_REVIEW" if path == "normal" else "FAIL"
+    assert result.status == expected
     found = [f for f in result.findings if f.code == "LOW_IMAGE_QUALITY"]
-    assert len(found) == 1 and found[0].severity == "FAIL"
-    assert found[0].how_to_fix == QUALITY_REUPLOAD_GUIDANCE
-    assert "이대로 제출해도" not in found[0].how_to_fix
+    assert len(found) == 1 and found[0].severity == expected
+    assert found[0].how_to_fix == (QUALITY_REVIEW_GUIDANCE if path == "normal" else QUALITY_REUPLOAD_GUIDANCE)
+    assert ("이대로 제출" in found[0].how_to_fix) is (path == "normal")
 
 
 def test_only_quality_leaves_review_only_vocabulary():
@@ -62,8 +63,8 @@ def test_nhis_identity_review_cannot_downgrade_measured_quality():
     result = check_document(DocRequirement("nhis_acquisition_loss", DocType.NHIS_ACQUISITION_LOSS, "가짜 서류"),
                             read, identity=Identity("다른가짜명", date(1991,1,1)))
     assert "IDENTITY_UNCERTAIN" in result.codes
-    assert next(f.severity for f in result.findings if f.code == "LOW_IMAGE_QUALITY") == "FAIL"
-    assert result.status == "FAIL"
+    assert next(f.severity for f in result.findings if f.code == "LOW_IMAGE_QUALITY") == "NEEDS_REVIEW"
+    assert result.status == "NEEDS_REVIEW"
 
 
 def test_specific_date_page_and_quality_failures_all_reach_one_blocker(tmp_path):

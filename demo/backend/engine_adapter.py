@@ -27,7 +27,9 @@ from engine import models as engine_models  # noqa: E402
 from engine.models import RequiredDocumentSpec  # noqa: E402
 from engine.pipeline import run_pipeline as _run_pipeline  # noqa: E402
 from engine.stage1_document_check import (  # noqa: E402
+    IMAGE_QUALITY_REVIEW_MESSAGE,
     check_single_document as engine_check_single_document,
+    image_quality_status as engine_image_quality_status,
 )
 from engine_v2.extractors.nhis_payment import has_failed_payment_validation  # noqa: E402
 
@@ -212,21 +214,30 @@ def to_engine_documents(rows: list[dict[str, Any]]) -> list:
     for row in rows:
         doc_type = row.get("doc_type") or row.get("expected_doc_type") or ""
         confidence = float(row.get("confidence") or 0.0)
+        image_quality = float(row.get("image_quality") or 0.0)
         payment_failed = (doc_type == str(DocType.NHIS_PAYMENT) and
                           has_failed_payment_validation(row.get("fields") or {}))
         if payment_failed or (row.get("status") == "NEEDS_REVIEW" and confidence >= engine_config.OCR_CONFIDENCE_THRESHOLD):
             confidence = min(confidence, 0.4)
+        quality_finding = next((finding for finding in (row.get("findings") or [])
+                                if isinstance(finding, dict) and finding.get("code") == "LOW_IMAGE_QUALITY"), None)
+        quality_review = (image_quality < engine_config.IMAGE_QUALITY_THRESHOLD
+                          and quality_finding is not None
+                          and quality_finding.get("severity", "FAIL") == "NEEDS_REVIEW")
         documents.append(
             engine_models.Document(
                 doc_type=str(doc_type),
                 file_format=row.get("file_format") or "pdf",
                 ocr_confidence=confidence,
-                image_quality_score=float(row.get("image_quality") or 0.0),
+                image_quality_score=image_quality,
                 has_signature=row.get("has_signature"),
                 issue_date=row.get("issue_date"),
                 declared_issue_date=row.get("declared_issue_date"),
                 extracted_fields=dict(row.get("fields") or {}),
                 is_encrypted_or_corrupted=bool(row.get("is_encrypted")),
+                classification_succeeded=bool(row.get("doc_type")) if quality_finding is not None else None,
+                required_fields_readable=quality_review if quality_finding is not None else None,
+                has_confirmed_document_failure=quality_review and row.get("status") == "FAIL",
             )
         )
     return documents
@@ -234,11 +245,28 @@ def to_engine_documents(rows: list[dict[str, Any]]) -> list:
 
 def run_pipeline(applicant, documents, requirements=None):
     """신청서 버전에서 만든 체크리스트 기준을 엔진 1단계에 전달한다."""
-    specs = ([RequiredDocumentSpec(
-        doc_type=str(req.doc_type), required=req.required,
-        requires_signature=req.requires_signature, min_issue_date=req.min_issue_date,
-        max_issue_date=req.max_issue_date, check_declared_date=req.check_declared_date,
-    ) for req in requirements] if requirements is not None else None)
+    specs = None
+    if requirements is not None:
+        specs = []
+        submitted_types = {doc.doc_type for doc in documents}
+        for req in requirements:
+            spec_type = str(req.doc_type)
+            if spec_type not in submitted_types:
+                accepted_types = {str(kind) for kind in getattr(req, "accepted_doc_types", ())}
+                alternate = next((doc for doc in documents
+                                  if doc.doc_type in accepted_types
+                                  and engine_image_quality_status(
+                                      doc.image_quality_score,
+                                      classification_succeeded=doc.classification_succeeded,
+                                      required_fields_readable=doc.required_fields_readable,
+                                  ) == engine_models.Status.NEEDS_REVIEW), None)
+                if alternate is not None:
+                    spec_type = alternate.doc_type
+            specs.append(RequiredDocumentSpec(
+                doc_type=spec_type, required=req.required,
+                requires_signature=req.requires_signature, min_issue_date=req.min_issue_date,
+                max_issue_date=req.max_issue_date, check_declared_date=req.check_declared_date,
+            ))
     return _run_pipeline(applicant, documents, specs)
 
 
@@ -294,6 +322,8 @@ __all__ = [
     "apply_runtime_overrides",
     "electronic_consent_row",
     "engine_check_single_document",
+    "engine_image_quality_status",
+    "IMAGE_QUALITY_REVIEW_MESSAGE",
     "engine_config",
     "engine_models",
     "income_percent_to_decile",

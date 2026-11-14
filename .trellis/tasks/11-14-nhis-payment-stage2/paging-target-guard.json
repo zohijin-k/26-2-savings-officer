@@ -1,0 +1,24 @@
+[
+  {
+    "stage": "own",
+    "input_fingerprint_equal": true,
+    "status": "FAIL",
+    "codes": [
+      {
+        "code": "PAGES_INCOMPLETE",
+        "severity": "FAIL"
+      }
+    ]
+  },
+  {
+    "stage": "reference",
+    "input_fingerprint_equal": true,
+    "status": "FAIL",
+    "codes": [
+      {
+        "code": "PAGES_INCOMPLETE",
+        "severity": "FAIL"
+      }
+    ]
+  }
+]

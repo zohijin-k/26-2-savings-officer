@@ -73,3 +73,19 @@ Signature: `python -B -m engine_v2.tools.batch_assess --root FAKE-input --out FA
 - New synthetic tests must cover count-only output, exact Unicode/spaced IDs, no unselected content reads, duplicates/outside/missing/invalid entries, empty selection, changed/expanded selection with resume, stable groups/schemas, location/alias rejection and old-test preservation.
 
 Good: select two synthetic IDs, count one duplicate and one outside-root entry, process the two valid entries, then skip both on resume. Base: no --ids retains the original four-number progress. Bad: open unselected PDFs, print rejected entries, bind selection to a new metadata schema or rewrite completed records.
+
+
+## Payment folio observation extension
+
+Per-engine OK/NHIS_PAYMENT records may include optional `payment_paging` with exactly `adopted`, `total_bucket`, `count_mismatch`. Use `payment_paging.statistics` from validated source evidence; never serialize raw markers, exact totals above the reviewed buckets, confidence, amount/date maps or hashes. Vocabulary: adopted O/X; totals 1/2/3_PLUS/UNREADABLE; mismatch O/X/UNREADABLE. X requires both other fields UNREADABLE; O requires a known bucket and O/X mismatch. Conflicting/duplicate markers are X. Missing historical extension stays valid and is counted as EVIDENCE_ABSENT, not rewritten.
+
+`--summarize` reports own/applevision/text_layer separately, denominators OK payment records, adoption counts, total buckets, FILE_LOCAL_MISMATCH counts and unavailable/error/not-requested states. Compare printed total with selected same-form pages, excluding dissimilar attachments. This is a file-local observation, not an application-level received-page count or omission FAIL. Summary remains read-only and imports no OCR/model backend. New tests live in `engine_v2/tests/test_batch_payment_paging.py`; use synthetic temporary inputs/records only.
+
+
+## Period-denied and folder-multiplicity observations
+
+Optional OK/payment `payment_period_waiver` is O/X/UNREADABLE from `payment_completeness.period_statistics`, never a raw period. O means the necessary confirmed-period condition failed; other blockers can coexist. Summary denominator is each route's successful payment files, with absent historical evidence separated. Keep backward compatibility when the key is absent.
+
+For each route, count nonzero first-level group folders containing at least two successful files of the same canonical kind. Report by kind and overall distinct folders, exclude root group0 from duplicate-folder counts and expose root successful files separately. Per-kind denominator is folders containing that kind; overall denominator is folders with at least one successful classified file. ERROR, SKIPPED, NOT_REQUESTED, NOT_APPLICABLE and unclassified records are excluded and counted. A folder grouping is not verified applicant identity and does not alter any per-file verdict. No folder names, file IDs or paths enter these tables.
+
+Both upload codebases use one-file replacement per explicit slot. Batch uses the same single-file assessment rule: reliable consistent printed total greater than physical file pages can FAIL. Duplicate-folder statistics are separate operational observations, never file aggregation.

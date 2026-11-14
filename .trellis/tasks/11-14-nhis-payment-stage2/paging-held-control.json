@@ -1,0 +1,97 @@
+{
+  "case_id": "s1_nhis_payment_pages_incomplete",
+  "results": [
+    {
+      "variant": "held_control",
+      "enabled": [
+        "fusion",
+        "settlement"
+      ],
+      "stage": "own",
+      "input_fingerprint": "64b7b7ade7e3386419f8718378090c557e701017eda10ef86475f9cb96ebc884",
+      "variant_source_fingerprint": "08ef1346de587581f7771d97f907ac68019ec51649be6c364a2e869df4629214",
+      "word_fingerprint": "511e06a11f78160fb9cf3437cb7f08eb4bc8965f94db88b0b6dac111dce5f968",
+      "word_count": 108,
+      "status": "NEEDS_REVIEW",
+      "findings": [
+        {
+          "code": "LOW_OCR_CONFIDENCE",
+          "severity": "NEEDS_REVIEW"
+        },
+        {
+          "code": "MISSING_BILLING_MONTHS",
+          "severity": "NEEDS_REVIEW"
+        }
+      ],
+      "page_count": 1,
+      "confidence": 0.4,
+      "failed_validations": [
+        "payment_component_headers",
+        "payment_columns",
+        "paid_total_matches"
+      ],
+      "has_monthly_map": false,
+      "field_names": [
+        "고지월검증자료",
+        "납부자번호",
+        "납부총액",
+        "문서확인번호",
+        "발급일",
+        "사업장명칭",
+        "사업장명칭_상태",
+        "생년월일",
+        "성명",
+        "양식판독상태",
+        "용도구분",
+        "원본이미지크기",
+        "조회기간",
+        "판독검증",
+        "판독검증실패",
+        "판독경고"
+      ],
+      "paging_field_names": []
+    },
+    {
+      "variant": "held_control",
+      "enabled": [
+        "fusion",
+        "settlement"
+      ],
+      "stage": "reference",
+      "input_fingerprint": "64b7b7ade7e3386419f8718378090c557e701017eda10ef86475f9cb96ebc884",
+      "variant_source_fingerprint": "08ef1346de587581f7771d97f907ac68019ec51649be6c364a2e869df4629214",
+      "word_fingerprint": "70d4f389fd9e6755cad3bdcba5e907f8f3073780418ff9bd63fdd45eb3f92969",
+      "word_count": 132,
+      "status": "PASS",
+      "findings": [],
+      "page_count": 1,
+      "confidence": 0.95,
+      "failed_validations": [],
+      "has_monthly_map": true,
+      "field_names": [
+        "건강보험료",
+        "고지월",
+        "고지월검증자료",
+        "납부자번호",
+        "납부총액",
+        "문서확인번호",
+        "발급일",
+        "사업장명칭",
+        "사업장명칭_상태",
+        "생년월일",
+        "성명",
+        "양식판독상태",
+        "용도구분",
+        "원본이미지크기",
+        "월별고지금액",
+        "월별납부내역",
+        "월별장기요양보험료",
+        "장기요양보험료",
+        "조회기간",
+        "판독검증",
+        "합계자료"
+      ],
+      "paging_field_names": []
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "staged_file_count": 0,
+  "staged_diff_empty": true,
+  "candidate_files_scanned": 54,
+  "secret_pattern_file_count": 0,
+  "private_or_masked_candidate_paths": [],
+  "old_tracked_tests_or_measurement_sources_changed": [],
+  "all_five_dumps_ignored": true,
+  "real_document_access": "ONLY_AUTHORIZED_MASKED_DUMPS_NO_UNMASKED_SOURCE",
+  "limitation": "No staged candidate exists yet. No claim of a populated staged diff audit. Candidate content scan and source provenance checked."
+}

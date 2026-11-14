@@ -1,0 +1,32 @@
+[
+  {
+    "stage": "own",
+    "input_fingerprint_equal": true,
+    "status": "NEEDS_REVIEW",
+    "codes": [
+      {
+        "code": "LOW_OCR_CONFIDENCE",
+        "severity": "NEEDS_REVIEW"
+      },
+      {
+        "code": "MISSING_BILLING_MONTHS",
+        "severity": "NEEDS_REVIEW"
+      },
+      {
+        "code": "NHIS_PAYMENT_PAGING_UNCERTAIN",
+        "severity": "NEEDS_REVIEW"
+      }
+    ]
+  },
+  {
+    "stage": "reference",
+    "input_fingerprint_equal": true,
+    "status": "NEEDS_REVIEW",
+    "codes": [
+      {
+        "code": "NHIS_PAYMENT_PAGING_UNCERTAIN",
+        "severity": "NEEDS_REVIEW"
+      }
+    ]
+  }
+]

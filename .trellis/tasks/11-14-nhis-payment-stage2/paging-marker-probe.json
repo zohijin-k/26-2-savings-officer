@@ -1,0 +1,26 @@
+[
+  {
+    "stage": "own",
+    "existing_independent_marker_helper": {
+      "markers": [
+        [
+          1,
+          2
+        ]
+      ],
+      "confidence": 0.9988716244697571
+    }
+  },
+  {
+    "stage": "reference",
+    "existing_independent_marker_helper": {
+      "markers": [
+        [
+          1,
+          2
+        ]
+      ],
+      "confidence": 1.0
+    }
+  }
+]

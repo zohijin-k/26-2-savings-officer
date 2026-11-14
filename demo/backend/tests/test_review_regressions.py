@@ -145,19 +145,20 @@ def test_legacy_payment_sum_failure_controls_direct_verdict_and_financial_trust(
     result = _from_nhis(nhis_payment.extract(pages), pages, V2DocType)
     requirement = DocRequirement("nhis_payment", DocType.NHIS_PAYMENT, "가상납부확인서")
     verdict = check_document(requirement, result, identity=Identity("김전북", date(1999, 1, 1)))
-    assert verdict.status == ("NEEDS_REVIEW" if incorrect else "PASS")
+    needs_review = incorrect or kind == "legacy"
+    assert verdict.status == ("NEEDS_REVIEW" if needs_review else "PASS")
     assert "양식판독상태" not in result.fields
     payment = {"doc_type": str(DocType.NHIS_PAYMENT), "fields": result.fields,
                "confidence": result.confidence, "status": verdict.status,
                "image_quality": 1, "issue_date": result.issue_date, "file_format": "pdf"}
     qualification = {"doc_type": str(DocType.NHIS_QUALIFICATION), "fields": {"가구원수": "1"}}
     facts = build_facts({}, [payment, qualification], ["2025-10", "2025-11", "2025-12"])
-    assert (facts.monthly_premium is None) == incorrect
+    assert (facts.monthly_premium is None) == needs_review
     program = PROGRAMS[DOUBLE_SAVINGS]
     applicant = to_engine_applicant(application_no="FAKE", name="김전북", birth_date=date(1999, 1, 1),
                                     residence_region="전주시", program=program, income_percent=90)
     pipeline = run_pipeline(applicant, to_engine_documents([payment]), [requirement])
-    assert pipeline.status.value == ("NEEDS_REVIEW" if incorrect else "PASS")
+    assert pipeline.status.value == ("NEEDS_REVIEW" if needs_review else "PASS")
 
 
 @pytest.mark.parametrize("kind", ["legacy", "month-only"])

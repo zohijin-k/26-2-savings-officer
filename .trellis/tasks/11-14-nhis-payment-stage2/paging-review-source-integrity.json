@@ -1,0 +1,11 @@
+{
+  "checked_source_snapshot_files": 157,
+  "changed": [
+    "demo/backend/tests/test_payment_paging.py"
+  ],
+  "proposed_rule_not_in_production": true,
+  "changed_old_tests_or_corpus": [],
+  "changed_since_snapshot_explanation": {
+    "demo/backend/tests/test_payment_paging.py": "New untracked paging test file expanded from 39 to 44 checks before this proposal review. No main-existing test or stage-2 shape input/assertion changed."
+  }
+}

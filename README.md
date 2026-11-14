@@ -13,8 +13,7 @@
 | 전체 안내 | [26-2-capstone](https://github.com/zohijin-k/26-2-capstone) |
 | 두배적금 담당자 — 현재 저장소 | [26-2-savings-officer](https://github.com/zohijin-k/26-2-savings-officer) |
 | 두배적금 신청자 | [26-2-savings-applicant](https://github.com/zohijin-k/26-2-savings-applicant) |
-| 청년 취업지원 신청자 | [26-2-youth-applicant](https://github.com/zohijin-k/26-2-youth-applicant) |
-| 청년 취업지원 담당자 | [26-2-youth-officer](https://github.com/zohijin-k/26-2-youth-officer) |
+| 청년 취업지원 신청자·담당자 | [26-2-youth](https://github.com/zohijin-k/26-2-youth) |
 
 ## 설치와 실행
 

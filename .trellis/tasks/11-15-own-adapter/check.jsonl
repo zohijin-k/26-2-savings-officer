@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "백엔드 관련 규약과 품질 점검 진입점"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "OCR 공통 형식·원래 엔진 보존"}
+{"file": ".trellis/spec/backend/ocr-baseline.md", "reason": "clean 렌더·참조·마스킹·격리·수치 스키마"}
+{"file": ".trellis/spec/backend/documentai-measurement.md", "reason": "410쌍의 정답·판정 분모·운영 경로 보존"}
+{"file": ".trellis/tasks/11-15-own-adapter/research/source-map.md", "reason": "코드 읽기 지도·생성기 목록·기존 보고 차이"}
+{"file": ".trellis/tasks/11-15-own-adapter/research/corpus-command.md", "reason": "사전 고정 합성 구성과 실행 명령"}
+{"file": ".trellis/tasks/11-15-own-adapter/research/adapter-contract.md", "reason": "실제 baseline 추출 호출과 8개 입력 계약, 서식 차이 한계"}

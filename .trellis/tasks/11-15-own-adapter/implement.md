@@ -248,3 +248,18 @@ On 2026-11-15 the user approved implementation. Changes under engine_v2/tools/, 
 ## Stage 2-1 verification complete
 
 New108 and existing focused127 tests pass. Full engine1983/3skip/3xfail reconciles to the108 added tests. Native70-page diagnosis preserves all420 prior field rows, all prior summary sections and run metadata, with210 MEASURED condition paths and zero diagnostic/parity errors. The approved four-directory path condition selects engine-only verification. Detailed H1/H2 evidence, operator brief row guidance and both Git path lists are in stage21-report.md. Final staged five-pattern counts are 0/0/0/0/0 across 13 files. Separate commit approval remains.
+
+## 2-2단계 실행 계획 — 구현 승인 대기
+
+1. research/route-stage22.md와 PRD의 추천안 A, 2순위 보류 및 알려진 fixture/기대값 변경 범위를 승인받는다. 같은 Trellis 작업을 다시 시작한다. 현재 설계 단계에서는 운영 코드와 시험을 수정하지 않는다.
+2. cdbe672와 원 before 결과를 고정하고 보호 소스/원 합성 입력 바이트를 확인한다. 작업 공간과 장기 결과를 분리하고 설치 의존성·모델·글꼴만 링크한 새 추적 소스 격리를 준비한다. 허용된 구조자료는 복제하지 않는다.
+3. 정부형 인식 밴드와 진단의 관찰을 같은 helper로 연결한다. 추천 식과 HEADER_HEIGHT_RATIO 의미를 구현하고 승인받은 정상 fixture와2개 시험 영향만 함께 조정한다. 실제 재현3쪽/구조 패딩 회귀, legacy50·정부형20의 분기 시험을 추가한다. 다른 기존 실패는 고치기 전에 이유를 보고한다.
+4. 기존 원 결과 검증·요약을 재사용한 읽기 전용 ocr_baseline_compare.py와 독립 시험을 추가한다. 파일 경로/ID·값 노출, 음수차이·0분모·미측정·CER>1·훼손·코호트 차이와 정상 CLI 진입점을 확인한다.
+5. 새 focused 및 전체 engine 시험을 실행하고 증가분=새시험 수를 확인한다. backend 직전 df -h /가용15GiB 이상을 확인한 뒤 backend,18시나리오,프런트3명령을 순차 실행한다. 새시험이 없는 그룹은 기존 수와 같아야 한다. 환경 실패/기존 실패는 보고하고 중단한다.
+6. 원410쌍을 같은 원 도구로 측정해 before와 엔진×종류별 잘못된PASS·FAIL·담당자확인·PASS를 비교한다. 개별 새 음성 PASS 또는 잘못된PASS 증가 하나라도 즉시 멈춘다. 모든 reference 결과가 같아야 한다.
+7. 원 전체 합성111PDF/114쪽·동일settings/seed에 대해 own/AV × clean/scan/phone OCR baseline을 새 폴더에서 측정한다. 새 비교 CLI로 before와 모든 종류/필드의 비율·인식·시간을 표로 비교한다. own2%p 초과 저하·AV/참조 변화는 이유를 보고하고 사용자 기준에 따라 승인 대기한다.
+8. 합성70쪽과 실제 OCR 재현3쪽을 새진단으로 재실행해 경로 교차표를 전후 비교한다. 글자층/AV 경로가 바뀌면 목록과 이유를 보고하고 승인을 기다린다. 추천A의 예상은 원70쪽 경로 유지와 재현3쪽 own→LEGACY다. 정부형 own20쪽 미해결을 명시한다.
+9. 한국어 표 보고와 소스/시험/부작용 경계 검토, spec/문서 갱신을 완료한다. staged diff 전체 사용자5패턴을 숫자로 보고하고 비영인 경우 파일/줄번호만 보고한다. 정확한 git diff --cached --name-only 목록과 커밋안을 제시하고 승인에서 멈춘다. 공저자 줄·amend·push는 실행하지 않는다.
+10. 채팅에만 실제 경로를 채운 사용자 명령을 제시한다. 진단/결과brief보기, 전체 OCR 재측정, before/after 비교를 각각 한 줄로 적고 절대 cd 및 && 연결을 사용한다. 실행 명령은 caffeinate -i를 포함한다. 사용자의 실서류 실행 중에는 작업하지 않는다.
+
+예상 운영 변경은 nhis_payment_gov.py의 인식 밴드와 최소 내부 helper다. 진단 helper, 비교 도구, 새 합성 시험 fixture/회귀, 승인된 기존 진단 시험 영향, 문서/Trellis 기록이 함께 변경된다. 기존 서비스 판정·threshold·재업로드·쪽수 검증, 원 OCR/어댑터와 원 생성기 파일은 변경 범위에 포함되지 않는다.

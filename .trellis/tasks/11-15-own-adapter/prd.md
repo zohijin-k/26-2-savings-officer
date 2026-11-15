@@ -1,6 +1,6 @@
 # own OCR 어댑터 진단 — 요구사항
 
-현재 상태: 1단계는 95d9ef7로 커밋 완료. 2-1단계 구현·검증 완료, 커밋 승인을 기다린다. 아래 0~1단계 기록은 완료된 이력이다.
+현재 상태: 1단계 95d9ef7, 2-1단계 cdbe672, 비교 CLI 2610a2c 커밋 완료. 2-2단계는 A를 운영에 넣지 않고 구조 기반 후보 S를 그림자 평가로 검증하는 중이다(아래 "2-2단계 변경 기준"). 아래 0~1단계 기록은 완료된 이력이다.
 
 기존 상태 기록: 0~1단계 조건부 실행 승인. 아래 2026-11-15 승인 조건을 반영한 뒤 실행한다. 커밋과 2~3단계 구현은 미승인이다. 브랜치는 `work/own-adapter`, 시작 main은 `2b4ab5949a2d7455a3da7da3ab0fd7c1f687e4d8`이다.
 
@@ -86,3 +86,45 @@ The design owns condition/bin/error contracts. The implementation plan owns the 
 ## Stage 2-1 implementation approval
 
 On 2026-11-15 the user approved implementation. Changes under engine_v2/tools/, engine_v2/tests/, engine_v2/docs/ and .trellis/ require engine_v2 tests only. A changed path outside this set triggers backend, all 18 scenario modules and frontend checks as well. Report both git diff --name-only main...HEAD and working-tree paths to prove the decision. For H1/H2, report supporting/refuting synthetic numbers and exact summary_brief row families the operator should inspect. The five supplied patterns are available for the final staged-diff scan.
+
+## 2-2단계 현재 목표와 추천안
+
+실서류 legacy의 own 가입구분·고지월·발급일 일치율을 각각 95% 이상으로 회복하고, 엔진·서류 종류별 잘못된 통과 증가를 0으로 유지한다. 사용자가 제공한 120쪽 재진단과 이번 구조·합성 연구의 숫자, 세 안 비교, 알려진 시험 영향은 research/route-stage22.md에 한 번씩 정리했다.
+
+추천안 A는 첫 월 상자 높이 배수에 의존하는 탐색을 일반 상자 높이 중앙값 H와 첫 월 중심 C 기준의 [C−3H, C−0.5H)로 바꾼다. 실제 폭은 2.5H다. 이후 component-top 절단, 가로/줄 조립, 제목·메타 대체 조건과 반복 임계값은 기존 의미를 유지한다. 같은 식을 글자층·own·AV에 적용한다. 정상 전체 표·금액·기간 검증과 confidence 계산은 기존 추출기가 맡는다. 2순위 정부형 own의 머리글 인식·조립 수정은 이번 추천 범위에서 보류하고 원인과 후속안을 보고한다.
+
+### 2-2단계 요구사항과 수용 기준
+
+| ID | 요구사항과 관측 가능한 기준 |
+| --- | --- |
+| R31 | 사용자가 재실행한 legacy 120쪽에서 own 세 필드 각각 최소114/120 일치, 참조 LEGACY120 유지와 같은 참조/비교 분모를 확인한다. 에이전트의 합성 검증과 사용자 실서류 검증 결과를 구분한다. |
+| R32 | 허용된 가림 자료는 구조만 읽고 원본 서류·나머지 결과 저장소를 읽지 않는다. 내용/좌표를 고정값으로 전사하지 않는다. 실제 사용자 실행 경로는 채팅에만 둔다. |
+| R33 | 현 코드에서 글자층·AV LEGACY / own GOVERNMENT가 되는 실제 OCR 합성 3쪽과 독립 구조 사례를 보존한다. 수정 후 세 경로 모두 LEGACY여야 한다. |
+| R34 | 기존 합성 legacy50·정부형20와 렌더 연구12쪽의 글자층·AV 분기는 현재와 같아야 한다. 전체 합성 검증 중 차이가 나타나면 목록과 이유를 보고하고 승인을 기다린다. |
+| R35 | 서식 분기와 그 관찰에 필요한 최소 helper만 수정한다. 판정·신뢰도 보정·재업로드·쪽수 규칙, OCR 어댑터·엔진, 원 410쌍 생성기를 보존한다. 값 추측과 파일명 힌트는 0건이어야 한다. |
+| R36 | research/route-stage22.md에 명시한 정상 기하 fixture 1건과 의도된 버그 기대값 영향 2건을 구현 승인에 포함해 검토한다. 추가 기존 시험 실패나 미승인 기대값 수정은 원인 보고 후 중단한다. |
+| R37 | 엔진1983/3skip/3xfail과 backend1410/2xfail에서 통과 증가분이 각 새 시험 수와 같아야 한다. 18시나리오1885검사/실패0, 프런트3명령 exit0을 확인한다. backend 직전 가용15GiB 이상과 작업/장기 결과 분리를 지킨다. |
+| R38 | 원 410쌍의 own/reference × 종류별 잘못된 PASS·FAIL·담당자 확인·PASS를 전후 비교한다. 새 음성 PASS 또는 잘못된 PASS 증가 하나라도 즉시 중단한다. own0/235와 모든 글자층 참조 결과를 유지한다. |
+| R39 | 모든 원 합성 종류/필드 × own/AV × clean/scan/phone을 비교한다. own 필드 2%p 초과 하락은 보고·승인 대기, AV 값 변화는 이유를 보고한다. 70쪽 진단 분기 교차표도 전후 보존한다. |
+| R40 | 결과 폴더 비교 CLI가 없으므로 기존 검증·집계를 재사용한 ocr_baseline_compare.py를 만든다. 종류/필드/엔진/변형별 일치율·CER·단어F1은 전/후/차이(%p), 시간은 전/후/차이(초)로 출력한다. 미측정·분모·코호트 차이를 고정 코드와 숫자로 보인다. |
+| R41 | 비교 도구 stdout와 오류/도움말에 실제 값·ID·파일명·경로·좌표·해시·예외 메시지가 없어야 한다. 원 결과 JSON만 읽고 원본 문서를 열지 않는다. |
+| R42 | 사용자가 지정한 진단·전체 OCR 재측정·결과 비교 명령을 경로를 채운 한 줄로 채팅에 제공한다. 진단 결과 확인 명령은 summary_brief.txt만 출력한다. |
+| R43 | 한국어 표 보고, staged 전체 다섯 패턴0건과 정확한 스테이징 목록을 제출하고 별도 커밋 승인을 요청한다. 공저자 줄·amend·push 실행은 0건이다. |
+
+### 수용 범위와 보류
+
+A는 합성 70쪽과 렌더12쪽에서 글자층/AV 경로를 보존하고 재현3쪽 own을 교정했다. 실제120쪽의 95%는 후속 사용자 집계가 필요하다. 일반 상자 중앙값도 엔진 관측치이므로 모든 경계 변형에서 동일 분기를 보장하지 않는다. 정부형 own20쪽은 같은 식으로 해결되지 않았으며, 정확한 머리글 일치6/9 또는7/9와 열 경계 실패를 별도 보정 과제로 남긴다. 아직 미해결 제품 결정은 추천안과 알려진 시험 영향의 구현 승인이다.
+
+## 2-2단계 변경 기준 (2026-11-16 사용자 결정)
+
+A는 기존 정부형 시험 8개 실패로 운영에 넣지 않고 되돌렸다. 구조 기반 후보 S(첫 월 바로 위의 연속 머리글 줄 묶음, 정의는 stage22-stop.md)를 채택해 운영 판별·추출을 바꾸지 않는 그림자 평가로 먼저 검증한다. 아래 기준은 R33·R34를 대체한다.
+
+| ID | 기준 |
+| --- | --- |
+| R44 | 생성 서식을 아는 합성 자료(렌더 12쪽, 재현 3쪽)는 "현재 분기 유지"가 아니라 "생성 서식대로 분기"가 기준이다. 렌더 12쪽은 글자층·own·AV 세 경로 모두 LEGACY여야 한다. 현재 대비 바뀐 수는 보고 항목으로만 남긴다. |
+| R45 | 원 합성 70쪽(legacy50·정부형20)과 기존 판별 시험은 글자층·AV 분기를 현재와 같게 유지하고 기대값 변경 없이 통과해야 한다. |
+| R46 | test_own_adapter_route_diag.py의 진단 미러 시험 29개는 S를 운영 코드에 넣을 때 고친다. 그때 목록과 이유를 보고하고 승인을 받는다. 그림자 평가 단계에서는 건드리지 않는다. |
+| R47 | own_adapter_diag는 CURRENT·A·S를 같은 실제 납부 추출 입력에서 쪽마다 계산해 SHADOW_ROUTE <규칙> <엔진> <분기> <쪽 수>와 SHADOW_CROSS <규칙> <엔진> <글자층 분기> <후보 분기> <쪽 수>를 summary.txt·summary_brief.txt에 낸다. CURRENT 그림자는 실제 운영 분기와 쪽마다 같아야 한다(SHADOW_CHECK, 불일치·규칙 오류는 종료 코드 1). |
+| R48 | 렌더 12쪽, 재현 3쪽, 원 70쪽의 그림자 결과가 연구 평가표와 쪽마다 같아야 한다. |
+| R49 | 실서류 판단 기준(S 그림자): 글자층 LEGACY 120(현재와 같음), AV LEGACY 118 이상, own LEGACY 114 이상. 글자층이 하나라도 바뀌면 정답 경로가 흔들리는 것이므로 S를 운영에 넣기 전에 따로 검토한다. |
+| R50 | 검색은 engine_v2/data와 실서류 결과 폴더를 제외한다. 커밋 전 다섯 패턴 검사와 스테이징 목록 보고 후 그림자 평가 커밋 승인을 따로 받는다. |

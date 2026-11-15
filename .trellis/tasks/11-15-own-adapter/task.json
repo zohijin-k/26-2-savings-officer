@@ -2,7 +2,7 @@
   "id": "own-adapter",
   "name": "own-adapter",
   "title": "own OCR adapter diagnosis and synthetic baseline",
-  "description": "Stage 2-1 value-free routing predicate diagnostics and CLI usability, implemented and verified. Commit approval pending.",
+  "description": "Stage2-2: candidate A reverted after 8 existing government test failures; structure rule S adopted for shadow evaluation (CURRENT/A/S) in own_adapter_diag. Operating routing unchanged. Shadow commit approval pending.",
   "status": "in_progress",
   "dev_type": null,
   "scope": "backend",
@@ -15,12 +15,12 @@
   "branch": "work/own-adapter",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": "95d9ef7",
+  "commit": "2610a2c",
   "pr_url": null,
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Stage one95d9ef7. Stage2-1 approved with engine-only scope for tools/tests/docs/.trellis. New tests108, existing focused127, engine1983/3skip/3xfail, increase108 matches new collection. Same70 synthetic pages420 records/210 measured condition paths, all original flags/routes/summary sections equal, condition errors0. Government own FIRST_MONTH_FOUND20/20 but HEADER_BOSUOE_GE3 fails20; repetition bins1x10/2x10. Header-height bins match across engines. Private accesses0, original test edits0, classifier/extractor/adapter/decision/generator edits0. Staged13 files. Five-pattern counts0/0/0/0/0. Commit approval pending.",
+  "notes": "Comparison CLI committed2610a2c. A reverted; 8 failing expectations unchanged. Criteria revised2026-11-16 (prd R44-R50): render12/repro3 must route as generated (LEGACY on all paths), corpus70 and existing route tests keep text/AV routes. Shadow rows SHADOW_ROUTE/SHADOW_CROSS/SHADOW_CHECK added. Corpus70 (111 restored PDFs, fingerprints identical) and render12 per-page shadow equal research for all3 rules on246 paths; CURRENT equals actual on all. S: corpus70 unchanged, render12 LEGACY on all paths (text9/AV2/own12 changed from current), repro3 LEGACY. Existing output byte-identical plus new sections. Engine2072/3skip/3xfail (new71). Diagnostic mirror tests (29) deferred until S enters operating code. Real-document gate: text LEGACY120, AV>=118, own>=114.",
   "meta": {}
 }

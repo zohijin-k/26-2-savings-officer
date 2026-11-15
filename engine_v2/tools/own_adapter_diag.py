@@ -16,6 +16,7 @@ sys.dont_write_bytecode = True
 from . import batch_assess as batch
 from .ocr_baseline_settings import SETTINGS
 from . import own_adapter_route_diag as route_diag
+from . import own_adapter_shadow_route as shadow_route
 
 VERSION = 1
 ENGINES = ('own', 'applevision')
@@ -177,7 +178,7 @@ def _kind(result):
     return kind if kind in REGISTRY else 'X'
 
 
-def process_document(path, ordinal, engines, fields, route_observations=None):
+def process_document(path, ordinal, engines, fields, route_observations=None, shadow_observations=None):
     """Return projected records under the caller's shared read-only guard.
 
     REFERENCE_ERROR has unknown reference availability. RENDER_ERROR retains
@@ -206,9 +207,10 @@ def process_document(path, ordinal, engines, fields, route_observations=None):
                 if quality != 'NONE':
                     output.append(row(ordinal, number, code=quality))
                     continue
+                ref_shadow = []
                 try:
                     extracted, ref_analysis = route_diag.inspect_extraction(
-                        page, truth, 'text_layer', evidence.extract_with_form)
+                        page, truth, 'text_layer', evidence.extract_with_form, ref_shadow)
                     reference, ref_raw, form = extracted
                 except Exception:
                     output.append(row(ordinal, number, code='REFERENCE_ERROR'))
@@ -216,6 +218,8 @@ def process_document(path, ordinal, engines, fields, route_observations=None):
                 kind = _kind(reference)
                 if kind == 'NHIS_PAYMENT':
                     route_diag.record(route_observations, ordinal, number, 'text_layer', form, form, ref_analysis)
+                    shadow_route.record(shadow_observations, ordinal, number, 'text_layer', form,
+                                        ref_shadow[0] if ref_shadow else None)
                 if kind == 'X':
                     output.append(row(ordinal, number, form=form, code='CLASSIFICATION_FAILED'))
                     continue
@@ -242,9 +246,10 @@ def process_document(path, ordinal, engines, fields, route_observations=None):
                         output.extend(row(ordinal, number, kind, form, field, engine, 'EMPTY_OCR',
                             eligible=int(key in ref_raw and batch._present(ref_raw[key]))) for field, key in selected)
                         continue
+                    path_shadow = []
                     try:
                         extracted, analysis = route_diag.inspect_extraction(
-                            image, recognized.words, engine, evidence.extract_with_form)
+                            image, recognized.words, engine, evidence.extract_with_form, path_shadow)
                         observed, obs_raw, observed_form = extracted
                     except Exception:
                         output.extend(row(ordinal, number, kind, form, field, engine, 'EXTRACTION_ERROR',
@@ -252,6 +257,8 @@ def process_document(path, ordinal, engines, fields, route_observations=None):
                         continue
                     if kind == 'NHIS_PAYMENT':
                         route_diag.record(route_observations, ordinal, number, engine, form, observed_form, analysis)
+                        shadow_route.record(shadow_observations, ordinal, number, engine, observed_form,
+                                            path_shadow[0] if path_shadow else None)
                     observed_kind = _kind(observed)
                     for field, key in selected:
                         eligible = int(key in ref_raw and batch._present(ref_raw[key]))
@@ -303,7 +310,7 @@ def route_summary(meta, rows):
     return dict(distributions=distributions, cross=cross)
 
 
-def build_summary(meta, rows, counters, route_observations=()):
+def build_summary(meta, rows, counters, route_observations=(), shadow_observations=()):
     cells = defaultdict(list)
     for item in meta['fields']:
         for form in FORMS:
@@ -340,20 +347,22 @@ def build_summary(meta, rows, counters, route_observations=()):
     }
     return dict(schema_version=VERSION, counters=dict(counters), availability=availability,
                 routes=route_summary(meta, rows), groups=groups,
-                route_conditions=route_diag.build_summary(meta, rows, route_observations))
+                route_conditions=route_diag.build_summary(meta, rows, route_observations),
+                shadow_routes=shadow_route.build_summary(meta, shadow_observations))
 
 
-def validate_summary(value, meta, rows, route_observations=()):
+def validate_summary(value, meta, rows, route_observations=(), shadow_observations=()):
     require(isinstance(value, dict) and set(value) == {
-        'schema_version', 'counters', 'availability', 'routes', 'groups', 'route_conditions'})
+        'schema_version', 'counters', 'availability', 'routes', 'groups', 'route_conditions', 'shadow_routes'})
     require(type(value['schema_version']) is int and value['schema_version'] == VERSION)
     counters = value['counters']
     require(isinstance(counters, dict) and set(counters) == set(COUNTERS) and all(count(v) for v in counters.values()))
-    expected = build_summary(meta, rows, counters, route_observations)
+    expected = build_summary(meta, rows, counters, route_observations, shadow_observations)
     require(value == expected)
     require(all(count(item['pages']) for items in value['routes'].values() for item in items))
     require(all(count(number) for statuses in value['availability'].values() for number in statuses.values()))
     route_diag.validate_summary(value['route_conditions'])
+    shadow_route.validate_summary(value['shadow_routes'])
     for group in value['groups']:
         require(set(group['codes']) == set(CAUSES) and set(group['statuses']) == set(AVAILABILITY))
         require(all(count(v) for v in [group['eligible'], group['diagnosed'], group['missing_reference'],
@@ -388,6 +397,7 @@ def summary_text(summary):
         for code, number in group['statuses'].items():
             lines.append(' '.join((group['type'], group['form'], group['field'], group['engine'], code, str(number))))
     lines.extend(route_diag.text_lines(summary['route_conditions']))
+    lines.extend(shadow_route.text_lines(summary['shadow_routes']))
     return '\n'.join(lines)+'\n'
 
 
@@ -401,6 +411,7 @@ def summary_brief(summary):
     for item in summary['routes']['cross']:
         lines.append(f"ROUTE_CROSS {item['engine']} {item['reference_form']} {item['observed_form']} {item['pages']}")
     lines.extend(route_diag.text_lines(summary['route_conditions'], brief=True))
+    lines.extend(shadow_route.text_lines(summary['shadow_routes'], brief=True))
     for group in summary['groups']:
         if not (group['eligible'] or any(group['statuses'].values())):
             continue
@@ -543,24 +554,27 @@ def run(root, out, engines=ENGINES, *, ids=None, limit=None, fields=DEFAULT_FIEL
     batch._atomic(target/'run.json', meta)
     rows = []
     route_observations = []
+    shadow_observations = []
     # Claim the fixed result file even when there are no selected PDFs.
     fd = batch._open(target/'results.jsonl', os.O_WRONLY | os.O_CREAT | os.O_EXCL)
     os.close(fd)
     for ordinal, path in enumerate(pending, 1):
-        document_observations = []
+        document_observations, document_shadow = [], []
         try:
             with batch.guarded():
-                projected, pages = process_document(path, ordinal, engines, selected, document_observations)
+                projected, pages = process_document(path, ordinal, engines, selected,
+                                                    document_observations, document_shadow)
         except KeyboardInterrupt:
             raise
         except Exception:
             projected, pages = [row(ordinal, code='PROCESSING_ERROR')], 0
-            document_observations = []
+            document_observations, document_shadow = [], []
         for item in projected:
             validate_row(item, meta)
             batch._append(target/'results.jsonl', item)
         rows.extend(projected)
         route_observations.extend(document_observations)
+        shadow_observations.extend(document_shadow)
         counters['attempted_documents'] += 1
         counters['processed_pages'] += pages
         unrequested = {item['page'] for item in projected if item['code'] == 'TYPE_NOT_REQUESTED'}
@@ -579,15 +593,16 @@ def run(root, out, engines=ENGINES, *, ids=None, limit=None, fields=DEFAULT_FIEL
         if r['engine'] != 'X' and r['code'] in ('ENGINE_UNAVAILABLE','OCR_ERROR','EXTRACTION_ERROR')})
     counters['empty_ocr'] = len({(r['document'],r['page'],r['engine']) for r in rows if r['code'] == 'EMPTY_OCR'})
     counters['execution_errors'] = len({(r['document'],r['page'],r['engine']) for r in rows if r['code'] in ERRORS})
-    summary = validate_summary(build_summary(meta, rows, counters, route_observations),
-                               meta, rows, route_observations)
+    summary = validate_summary(build_summary(meta, rows, counters, route_observations, shadow_observations),
+                               meta, rows, route_observations, shadow_observations)
     batch._atomic(target/'summary.json', summary)
     _atomic_text(target/'summary.txt', summary_text(summary))
     _atomic_text(target/'summary_brief.txt', summary_brief(summary))
     print(json.dumps(dict(counters)), flush=True)
     condition_errors = sum(group['statuses'][code] for group in summary['route_conditions']['groups']
                            for code in route_diag.ANALYSIS_ERRORS)
-    return int(counters['execution_errors'] > 0 or condition_errors > 0)
+    return int(counters['execution_errors'] > 0 or condition_errors > 0
+               or shadow_route.failures(summary['shadow_routes']) > 0)
 
 
 class SafeParser(argparse.ArgumentParser):
@@ -615,7 +630,8 @@ def main(argv=None):
         return 130
     except SystemExit as exc:
         return 0 if exc.code == 0 else 2
-    except (DiagnosticError, batch.BatchError, route_diag.RouteDiagnosticError) as exc:
+    except (DiagnosticError, batch.BatchError, route_diag.RouteDiagnosticError,
+            shadow_route.ShadowRouteError) as exc:
         code = exc.args[0] if exc.args and exc.args[0] in CLI_ERRORS else 'OUTPUT_ERROR'
         print(json.dumps({'code': code}))
         return 2

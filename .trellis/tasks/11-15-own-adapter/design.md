@@ -160,3 +160,31 @@ The requested new test file and required task/spec/usage documents reside outsid
 ## Stage 2-1 implementation approval
 
 On 2026-11-15 the user approved implementation. Changes under engine_v2/tools/, engine_v2/tests/, engine_v2/docs/ and .trellis/ require engine_v2 tests only. A changed path outside this set triggers backend, all 18 scenario modules and frontend checks as well. Report both git diff --name-only main...HEAD and working-tree paths to prove the decision. For H1/H2, report supporting/refuting synthetic numbers and exact summary_brief row families the operator should inspect. The five supplied patterns are available for the final staged-diff scan.
+
+## 2-2단계 추천 설계 A
+
+### 경계와 실제 식
+
+nhis_payment_gov.recognizes의 머리글 후보 선택만 일반 높이 H와 첫 월 중심 C의 [C−3H, C−0.5H)로 바꾼다. 폭2.5H를 명시한다. H는 page_lines가 만든 유효 양수 상자 높이의 중앙값이다. 첫 월 후보 자격과 선택, 원 component-top 절단, header cluster/line 조립, 제목·문서번호 또는 정보 머리글 게이트, 반복 문자열 >=3 조건은 유지한다. 엔진 이름별 분기와 원 토큰/신뢰도 변경을 도입하지 않는다.
+
+작은 내부 helper에서 실제 인식용 머리글과 정상 높이/첫 월을 구하고 recognizes와 진단 helper가 같은 선택을 사용하게 해 관찰 드리프트를 막는다. 기존 세 항목 추출 API와 필드 결과 투영은 유지한다. HEADER_HEIGHT_RATIO는 실제 새 검색 폭2.5H/쪽 높이를 기록하도록 정의와 문서·관찰을 함께 변경한다. 구간 이름과 조건 순서는 유지한다. 이 의도된 관찰 의미 변화에 따른 알려진 시험 영향은 연구 문서에 명시했다.
+
+독립 가상 입력만으로 실제 OCR 재현3쪽과 구조 단위 패딩 불변성을 추가한다. 기존 합성 providers/Source 렌더러를 호출하는 새 시험 fixture는 허용하며 원 생성기와 410쌍 샘플은 바꾸지 않는다. 형식 자체를 바꾸어 측정 성공을 만드는 작업은 수행하지 않는다. 사전 고정한 12개 렌더 변형 모두의 현재/후보 수치는 장기 연구 결과에 보존한다.
+
+### 비교 CLI
+
+서명은 python -B -m engine_v2.tools.ocr_baseline_compare --before RESULT_DIR --after RESULT_DIR이다. 쓰기와 원 문서 접근 없이 두 결과의 run.json/results.jsonl을 기존 닫힌 검증 함수로 읽고 기존 build_summary/metrics 집계를 재사용한다. 등록된 전체 종류·필드·선택 엔진·변형 합집합의 격자를 출력한다. ASCII 필드 코드는 기존 FIELD_CODES를 재사용한다.
+
+지표는 FIELD_AGREEMENT, PAGE_CER_MEAN, POOLED_CER, WORD_F1, OCR_TIME_PER_PAGE_S, TOTAL_TIME_PER_PAGE_S와 분자/분모·시도 상태다. 비율 전/후와 차이는 %p, 시간 전/후와 차이는 초로 명시한다. 차이는 음수도 허용하는 유한 수치다. CER>1을 보존한다. 미측정은 NA로 출력하고 분모0을 숨기지 않는다. 읽기 전용 요약에는 값/텍스트/ID/파일명/경로/해시/동적 예외 메시지가 포함되지 않는다.
+
+설정 불일치·훼손된 결과·중복 행·인자 오류는 고정 코드로 처리한다. 입력 코호트/루트 식별 차이는 원문 없는 고정 상태와 숫자로 표시한다. 결과 JSON만으로 파일 바이트 동일성을 증명할 수 없으므로 합성은 원 입력 manifest로 따로 검증한다. 도움말·오류 경계와 음수 차이, 0분모, 미측정 종류, CER>1, 부분 코호트, 중복·훼손 결과를 시험한다.
+
+### 검증 게이트
+
+운영 코드 변경이므로 engine/backend/18 scenarios/frontend 전체를 순차 실행한다. backend 직전 df -h /가용15GiB 이상을 확인한다. 기준은 cdbe672 engine1983/3skip/3xfail과 원 baseline backend1410/2xfail, scenarios18/1885/0, frontend3명령0이다. 허용한 기대값 영향 외 기존 시험 실패는 즉시 보고한다.
+
+410쌍은 원 samples5/seed20261113·분모·개별 상태를 보존한다. 각 엔진·종류의 새 음성 PASS 증가를 발견하면 이후 측정을 멈춘다. reference 결과는 완전히 같아야 한다. 전체 OCR 측정은 보존된 모든 합성 종류와6경로를 사용하며 own 필드2%p 초과 저하·AV 값 변화·참조/분모 변화의 이유를 보고한다. 70쪽 분기와 재현3쪽 결과를 별도 표로 남긴다. 원본 OCR 토큰/신뢰도, 판정/재업로드/쪽수 로직과 금액의 근거를 보존한다.
+
+### 남은 위험
+
+같은 중앙값 식도 provider 관측의 영향을 받으며, 새로운 밴드가 불완전한 정부형을 legacy로 보낼 수 있다. 연구 격자 전체에서 own은 GOVERNMENT7/12가 남는다. 추천안은 정식 재현3쪽을 해결하고 원 참조·AV를 보존하는 최소 변경이다. 2순위 머리글 정확 인식/조립과 열 경계 증거는 별도 변경으로 보류한다. 실제120쪽에서의95%와 글자층/AV 경로 영향은 사용자 재진단으로 확인한다.

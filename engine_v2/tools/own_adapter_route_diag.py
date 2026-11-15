@@ -113,10 +113,15 @@ def analyze(pairs, payment_called, original_result=None):
                 bins={metric: bin_value(metric, value) for metric, value in measurements.items()})
 
 
-def inspect_extraction(page, words, engine, extract):
-    """Delegate one primary extraction and observe its actual payment inputs."""
+def inspect_extraction(page, words, engine, extract, shadow=None):
+    """Delegate one primary extraction and observe its actual payment inputs.
+
+    When shadow is a list, one branch mapping of the candidate header rules is
+    appended for the same observed payment inputs.
+    """
     from engine_v2.extractors import nhis_payment, nhis_payment_gov
     from .ocr_baseline_fields import prepare_pairs
+    from . import own_adapter_shadow_route as shadow_route
 
     payment_inputs, predicate_results = [], []
     original_payment = nhis_payment.extract
@@ -135,6 +140,12 @@ def inspect_extraction(page, words, engine, extract):
         stack.enter_context(patch.object(nhis_payment, 'extract', payment))
         stack.enter_context(patch.object(nhis_payment_gov, 'recognizes', recognizes))
         extracted = extract(page, words, engine)
+    if shadow is not None:
+        try:
+            require(len(payment_inputs) <= 1)
+            shadow.append(shadow_route.branches(payment_inputs[0] if payment_inputs else None, extracted[2]))
+        except Exception:
+            shadow.append(dict.fromkeys(shadow_route.RULES, 'ERROR'))
     try:
         if payment_inputs:
             require(len(payment_inputs) == len(predicate_results) == 1)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import builtins
 from collections import defaultdict
 from copy import deepcopy
 import json
@@ -14,6 +15,7 @@ sys.dont_write_bytecode = True
 
 from . import batch_assess as batch
 from .ocr_baseline_settings import SETTINGS
+from . import own_adapter_route_diag as route_diag
 
 VERSION = 1
 ENGINES = ('own', 'applevision')
@@ -28,7 +30,13 @@ AVAILABILITY = ('ENCRYPTED', 'OPEN_ERROR', 'EMPTY_DOCUMENT', 'NO_TEXT_LAYER',
     'REFERENCE_ERROR', 'RENDER_ERROR', 'PROCESSING_ERROR', 'TYPE_NOT_REQUESTED')
 ERRORS = frozenset(('OPEN_ERROR', 'EMPTY_DOCUMENT', 'REFERENCE_ERROR', 'RENDER_ERROR',
                     'OCR_ERROR', 'EXTRACTION_ERROR', 'PROCESSING_ERROR'))
-FILENAMES = ('run.json', 'results.jsonl', 'summary.json', 'summary.txt')
+FILENAMES = ('run.json', 'results.jsonl', 'summary.json', 'summary.txt', 'summary_brief.txt')
+CLI_ERRORS = ('ARGUMENT_ERROR', 'OUTPUT_ERROR', 'ROOT_NOT_DIR', 'OUT_EXISTS',
+    'OUT_INSIDE_ROOT', 'ROOT_INSIDE_OUT', 'IDS_NOT_FOUND', 'IDS_INVALID',
+    'SYMLINK_REJECTED', 'LOCATION_REJECTED')
+EXCEPTION_TYPES = (FileNotFoundError, PermissionError, FileExistsError, IsADirectoryError,
+    NotADirectoryError, UnicodeError, OSError, ValueError, TypeError, RuntimeError,
+    ImportError, LookupError, ArithmeticError, AssertionError, Exception)
 
 # Public field names are a fixed vocabulary, never extractor-produced strings.
 FIELD_CODES = {
@@ -169,7 +177,7 @@ def _kind(result):
     return kind if kind in REGISTRY else 'X'
 
 
-def process_document(path, ordinal, engines, fields):
+def process_document(path, ordinal, engines, fields, route_observations=None):
     """Return projected records under the caller's shared read-only guard.
 
     REFERENCE_ERROR has unknown reference availability. RENDER_ERROR retains
@@ -199,11 +207,15 @@ def process_document(path, ordinal, engines, fields):
                     output.append(row(ordinal, number, code=quality))
                     continue
                 try:
-                    reference, ref_raw, form = evidence.extract_with_form(page, truth, 'text_layer')
+                    extracted, ref_analysis = route_diag.inspect_extraction(
+                        page, truth, 'text_layer', evidence.extract_with_form)
+                    reference, ref_raw, form = extracted
                 except Exception:
                     output.append(row(ordinal, number, code='REFERENCE_ERROR'))
                     continue
                 kind = _kind(reference)
+                if kind == 'NHIS_PAYMENT':
+                    route_diag.record(route_observations, ordinal, number, 'text_layer', form, form, ref_analysis)
                 if kind == 'X':
                     output.append(row(ordinal, number, form=form, code='CLASSIFICATION_FAILED'))
                     continue
@@ -231,11 +243,15 @@ def process_document(path, ordinal, engines, fields):
                             eligible=int(key in ref_raw and batch._present(ref_raw[key]))) for field, key in selected)
                         continue
                     try:
-                        observed, obs_raw, observed_form = evidence.extract_with_form(image, recognized.words, engine)
+                        extracted, analysis = route_diag.inspect_extraction(
+                            image, recognized.words, engine, evidence.extract_with_form)
+                        observed, obs_raw, observed_form = extracted
                     except Exception:
                         output.extend(row(ordinal, number, kind, form, field, engine, 'EXTRACTION_ERROR',
                             eligible=int(key in ref_raw and batch._present(ref_raw[key]))) for field, key in selected)
                         continue
+                    if kind == 'NHIS_PAYMENT':
+                        route_diag.record(route_observations, ordinal, number, engine, form, observed_form, analysis)
                     observed_kind = _kind(observed)
                     for field, key in selected:
                         eligible = int(key in ref_raw and batch._present(ref_raw[key]))
@@ -287,7 +303,7 @@ def route_summary(meta, rows):
     return dict(distributions=distributions, cross=cross)
 
 
-def build_summary(meta, rows, counters):
+def build_summary(meta, rows, counters, route_observations=()):
     cells = defaultdict(list)
     for item in meta['fields']:
         for form in FORMS:
@@ -323,18 +339,21 @@ def build_summary(meta, rows, counters):
                               if r['code'] == code and r['engine'] != 'X'}) for code in AVAILABILITY},
     }
     return dict(schema_version=VERSION, counters=dict(counters), availability=availability,
-                routes=route_summary(meta, rows), groups=groups)
+                routes=route_summary(meta, rows), groups=groups,
+                route_conditions=route_diag.build_summary(meta, rows, route_observations))
 
 
-def validate_summary(value, meta, rows):
-    require(isinstance(value, dict) and set(value) == {'schema_version', 'counters', 'availability', 'routes', 'groups'})
+def validate_summary(value, meta, rows, route_observations=()):
+    require(isinstance(value, dict) and set(value) == {
+        'schema_version', 'counters', 'availability', 'routes', 'groups', 'route_conditions'})
     require(type(value['schema_version']) is int and value['schema_version'] == VERSION)
     counters = value['counters']
     require(isinstance(counters, dict) and set(counters) == set(COUNTERS) and all(count(v) for v in counters.values()))
-    expected = build_summary(meta, rows, counters)
+    expected = build_summary(meta, rows, counters, route_observations)
     require(value == expected)
     require(all(count(item['pages']) for items in value['routes'].values() for item in items))
     require(all(count(number) for statuses in value['availability'].values() for number in statuses.values()))
+    route_diag.validate_summary(value['route_conditions'])
     for group in value['groups']:
         require(set(group['codes']) == set(CAUSES) and set(group['statuses']) == set(AVAILABILITY))
         require(all(count(v) for v in [group['eligible'], group['diagnosed'], group['missing_reference'],
@@ -368,6 +387,28 @@ def summary_text(summary):
                 code, str(number), str(group['diagnosed']), 'null' if rate is None else f'{rate:.8f}')))
         for code, number in group['statuses'].items():
             lines.append(' '.join((group['type'], group['form'], group['field'], group['engine'], code, str(number))))
+    lines.extend(route_diag.text_lines(summary['route_conditions']))
+    return '\n'.join(lines)+'\n'
+
+
+def summary_brief(summary):
+    lines = ['OWN_ADAPTER_DIAG_BRIEF']
+    lines.extend(f'{key.upper()} {value}' for key, value in summary['counters'].items())
+    for unit, statuses in summary['availability'].items():
+        lines.extend(f'{unit.upper()} {code} {number}' for code, number in statuses.items() if number)
+    for item in summary['routes']['distributions']:
+        lines.append(f"ROUTE {item['engine']} {item['form']} {item['pages']}")
+    for item in summary['routes']['cross']:
+        lines.append(f"ROUTE_CROSS {item['engine']} {item['reference_form']} {item['observed_form']} {item['pages']}")
+    lines.extend(route_diag.text_lines(summary['route_conditions'], brief=True))
+    for group in summary['groups']:
+        if not (group['eligible'] or any(group['statuses'].values())):
+            continue
+        prefix = ' '.join((group['type'], group['form'], group['field'], group['engine']))
+        lines.append(f"FIELD_POPULATION {prefix} {group['eligible']} {group['match_opportunities']} {group['diagnosed']}")
+        for code, number in {**group['codes'], **group['statuses']}.items():
+            if number:
+                lines.append(f'FIELD {prefix} {code} {number}')
     return '\n'.join(lines)+'\n'
 
 
@@ -382,7 +423,7 @@ def _ids_selection(root, path, out, files):
     """
     actual = batch._location(path)
     if not actual.is_file() or actual.is_relative_to(out):
-        raise DiagnosticError('ARGUMENT_ERROR')
+        raise DiagnosticError('IDS_INVALID')
     available = {item.relative_to(root).as_posix(): item for item in files}
     with os.scandir(root) as entries:
         folders = {entry.name for entry in entries if not entry.name.startswith('.')
@@ -444,29 +485,44 @@ def _ids_selection(root, path, out, files):
 
 
 def _selection(root, requested, ids):
-    if Path(root).is_symlink() or Path(requested).is_symlink():
-        raise DiagnosticError('ARGUMENT_ERROR')
+    arguments = [root, requested] if ids is None else [root, requested, ids]
+    if any(Path(path).is_symlink() for path in arguments):
+        raise DiagnosticError('SYMLINK_REJECTED')
+    original_root, original_out = Path(root).resolve(), Path(requested).resolve()
+    if not original_root.is_dir():
+        raise DiagnosticError('ROOT_NOT_DIR')
+    if original_out.is_relative_to(original_root):
+        raise DiagnosticError('OUT_INSIDE_ROOT')
+    if original_root.is_relative_to(original_out):
+        raise DiagnosticError('ROOT_INSIDE_OUT')
+    if original_out.exists():
+        raise DiagnosticError('OUT_EXISTS')
     root = batch._location(root)
     out = batch._location(requested)
-    if not root.is_dir() or out.exists() or root.is_relative_to(out) or out.is_relative_to(root):
-        raise DiagnosticError('ARGUMENT_ERROR')
+    if ids is not None:
+        original = Path(ids)
+        if not original.exists():
+            raise DiagnosticError('IDS_NOT_FOUND')
+        if not original.is_file() or original.stat().st_nlink != 1:
+            raise DiagnosticError('IDS_INVALID')
     inventory, excluded = batch.inventory(root)
     files = [path for path in inventory if path.suffix.lower() == '.pdf']
     counts = dict.fromkeys(SELECTION_KEYS, 0)
     counts['selected'] = len(files)
     if ids is not None:
-        original = Path(ids)
-        if original.is_symlink() or original.stat().st_nlink != 1:
-            raise DiagnosticError('ARGUMENT_ERROR')
         actual_ids = batch._location(ids)
         if any(os.path.samefile(actual_ids, path) for path in files):
-            raise DiagnosticError('ARGUMENT_ERROR')
+            raise DiagnosticError('IDS_INVALID')
         files, counts = _ids_selection(root, actual_ids, out, files)
     return out, files, counts, len(inventory), sum(excluded.values())
 
 
 def run(root, out, engines=ENGINES, *, ids=None, limit=None, fields=DEFAULT_FIELDS):
     from .ocr_baseline import _atomic_text
+    if (not engines or any(engine not in ENGINES for engine in engines)
+            or len(engines) != len(set(engines))
+            or (limit is not None and (not count(limit) or limit <= 0))):
+        raise DiagnosticError('ARGUMENT_ERROR')
     selected = parse_fields(fields)
     meta = validate_meta(dict(schema_version=VERSION, engines=list(engines),
         fields=[dict(type=kind, field=field) for kind, field in selected],
@@ -486,21 +542,25 @@ def run(root, out, engines=ENGINES, *, ids=None, limit=None, fields=DEFAULT_FIEL
     target.mkdir(parents=True, exist_ok=False, mode=0o700)
     batch._atomic(target/'run.json', meta)
     rows = []
+    route_observations = []
     # Claim the fixed result file even when there are no selected PDFs.
     fd = batch._open(target/'results.jsonl', os.O_WRONLY | os.O_CREAT | os.O_EXCL)
     os.close(fd)
     for ordinal, path in enumerate(pending, 1):
+        document_observations = []
         try:
             with batch.guarded():
-                projected, pages = process_document(path, ordinal, engines, selected)
+                projected, pages = process_document(path, ordinal, engines, selected, document_observations)
         except KeyboardInterrupt:
             raise
         except Exception:
             projected, pages = [row(ordinal, code='PROCESSING_ERROR')], 0
+            document_observations = []
         for item in projected:
             validate_row(item, meta)
             batch._append(target/'results.jsonl', item)
         rows.extend(projected)
+        route_observations.extend(document_observations)
         counters['attempted_documents'] += 1
         counters['processed_pages'] += pages
         unrequested = {item['page'] for item in projected if item['code'] == 'TYPE_NOT_REQUESTED'}
@@ -519,11 +579,15 @@ def run(root, out, engines=ENGINES, *, ids=None, limit=None, fields=DEFAULT_FIEL
         if r['engine'] != 'X' and r['code'] in ('ENGINE_UNAVAILABLE','OCR_ERROR','EXTRACTION_ERROR')})
     counters['empty_ocr'] = len({(r['document'],r['page'],r['engine']) for r in rows if r['code'] == 'EMPTY_OCR'})
     counters['execution_errors'] = len({(r['document'],r['page'],r['engine']) for r in rows if r['code'] in ERRORS})
-    summary = validate_summary(build_summary(meta, rows, counters), meta, rows)
+    summary = validate_summary(build_summary(meta, rows, counters, route_observations),
+                               meta, rows, route_observations)
     batch._atomic(target/'summary.json', summary)
     _atomic_text(target/'summary.txt', summary_text(summary))
+    _atomic_text(target/'summary_brief.txt', summary_brief(summary))
     print(json.dumps(dict(counters)), flush=True)
-    return int(counters['execution_errors'] > 0)
+    condition_errors = sum(group['statuses'][code] for group in summary['route_conditions']['groups']
+                           for code in route_diag.ANALYSIS_ERRORS)
+    return int(counters['execution_errors'] > 0 or condition_errors > 0)
 
 
 class SafeParser(argparse.ArgumentParser):
@@ -532,13 +596,13 @@ class SafeParser(argparse.ArgumentParser):
 
 
 def parser():
-    result = SafeParser(prog='own_adapter_diag', add_help=False)
-    result.add_argument('--root', required=True)
-    result.add_argument('--out', required=True)
-    result.add_argument('--ids')
-    result.add_argument('--limit', type=int)
-    result.add_argument('--engines', nargs='+', default=list(ENGINES))
-    result.add_argument('--fields', nargs='+', default=list(DEFAULT_FIELDS))
+    result = SafeParser(prog='own_adapter_diag', description='VALUE_FREE_ROUTE_DIAGNOSTICS')
+    result.add_argument('--root', required=True, metavar='ROOT')
+    result.add_argument('--out', required=True, metavar='OUT')
+    result.add_argument('--ids', metavar='IDS')
+    result.add_argument('--limit', type=int, metavar='N')
+    result.add_argument('--engines', nargs='+', default=list(ENGINES), metavar='ENGINE')
+    result.add_argument('--fields', nargs='+', default=list(DEFAULT_FIELDS), metavar='TYPE_FIELD')
     return result
 
 
@@ -549,12 +613,16 @@ def main(argv=None):
     except KeyboardInterrupt:
         print(json.dumps({'code': 'INTERRUPTED'}))
         return 130
-    except DiagnosticError as exc:
-        code = exc.args[0] if exc.args and exc.args[0] in ('ARGUMENT_ERROR', 'OUTPUT_ERROR') else 'OUTPUT_ERROR'
+    except SystemExit as exc:
+        return 0 if exc.code == 0 else 2
+    except (DiagnosticError, batch.BatchError, route_diag.RouteDiagnosticError) as exc:
+        code = exc.args[0] if exc.args and exc.args[0] in CLI_ERRORS else 'OUTPUT_ERROR'
         print(json.dumps({'code': code}))
         return 2
-    except Exception:
-        print(json.dumps({'code': 'ARGUMENT_ERROR'}))
+    except Exception as exc:
+        kind = next(base.__name__ for base in type(exc).__mro__
+                    if base in EXCEPTION_TYPES and getattr(builtins, base.__name__, None) is base)
+        print(json.dumps({'code': 'UNEXPECTED_ERROR', 'exception_type': kind}))
         return 2
 
 

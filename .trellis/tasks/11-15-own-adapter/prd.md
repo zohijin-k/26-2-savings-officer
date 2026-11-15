@@ -1,6 +1,8 @@
 # own OCR 어댑터 진단 — 요구사항
 
-상태: 0~1단계 조건부 실행 승인. 아래 2026-11-15 승인 조건을 반영한 뒤 실행한다. 커밋과 2~3단계 구현은 미승인이다. 브랜치는 `work/own-adapter`, 시작 main은 `2b4ab5949a2d7455a3da7da3ab0fd7c1f687e4d8`이다.
+현재 상태: 1단계는 95d9ef7로 커밋 완료. 2-1단계 구현·검증 완료, 커밋 승인을 기다린다. 아래 0~1단계 기록은 완료된 이력이다.
+
+기존 상태 기록: 0~1단계 조건부 실행 승인. 아래 2026-11-15 승인 조건을 반영한 뒤 실행한다. 커밋과 2~3단계 구현은 미승인이다. 브랜치는 `work/own-adapter`, 시작 main은 `2b4ab5949a2d7455a3da7da3ab0fd7c1f687e4d8`이다.
 
 ## 조건부 승인 반영 — 1단계 보고 첫머리에도 명시
 
@@ -63,3 +65,24 @@
 - Inspect and report existing form-selection predicates. Keep implementation changes within diagnostic code/tests/documents.
 - Repeat the supplied five-pattern scan over the entire staged diff and report its exact staged path list. Request commit approval after these additions.
 - Keep actual operator paths in chat commands only. Private documents remain inaccessible throughout this follow-up.
+
+## Stage 2-1 requirements and acceptance
+
+The operator's 120-page route/field aggregates are recorded once in research/route-conditions.md. The purpose of this stage is to expose which government routing conditions differ between the actual extraction inputs for text_layer, own and applevision.
+
+| ID | Requirement and observable acceptance |
+| --- | --- |
+| R21 | Inspect all LEGACY/GOVERNMENT/OTHER dispatch functions, input transformations and the default legacy behavior. Record source-grounded, testable hypotheses for the opposing synthetic/operator directions. |
+| R22 | Add page-level aggregate O/X condition counts for all three paths, binned structural distributions and a condition-pattern to observed-route cross-tabulation. Preserve existing output fields and records. New content contains only fixed codes, O/X, bin names and numeric page counts. |
+| R23 | Add static value-free --help with exit 0, distinct location/selection errors, and UNEXPECTED_ERROR with a reviewed exception-type name. ARGUMENT_ERROR covers argument parsing/validation. Add summary_brief.txt with routes, condition outputs and nonzero field-code rows, with enough population counts to interpret exclusions. |
+| R24 | Reuse the exact preserved 70 pages, separated by reference LEGACY 50 / GOVERNMENT 20. Report all new aggregate families, verify previous field flags/routes remain equal and preserve evidence outside Git. Generator changes are deferred. |
+| R25 | Add independent condition, boundary, parity, privacy, CLI-error and brief-output tests. Check that engine_v2 pass growth above 1875 equals the collected newly added tests, retaining 3 skipped / 3 xfailed. A failure in an existing test requires a report before any attempted expectation change. |
+| R26 | Preserve source boundaries for classifiers, extractors, decisions, adapters, generators and shared runtime helpers. Test files and documentation are required deliverables outside tools. The literal tools-outside regression condition therefore schedules the full regression bundle unless the user narrows that condition during plan review. |
+| R27 | Keep operator input paths solely in chat commands. Provide the requested absolute-cd/caffeinate invocation and a separate command that prints only summary_brief.txt after implementation. Private inputs and results receive zero agent accesses. |
+| R28 | Follow the same Trellis task. Approve the plan before implementation, and approve the staged commit separately. Ask for the five scan patterns at the precommit gate, scan the whole staged diff, report exact paths and stop for commit approval. |
+
+The design owns condition/bin/error contracts. The implementation plan owns the change sequence and verification gates. The accepted implementation baseline is commit 95d9ef7 with engine_v2 1875 passed / 3 skipped / 3 xfailed. Stage 2-2 starts after the operator supplies the expanded diagnosis and separately authorizes the next change.
+
+## Stage 2-1 implementation approval
+
+On 2026-11-15 the user approved implementation. Changes under engine_v2/tools/, engine_v2/tests/, engine_v2/docs/ and .trellis/ require engine_v2 tests only. A changed path outside this set triggers backend, all 18 scenario modules and frontend checks as well. Report both git diff --name-only main...HEAD and working-tree paths to prove the decision. For H1/H2, report supporting/refuting synthetic numbers and exact summary_brief row families the operator should inspect. The five supplied patterns are available for the final staged-diff scan.

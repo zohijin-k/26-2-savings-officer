@@ -5,3 +5,5 @@
 {"file": ".trellis/tasks/11-15-own-adapter/research/source-map.md", "reason": "코드 읽기 지도·생성기 목록·기존 보고 차이"}
 {"file": ".trellis/tasks/11-15-own-adapter/research/corpus-command.md", "reason": "사전 고정 합성 구성과 실행 명령"}
 {"file": ".trellis/tasks/11-15-own-adapter/research/adapter-contract.md", "reason": "실제 baseline 추출 호출과 8개 입력 계약, 서식 차이 한계"}
+{"file": ".trellis/tasks/11-15-own-adapter/research/route-conditions.md", "reason": "Stage 2-1 actual routing predicates, provider geometry, user numeric observations and falsifiable hypotheses"}
+{"file": ".trellis/spec/backend/own-adapter-diagnostics.md", "reason": "Closed diagnostic output, original extraction and route-denominator contracts"}

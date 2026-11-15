@@ -96,3 +96,67 @@ exit 0은 처리 완료(예상된 제외 포함), 1은 실행 오류 기록, 2�
 The diagnostic row's form and observed_form use null for paths without completed extraction. A completed OTHER dispatch remains explicit. Successful reference extraction retains its form when classification fails. Summary dispatch counts deduplicate document/page identities across fields and reject contradictory forms for the same engine/path. Closed summary validation covers the new distributions and full cross-tabulation, including integer count types and zero cells.
 
 The causal order now begins OK, ROUTE_MISMATCH, LABEL_NOT_FOUND, followed by the existing remaining causes. Missing reference and execution/availability statuses preserve their populations. Compare the observed and reference forms before reference-evidence eligibility for a present-reference field mismatch. This makes an unsupported government billing-month evidence case attributable to the observed route difference. Existing readers and form recognition predicates retain their current implementation.
+
+## Stage 2-1 proposed design
+
+### Observation boundary and compatibility
+
+Add a diagnostic-only helper under engine_v2/tools for route-condition analysis. Observe the original nhis_payment.extract and nhis_payment_gov.recognizes calls during each primary extraction, always delegate and restore wrappers on success, failure and interruption. Analyze the exact prepared inputs received at that call. Reuse original MONTH, DOCUMENT_NUMBER, component/cluster/layout helpers and permitted format normalization. Compare the decomposed predicate with the original recognizes result to detect drift. Counterfactual evidence replays contribute zero route-condition observations.
+
+Keep extract_with_form's existing three-item return contract and the original results.jsonl record keys. Retain run.json's current metadata fields. Collect new in-memory observations separately from field records. Summaries gain one closed route_conditions section. Its aggregates are keyed by reference form and engine, making the synthetic legacy/government populations distinguishable. Count each document/page/engine once across fields. No page identifiers or raw measurements are added to the condition summaries.
+
+For a reference-confirmed payment page whose observed path becomes OTHER, analyze identically prepared copies and record PAYMENT_DISPATCH_CALLED X. Treat these as prospective predicate observations, distinct from an observed recognizes call. Missing/empty/error OCR contributes availability counts and contributes zero O/X patterns. A diagnostic-analysis failure contributes CONDITION_ERROR, preserves measured fields/routes and produces a visible failed diagnostic population. A formula/actual-return disagreement contributes PREDICATE_DIVERGENCE and fails the validation gate.
+
+### Condition order
+
+The ordered condition vocabulary is PAYMENT_DISPATCH_CALLED, GOV_TITLE, DOCUMENT_NUMBER_LABEL, DOCUMENT_NUMBER_PATTERN, GOV_NUMBER_GATE, PAYER_NUMBER_LABEL, WORKPLACE_LABEL, INFO_GRID_GATE, COMPONENT_TOP_FOUND, FIRST_MONTH_FOUND, HEADER_COMPONENT_TOP_FOUND, HEADER_BOSUOE_GE3, HEADER_INCOME_GE3, GOV_PREDICATE, LEGACY_TITLE. Definitions and source functions are in research/route-conditions.md. Output each condition as O or X. Pattern rows use this exact O/X order and the actual final LEGACY/GOVERNMENT/OTHER route. The brief file prints CONDITION_ORDER so pasted pattern rows are self-contained.
+
+### Measurement bins
+
+Compute measurements on the NFKC/masked extraction copies. Never serialize the raw number. Intervals are left-inclusive and right-exclusive. The final interval includes all larger finite values. NA counts unavailable measurements explicitly.
+
+| Metric code | Measurement | Fixed bin boundaries / codes |
+| --- | --- | --- |
+| HEADER_BOSUOE_COUNT | Final reconstructed header_text count of 보수외 | N0, N1, N2, N3, N4_9, GE10 |
+| HEADER_INCOME_COUNT | Final reconstructed header_text count of 소득월액 | N0, N1, N2, N3, N4_9, GE10 |
+| HEADER_HEIGHT_RATIO | Original candidate band height 3 * first-month box height / page height, before component trimming. No first month yields NA. | [0,.01) LT_001, [.01,.02) R001_002, [.02,.05) R002_005, [.05,.10) R005_010, [.10,.25) R010_025, [.25,infinity) GE_025, NA |
+| BOX_HEIGHT_MEDIAN_RATIO | Median positive box height / page height over actual prepared words | [0,.005) LT_0005, [.005,.01) R0005_001, [.01,.02) R001_002, [.02,.05) R002_005, [.05,.10) R005_010, [.10,infinity) GE_010, NA |
+| BOX_CHAR_MEDIAN | Median len(squash(word.text)) on prepared words | [0,1) LT1, [1,4) R1_4, [4,8) R4_8, [8,16) R8_16, [16,32) R16_32, [32,64) R32_64, [64,infinity) GE64, NA |
+| PAGE_BOX_COUNT | Number of prepared boxes | ZERO, N1_49, N50_99, N100_199, N200_399, N400_799, GE800 |
+
+All coordinate calculations retain the original normalized-page interpretation. Reject nonfinite/invalid geometry as diagnostic-analysis failure. A missing component top or first month produces the original empty header string and count bin N0. Missing first month gives NA for header height. Header height measures the recognizer's search band, allowing tall boxes to be detected even when trimming leaves few selected words. A full observed predicate records both X and O counts, including zeros. Histogram bins include zero cells in JSON/full text. Brief output may omit zero histogram/pattern cells while retaining both O/X condition counts and the fixed condition/bin definitions.
+
+### Outputs
+
+Retain run.json, results.jsonl, summary.json and summary.txt. Add summary_brief.txt to the fixed output allowlist. Add route_conditions with condition_order, aggregate condition counts, binned distributions, observed condition patterns to final routes, and availability/error populations. Validate key sets, reviewed code values, nonnegative integer counts, exact partition sums and page deduplication before writing. Existing results.jsonl rows and existing summary sections must match the accepted baseline on the preserved corpus.
+
+The brief file prints population/availability counts, ROUTE and ROUTE_CROSS, condition order and O/X counts, distribution definitions/nonzero counts, pattern rows, and field-code/status rows with nonzero counts. Preserve full routes including zero cells so a missing government population is explicit. Field rows identify type, reference form, field, engine, code and count. Include existing comparison/eligibility denominators for interpreting REFERENCE_MISSING and unavailable paths. Exclude text, values, paths, filenames, coordinates, raw medians and exception messages.
+
+### CLI error matrix and precedence
+
+| Code | Trigger | Exit |
+| --- | --- | ---: |
+| ARGUMENT_ERROR | Unknown/missing flags, invalid integer or invalid/duplicate engine/field/limit selection | 2 |
+| SYMLINK_REJECTED | Explicit root/out/ids argument is a symlink, including a dangling link | 2 |
+| ROOT_NOT_DIR | Root is missing or is not a directory | 2 |
+| OUT_INSIDE_ROOT | Output equals root or lies under root | 2 |
+| ROOT_INSIDE_OUT | Root lies under output | 2 |
+| OUT_EXISTS | Output already exists after overlap checks | 2 |
+| IDS_NOT_FOUND | Specified list file is missing | 2 |
+| IDS_INVALID | List is not a regular file, has unsafe hardlink/alias or overlaps output | 2 |
+| LOCATION_REJECTED | Existing repository ignored/external location policy rejects an argument | 2 |
+| OUTPUT_ERROR | Closed-schema rejection or fixed artifact-writing contract failure | 2 |
+| UNEXPECTED_ERROR | Remaining unexpected exception, plus reviewed exception type only | 2 |
+| INTERRUPTED | Keyboard interrupt | 130 |
+
+Apply argument validation first, then explicit symlink checks, root/overlap/existence checks, existing location policy and ids validation. Terminal argument symlinks are rejected. Existing safe inventory behavior still counts/skips descendant symlinks. Preserve invalid/missing selector-line counters and per-line UTF-8 handling. IDS_INVALID concerns the list container/alias contract, so malformed individual selector lines retain their existing counted-skip behavior.
+
+Use a fixed built-in exception vocabulary for the exception_type field. Map a custom exception to its nearest reviewed built-in base class. This permits exception-type reporting without exposing arbitrary custom class names or message contents. Static --help works without filesystem access or loading OCR dependencies and exits 0. Main must distinguish help's successful exit from unexpected exceptions.
+
+### Regression scope superseded by the approval below
+
+The requested new test file and required task/spec/usage documents reside outside engine_v2/tools. Applying the user's tools-outside-files condition literally schedules engine/backend/scenario/frontend verification in the tracked-source isolation. The user can narrow this condition to operating code during plan approval. Existing tests/expectations have zero planned modifications. Known filename assertions use FILENAMES, so adding summary_brief through that constant does not require an expectation rewrite. Any newly discovered old-test conflict is reported before changing expectations.
+
+## Stage 2-1 implementation approval
+
+On 2026-11-15 the user approved implementation. Changes under engine_v2/tools/, engine_v2/tests/, engine_v2/docs/ and .trellis/ require engine_v2 tests only. A changed path outside this set triggers backend, all 18 scenario modules and frontend checks as well. Report both git diff --name-only main...HEAD and working-tree paths to prove the decision. For H1/H2, report supporting/refuting synthetic numbers and exact summary_brief row families the operator should inspect. The five supplied patterns are available for the final staged-diff scan.

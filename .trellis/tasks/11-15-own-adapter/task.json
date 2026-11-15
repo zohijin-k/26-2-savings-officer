@@ -2,7 +2,7 @@
   "id": "own-adapter",
   "name": "own-adapter",
   "title": "own OCR adapter diagnosis and synthetic baseline",
-  "description": "Plan stages 0–1: regression and synthetic baselines, value-free own/Apple Vision adapter diagnosis; later adapter changes require separate approval.",
+  "description": "Stage 2-1 value-free routing predicate diagnostics and CLI usability, implemented and verified. Commit approval pending.",
   "status": "in_progress",
   "dev_type": null,
   "scope": "backend",
@@ -15,12 +15,12 @@
   "branch": "work/own-adapter",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
+  "commit": "95d9ef7",
   "pr_url": null,
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Stages 0–1 and approved route-observation follow-up complete. Same 20-file commit candidate awaits renewed approval. Added page-based dispatch distributions/cross-tabulations and ROUTE_MISMATCH after OK. Focused127, +22 follow-up tests. Engine1875/3skip/3xfail, growth matches127 total new tests and22 follow-up tests. Native synthetic70-page/420-field diagnosis preserves prior match flags/routes. Government own billing20 and issue10 become ROUTE_MISMATCH. Initial sandbox Apple empty OCR is superseded. Original recognition code edits0, private accesses0. Five-pattern scan and staged list reported in chat. Commit approval is pending. Stage-two planning follows private diagnosis.",
+  "notes": "Stage one95d9ef7. Stage2-1 approved with engine-only scope for tools/tests/docs/.trellis. New tests108, existing focused127, engine1983/3skip/3xfail, increase108 matches new collection. Same70 synthetic pages420 records/210 measured condition paths, all original flags/routes/summary sections equal, condition errors0. Government own FIRST_MONTH_FOUND20/20 but HEADER_BOSUOE_GE3 fails20; repetition bins1x10/2x10. Header-height bins match across engines. Private accesses0, original test edits0, classifier/extractor/adapter/decision/generator edits0. Staged13 files. Five-pattern counts0/0/0/0/0. Commit approval pending.",
   "meta": {}
 }

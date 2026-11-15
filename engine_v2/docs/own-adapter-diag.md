@@ -17,7 +17,7 @@ The extraction call is `ocr_baseline_runtime.extract → batch_assess._read_page
 
 ## Outputs and denominators
 
-The four output files are `run.json`, `results.jsonl`, `summary.json`, and `summary.txt`. Their closed schemas permit only fixed codes, integer document/page ordinals, finite numeric measurements and null. Text, values, input IDs/paths, coordinates, hashes, exception details and tracebacks are not diagnostic output. Dependencies execute under the existing quiet, read-only, no-network boundary.
+The four output files are `run.json`, `results.jsonl`, `summary.json`, `summary.txt`, and `summary_brief.txt`. Their closed schemas permit only fixed codes, integer document/page ordinals, finite numeric measurements and null. Text, values, input IDs/paths, coordinates, hashes, exception details and tracebacks are not diagnostic output. Dependencies execute under the existing quiet, read-only, no-network boundary.
 
 - **Eligible** counts a present reference field. Reference absence is not a failed recognition.
 - **Match opportunities** count completed comparisons with defined exact/normalized flags. Unsupported causal attribution does not erase a completed comparison. Execution failures and unavailable/empty OCR remain explicit without manufactured agreement rates.
@@ -64,3 +64,21 @@ Legacy and government payment forms use different existing readers. Government m
 `summary.json.routes.distributions` contains page counts for text_layer and each selected engine by LEGACY/GOVERNMENT/OTHER. `routes.cross` contains each engine's reference-form by observed-form cross-tabulation. `summary.txt` renders both as ROUTE and ROUTE_CROSS lines containing only fixed names and counts, including zero cells. Each completed path counts once per document/page across fields. A completed extraction counts even when its reference fields are absent. Reference counts include successful reference extraction on unrequested or classification-failed pages. OCR engines run only for requested types. An unavailable or failed path has a null form and contributes no dispatch count.
 
 On a present-reference mismatch, ROUTE_MISMATCH precedes classification/label/value/evidence diagnoses. OK retains first priority. Reference absence and execution/availability errors retain their status. Dispatch agreement and field agreement therefore have separate denominators.
+
+## Routing conditions and compact output
+
+The diagnostic observes the prepared input received by the original payment reader and its government predicate. CONDITION rows report each gate as O/X counts. CONDITION_PATTERN rows pair the ordered O/X combination with the actual route and page count. Reference-form and engine columns keep legacy/government populations separate. Each path counts once per page across fields. PAYMENT_DISPATCH_CALLED X and PROSPECTIVE identify a completed OTHER path whose prepared inputs were analyzed separately. Availability/error paths contribute status counts and zero measured patterns.
+
+CONDITION_ORDER prints the full fixed order. BIN rows define each half-open interval as metric, interval name, inclusive lower and exclusive upper bound. INF is an unbounded upper limit and NA identifies unavailable measurements. DISTRIBUTION rows expose page counts per interval without raw document measurements.
+
+- HEADER_BOSUOE_COUNT and HEADER_INCOME_COUNT use N0, N1, N2, N3, N4_9 and GE10.
+- HEADER_HEIGHT_RATIO is the original search-band height, three first-month box heights divided by page height before component trimming. Boundaries are .01, .02, .05, .10 and .25. A missing first month yields NA.
+- BOX_HEIGHT_MEDIAN_RATIO uses .005, .01, .02, .05 and .10.
+- BOX_CHAR_MEDIAN measures whitespace-squashed NFKC/masked text length per prepared box, then takes its median. Boundaries are 1, 4, 8, 16, 32 and 64.
+- PAGE_BOX_COUNT uses ZERO, N1_49, N50_99, N100_199, N200_399, N400_799 and GE800.
+
+Paste summary_brief.txt for review. It contains ROUTE/ROUTE_CROSS, condition order, interval definitions, O/X counts, nonzero histogram/pattern rows and nonzero field-code rows. FIELD_POPULATION columns are eligible, match opportunities and diagnosed counts. CONDITION_STATUS records unavailable paths, CONDITION_ERROR and PREDICATE_DIVERGENCE. The latter two make the run exit 1 while retaining the preceding field measurements.
+
+For the broad-header hypothesis, compare HEADER_HEIGHT_RATIO and BOX_HEIGHT_MEDIAN_RATIO distributions across engines within the same reference form, then HEADER_BOSUOE_GE3/HEADER_INCOME_GE3 and their pattern-to-route rows. For the fused-month hypothesis, compare COMPONENT_TOP_FOUND, FIRST_MONTH_FOUND and HEADER_COMPONENT_TOP_FOUND with BOX_CHAR_MEDIAN. FIRST_MONTH_FOUND X by itself leaves absent, fused and spatially excluded month tokens unresolved. FIRST_MONTH_FOUND O shows that at least one eligible complete month token survived. It refutes the specific claim that all month candidates were lost to full-match failure on that page.
+
+Use --help for static usage with exit 0. CLI failures return code 2 and distinct ROOT_NOT_DIR, OUT_EXISTS, OUT_INSIDE_ROOT, ROOT_INSIDE_OUT, IDS_NOT_FOUND, IDS_INVALID, SYMLINK_REJECTED, LOCATION_REJECTED or OUTPUT_ERROR codes. Unknown/missing/invalid argument selections return ARGUMENT_ERROR. Remaining exceptions return UNEXPECTED_ERROR with a reviewed built-in exception_type. Error messages contain zero input values or paths. Invalid individual list lines keep their existing numeric skipped-line accounting.

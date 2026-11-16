@@ -263,3 +263,10 @@ New108 and existing focused127 tests pass. Full engine1983/3skip/3xfail reconcil
 10. 채팅에만 실제 경로를 채운 사용자 명령을 제시한다. 진단/결과brief보기, 전체 OCR 재측정, before/after 비교를 각각 한 줄로 적고 절대 cd 및 && 연결을 사용한다. 실행 명령은 caffeinate -i를 포함한다. 사용자의 실서류 실행 중에는 작업하지 않는다.
 
 예상 운영 변경은 nhis_payment_gov.py의 인식 밴드와 최소 내부 helper다. 진단 helper, 비교 도구, 새 합성 시험 fixture/회귀, 승인된 기존 진단 시험 영향, 문서/Trellis 기록이 함께 변경된다. 기존 서비스 판정·threshold·재업로드·쪽수 검증, 원 OCR/어댑터와 원 생성기 파일은 변경 범위에 포함되지 않는다.
+
+## 2-3단계 실행 결과 — 커밋 승인 대기
+
+1. own_adapter_shadow_route에 후보 함수·표시·D3 구간과 별도 요약 절 shadow_candidates를 추가하고, inspect_extraction의 candidates 목록과 own_adapter_diag 출력에 연결했다. 기존 shadow 매핑과 SHADOW_* 줄은 그대로다.
+2. 보존 캐시로 메모리 평가, 엔진 시험 전체에 후보를 운영 판별 자리에 넣는 플러그인 실행(작업 트리 밖), 판별 호출 529회의 표시 조사, 원 70쪽·렌더 12쪽 native 재실행과 쪽별 대조를 했다.
+3. 엔진 시험 2166 passed / 3 skipped / 3 xfailed = 2072 + 새 시험 94. 결과 표는 stage23-report.md에 있다.
+

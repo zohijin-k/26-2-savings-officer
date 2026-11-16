@@ -20,10 +20,11 @@
   --color-border-strong: #b9c0cb;
   --color-divider: #eef0f2;
   --color-head: #f4f5f6;
-  /* 로고 색. 장식 전용이며 글자 · 상태 · 버튼 색으로 쓰지 않는다. */
-  --accent-red: #b82d2b;
-  --accent-yellow: #e6b943;
-  --accent-green: #8db243;
+  /* 머리글 색 띠(line.png에서 뽑은 값). 장식 전용이며 글자 · 상태 · 버튼 색으로 쓰지 않는다. */
+  --accent-yellow: #f0bc29;
+  --accent-green: #8cb935;
+  --accent-blue: #2680c1;
+  --accent-red: #cc212d;
 
   /* 상태: 배경 -5 / 테두리 -10 / 아이콘 -50 / 글자 -60 */
   --success-5: #eaf6ec;

@@ -1,8 +1,8 @@
 /* 담당자 머리글: 흰 바탕 · 로고 · 로고 색 띠. */
 .app-shell { min-height: 100dvh; background: var(--color-surface); }
 .shell { border-bottom: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); }
-/* 맨 위 장식 띠. 로고의 남색 · 빨강 · 노랑 · 초록이며 뜻을 전하는 색이 아니다. */
-.shell::before { content: ''; display: block; height: 4px; background: linear-gradient(90deg, var(--color-primary) 0 59%, var(--accent-red) 59% 76%, var(--accent-yellow) 76% 90%, var(--accent-green) 90% 100%); }
+/* 맨 위 장식 띠. 노랑 · 초록 · 파랑 · 빨강을 같은 폭으로 잇는다. 뜻을 전하는 색이 아니다. */
+.shell::before { content: ''; display: block; height: 4px; background: linear-gradient(90deg, var(--accent-yellow) 0 25%, var(--accent-green) 25% 50%, var(--accent-blue) 50% 75%, var(--accent-red) 75% 100%); }
 .shell__inner { display: flex; align-items: center; gap: var(--space-4); min-height: 64px; padding: 0 var(--space-6); }
 .shell__home { display: block; flex: none; padding: var(--space-1); border: 0; border-radius: var(--radius-8); background: transparent; line-height: 0; cursor: pointer; }
 .shell__logo { display: block; width: auto; height: 40px; }

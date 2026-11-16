@@ -179,7 +179,7 @@ def _kind(result):
 
 
 def process_document(path, ordinal, engines, fields, route_observations=None, shadow_observations=None,
-                     candidate_observations=None):
+                     candidate_observations=None, marker_observations=None):
     """Return projected records under the caller's shared read-only guard.
 
     REFERENCE_ERROR has unknown reference availability. RENDER_ERROR retains
@@ -208,10 +208,10 @@ def process_document(path, ordinal, engines, fields, route_observations=None, sh
                 if quality != 'NONE':
                     output.append(row(ordinal, number, code=quality))
                     continue
-                ref_shadow, ref_candidates = [], []
+                ref_shadow, ref_candidates, ref_markers = [], [], []
                 try:
                     extracted, ref_analysis = route_diag.inspect_extraction(
-                        page, truth, 'text_layer', evidence.extract_with_form, ref_shadow, ref_candidates)
+                        page, truth, 'text_layer', evidence.extract_with_form, ref_shadow, ref_candidates, ref_markers)
                     reference, ref_raw, form = extracted
                 except Exception:
                     output.append(row(ordinal, number, code='REFERENCE_ERROR'))
@@ -223,6 +223,8 @@ def process_document(path, ordinal, engines, fields, route_observations=None, sh
                                         ref_shadow[0] if ref_shadow else None)
                     shadow_route.record_candidates(candidate_observations, ordinal, number, 'text_layer', form,
                                                    ref_candidates[0] if ref_candidates else None)
+                    shadow_route.record_markers(marker_observations, ordinal, number, 'text_layer', form,
+                                                ref_markers[0] if ref_markers else None)
                 if kind == 'X':
                     output.append(row(ordinal, number, form=form, code='CLASSIFICATION_FAILED'))
                     continue
@@ -249,10 +251,11 @@ def process_document(path, ordinal, engines, fields, route_observations=None, sh
                         output.extend(row(ordinal, number, kind, form, field, engine, 'EMPTY_OCR',
                             eligible=int(key in ref_raw and batch._present(ref_raw[key]))) for field, key in selected)
                         continue
-                    path_shadow, path_candidates = [], []
+                    path_shadow, path_candidates, path_markers = [], [], []
                     try:
                         extracted, analysis = route_diag.inspect_extraction(
-                            image, recognized.words, engine, evidence.extract_with_form, path_shadow, path_candidates)
+                            image, recognized.words, engine, evidence.extract_with_form, path_shadow, path_candidates,
+                            path_markers)
                         observed, obs_raw, observed_form = extracted
                     except Exception:
                         output.extend(row(ordinal, number, kind, form, field, engine, 'EXTRACTION_ERROR',
@@ -264,6 +267,8 @@ def process_document(path, ordinal, engines, fields, route_observations=None, sh
                                             path_shadow[0] if path_shadow else None)
                         shadow_route.record_candidates(candidate_observations, ordinal, number, engine,
                                                        observed_form, path_candidates[0] if path_candidates else None)
+                        shadow_route.record_markers(marker_observations, ordinal, number, engine,
+                                                    observed_form, path_markers[0] if path_markers else None)
                     observed_kind = _kind(observed)
                     for field, key in selected:
                         eligible = int(key in ref_raw and batch._present(ref_raw[key]))
@@ -315,7 +320,8 @@ def route_summary(meta, rows):
     return dict(distributions=distributions, cross=cross)
 
 
-def build_summary(meta, rows, counters, route_observations=(), shadow_observations=(), candidate_observations=()):
+def build_summary(meta, rows, counters, route_observations=(), shadow_observations=(), candidate_observations=(),
+                  marker_observations=()):
     cells = defaultdict(list)
     for item in meta['fields']:
         for form in FORMS:
@@ -354,23 +360,27 @@ def build_summary(meta, rows, counters, route_observations=(), shadow_observatio
                 routes=route_summary(meta, rows), groups=groups,
                 route_conditions=route_diag.build_summary(meta, rows, route_observations),
                 shadow_routes=shadow_route.build_summary(meta, shadow_observations),
-                shadow_candidates=shadow_route.build_candidate_summary(meta, candidate_observations))
+                shadow_candidates=shadow_route.build_candidate_summary(meta, candidate_observations),
+                shadow_markers=shadow_route.build_marker_summary(meta, marker_observations))
 
 
-def validate_summary(value, meta, rows, route_observations=(), shadow_observations=(), candidate_observations=()):
+def validate_summary(value, meta, rows, route_observations=(), shadow_observations=(), candidate_observations=(),
+                     marker_observations=()):
     require(isinstance(value, dict) and set(value) == {
         'schema_version', 'counters', 'availability', 'routes', 'groups', 'route_conditions', 'shadow_routes',
-        'shadow_candidates'})
+        'shadow_candidates', 'shadow_markers'})
     require(type(value['schema_version']) is int and value['schema_version'] == VERSION)
     counters = value['counters']
     require(isinstance(counters, dict) and set(counters) == set(COUNTERS) and all(count(v) for v in counters.values()))
-    expected = build_summary(meta, rows, counters, route_observations, shadow_observations, candidate_observations)
+    expected = build_summary(meta, rows, counters, route_observations, shadow_observations, candidate_observations,
+                             marker_observations)
     require(value == expected)
     require(all(count(item['pages']) for items in value['routes'].values() for item in items))
     require(all(count(number) for statuses in value['availability'].values() for number in statuses.values()))
     route_diag.validate_summary(value['route_conditions'])
     shadow_route.validate_summary(value['shadow_routes'])
     shadow_route.validate_candidate_summary(value['shadow_candidates'])
+    shadow_route.validate_marker_summary(value['shadow_markers'])
     for group in value['groups']:
         require(set(group['codes']) == set(CAUSES) and set(group['statuses']) == set(AVAILABILITY))
         require(all(count(v) for v in [group['eligible'], group['diagnosed'], group['missing_reference'],
@@ -407,6 +417,7 @@ def summary_text(summary):
     lines.extend(route_diag.text_lines(summary['route_conditions']))
     lines.extend(shadow_route.text_lines(summary['shadow_routes']))
     lines.extend(shadow_route.candidate_lines(summary['shadow_candidates']))
+    lines.extend(shadow_route.marker_lines(summary['shadow_markers']))
     return '\n'.join(lines)+'\n'
 
 
@@ -422,6 +433,7 @@ def summary_brief(summary):
     lines.extend(route_diag.text_lines(summary['route_conditions'], brief=True))
     lines.extend(shadow_route.text_lines(summary['shadow_routes'], brief=True))
     lines.extend(shadow_route.candidate_lines(summary['shadow_candidates'], brief=True))
+    lines.extend(shadow_route.marker_lines(summary['shadow_markers'], brief=True))
     for group in summary['groups']:
         if not (group['eligible'] or any(group['statuses'].values())):
             continue
@@ -566,20 +578,21 @@ def run(root, out, engines=ENGINES, *, ids=None, limit=None, fields=DEFAULT_FIEL
     route_observations = []
     shadow_observations = []
     candidate_observations = []
+    marker_observations = []
     # Claim the fixed result file even when there are no selected PDFs.
     fd = batch._open(target/'results.jsonl', os.O_WRONLY | os.O_CREAT | os.O_EXCL)
     os.close(fd)
     for ordinal, path in enumerate(pending, 1):
-        document_observations, document_shadow, document_candidates = [], [], []
+        document_observations, document_shadow, document_candidates, document_markers = [], [], [], []
         try:
             with batch.guarded():
-                projected, pages = process_document(path, ordinal, engines, selected,
-                                                    document_observations, document_shadow, document_candidates)
+                projected, pages = process_document(path, ordinal, engines, selected, document_observations,
+                                                    document_shadow, document_candidates, document_markers)
         except KeyboardInterrupt:
             raise
         except Exception:
             projected, pages = [row(ordinal, code='PROCESSING_ERROR')], 0
-            document_observations, document_shadow, document_candidates = [], [], []
+            document_observations, document_shadow, document_candidates, document_markers = [], [], [], []
         for item in projected:
             validate_row(item, meta)
             batch._append(target/'results.jsonl', item)
@@ -587,6 +600,7 @@ def run(root, out, engines=ENGINES, *, ids=None, limit=None, fields=DEFAULT_FIEL
         route_observations.extend(document_observations)
         shadow_observations.extend(document_shadow)
         candidate_observations.extend(document_candidates)
+        marker_observations.extend(document_markers)
         counters['attempted_documents'] += 1
         counters['processed_pages'] += pages
         unrequested = {item['page'] for item in projected if item['code'] == 'TYPE_NOT_REQUESTED'}
@@ -606,8 +620,9 @@ def run(root, out, engines=ENGINES, *, ids=None, limit=None, fields=DEFAULT_FIEL
     counters['empty_ocr'] = len({(r['document'],r['page'],r['engine']) for r in rows if r['code'] == 'EMPTY_OCR'})
     counters['execution_errors'] = len({(r['document'],r['page'],r['engine']) for r in rows if r['code'] in ERRORS})
     summary = validate_summary(build_summary(meta, rows, counters, route_observations, shadow_observations,
-                                             candidate_observations),
-                               meta, rows, route_observations, shadow_observations, candidate_observations)
+                                             candidate_observations, marker_observations),
+                               meta, rows, route_observations, shadow_observations, candidate_observations,
+                               marker_observations)
     batch._atomic(target/'summary.json', summary)
     _atomic_text(target/'summary.txt', summary_text(summary))
     _atomic_text(target/'summary_brief.txt', summary_brief(summary))
@@ -616,7 +631,8 @@ def run(root, out, engines=ENGINES, *, ids=None, limit=None, fields=DEFAULT_FIEL
                            for code in route_diag.ANALYSIS_ERRORS)
     return int(counters['execution_errors'] > 0 or condition_errors > 0
                or shadow_route.failures(summary['shadow_routes']) > 0
-               or shadow_route.candidate_failures(summary['shadow_candidates']) > 0)
+               or shadow_route.candidate_failures(summary['shadow_candidates']) > 0
+               or shadow_route.marker_failures(summary['shadow_markers']) > 0)
 
 
 class SafeParser(argparse.ArgumentParser):

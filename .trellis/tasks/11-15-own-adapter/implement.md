@@ -270,3 +270,9 @@ New108 and existing focused127 tests pass. Full engine1983/3skip/3xfail reconcil
 2. 보존 캐시로 메모리 평가, 엔진 시험 전체에 후보를 운영 판별 자리에 넣는 플러그인 실행(작업 트리 밖), 판별 호출 529회의 표시 조사, 원 70쪽·렌더 12쪽 native 재실행과 쪽별 대조를 했다.
 3. 엔진 시험 2166 passed / 3 skipped / 3 xfailed = 2072 + 새 시험 94. 결과 표는 stage23-report.md에 있다.
 
+## 2-4단계 실행 결과 — 커밋 승인 대기
+
+1. legacy 추출기의 가입구분·고지월·발급일·월별 금액 단서를 정리했다. 가입구분 값은 "가입구분" 글자가 아니라 직장가입·지역가입 문구나 사업장명칭 라벨 뒤 값에서 나온다.
+2. own_adapter_shadow_route에 표시 후보 여섯 개(라벨 3, 구조 2, 값 패턴 1)와 L_<후보>·L_<후보>+A_325 규칙 열두 개, 별도 요약 절 shadow_markers를 추가했다. inspect_extraction의 markers 목록과 own_adapter_diag 출력(MARKER_CAND_*, 새 CANDIDATE_ROUTE/CROSS 줄)에 연결했다.
+3. 엔진 시험 판별 호출 569회를 조사해 정부형 입력에 나오는 단서를 뺐다. 새 규칙을 운영 판별 자리에 넣어도 판별·판독 시험 실패는 0이다. 메모리 평가와 native 재실행은 246경로에서 같다.
+4. 엔진 시험 2264 passed / 3 skipped / 3 xfailed = 2166 + 새 시험 98. 결과 표는 stage24-report.md에 있다.

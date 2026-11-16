@@ -34,6 +34,15 @@ middle-dot characters removed, contains 가입구분 (the legacy column/field he
 character-confusion correction is applied.
 Position measures: D3 is the third-nearest centre distance, in H, of 보수외 (or 소득월액)
 words above the first-month centre; fewer than three such words give NA.
+
+Legacy-marker candidates (a third section, taken from the legacy reader's own clues):
+  RRN_LABEL 주민등록번호, MEMBER_CLASS_LABEL 가입구분|가입자구분, LEGACY_ALIAS_LABEL
+  고지보험료|납부보험료|실납부|출력일|발행일 and MEMBER_TYPE_VALUE 직장가입|지역가입 (a value
+  pattern) within one grouped line after the same character removal; YEAR_MONTH_ROWS at least
+  three lines whose leftmost box is a legacy year-month; MONTH_TABLE_ROWS the legacy month
+  header followed by at least three year-month lines before the closing line.
+  L_<marker> is LEGACY when the marker is present, otherwise CURRENT; L_<marker>+A_325 is
+  LEGACY when it is present, otherwise A_325.
 """
 from __future__ import annotations
 
@@ -429,4 +438,166 @@ def candidate_lines(value, *, brief=False):
                  for item in value['distances'] if item['pages'] or not brief)
     lines.extend(f"MARKER {item['engine']} {item['marker']} {item['pages']}"
                  for item in value['markers'] if item['pages'] or not brief or item['marker'] != 'NA')
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Legacy-marker candidates taken from the clues the legacy reader itself uses
+# (diagnostic only; CANDIDATE_RULES, MARKER and every earlier line are unchanged).
+
+MARKER_KINDS = (('RRN_LABEL', 'LABEL'), ('MEMBER_CLASS_LABEL', 'LABEL'), ('LEGACY_ALIAS_LABEL', 'LABEL'),
+                ('YEAR_MONTH_ROWS', 'STRUCTURE'), ('MONTH_TABLE_ROWS', 'STRUCTURE'), ('MEMBER_TYPE_VALUE', 'VALUE'))
+MARKER_CANDIDATES = tuple(name for name, _ in MARKER_KINDS)
+MARKER_RULES = tuple(rule for name in MARKER_CANDIDATES for rule in (f'L_{name}', f'L_{name}+A_325'))
+MARKER_PHRASES = {
+    'RRN_LABEL': ('주민등록번호',),
+    'MEMBER_CLASS_LABEL': ('가입구분', '가입자구분'),
+    'LEGACY_ALIAS_LABEL': ('고지보험료', '납부보험료', '실납부', '출력일', '발행일'),
+    'MEMBER_TYPE_VALUE': ('직장가입', '지역가입'),
+}
+MIN_MONTH_ROWS = 3
+TABLE_END = ('확인합니다', '국민건강보험공단', '합계', '납부총액')
+
+
+def _year_month(text, *, whole):
+    """The legacy reader's year-month grammar (dash unification only, no misread correction)."""
+    from engine_v2.extractors.format_text import normalize_format_text
+    from engine_v2.extractors.nhis_payment import COMPACT_MONTH_RE, MONTH_RE
+
+    if whole:
+        text = normalize_format_text(re.sub(r'\s+', '', text))
+        return bool(MONTH_RE.fullmatch(text) or COMPACT_MONTH_RE.fullmatch(text))
+    text = normalize_format_text(text)
+    return bool(MONTH_RE.search(text) or COMPACT_MONTH_RE.search(re.sub(r'\s+', '', text)))
+
+
+def legacy_markers(pairs):
+    """Presence of each legacy-marker candidate on the observed payment inputs."""
+    from engine_v2.extractors import nhis_common as common, nhis_payment as legacy
+    from engine_v2.pipeline.layout import line_text
+
+    found = dict.fromkeys(MARKER_CANDIDATES, False)
+    for page, result in pairs:
+        rows = common.page_lines(page, result)
+        texts = [line_text(row) for row in rows]
+        flats = [MARKER_NOISE.sub('', text) for text in texts]
+        for name, phrases in MARKER_PHRASES.items():
+            found[name] |= any(phrase in flat for flat in flats for phrase in phrases)
+        found['YEAR_MONTH_ROWS'] |= sum(_year_month(row[0].text, whole=True) for row in rows if row) >= MIN_MONTH_ROWS
+        headers = legacy._month_header(rows)
+        table = 0
+        for text, flat in zip(texts[max(headers) + 1:] if headers else (), flats[max(headers) + 1:] if headers else ()):
+            if any(phrase in flat for phrase in TABLE_END):
+                break
+            table += _year_month(text, whole=False)
+        found['MONTH_TABLE_ROWS'] |= table >= MIN_MONTH_ROWS
+    return found
+
+
+def marker_government(pairs, rule, found=None):
+    require(rule in MARKER_RULES)
+    name, _, band = rule[2:].partition('+')
+    if (legacy_markers(pairs) if found is None else found)[name]:
+        return False
+    return government(pairs, band or 'CURRENT')
+
+
+def failed_marker_candidates():
+    return dict(rules=dict.fromkeys(MARKER_RULES, 'ERROR'), markers=dict.fromkeys(MARKER_CANDIDATES, 'NA'))
+
+
+def marker_candidates(pairs, actual):
+    """Fixed codes only: marker-rule branches and marker states of one path."""
+    require(actual in FORMS)
+    if pairs is None:
+        return dict(rules=dict.fromkeys(MARKER_RULES, actual), markers=dict.fromkeys(MARKER_CANDIDATES, 'NA'))
+    try:
+        found = legacy_markers(pairs)
+    except Exception:
+        return failed_marker_candidates()
+    rules = {}
+    for rule in MARKER_RULES:
+        try:
+            rules[rule] = 'GOVERNMENT' if marker_government(pairs, rule, found) else 'LEGACY'
+        except Exception:
+            rules[rule] = 'ERROR'
+    return dict(rules=rules, markers={name: 'O' if found[name] else 'X' for name in MARKER_CANDIDATES})
+
+
+def record_markers(observations, document, page, engine, form, value):
+    if observations is not None and value is not None:
+        observations.append(dict(document=document, page=page, engine=engine, form=form,
+                                 rules=dict(value['rules']), markers=dict(value['markers'])))
+
+
+def validate_marker_observation(item, engines):
+    require(set(item) == {'document', 'page', 'engine', 'form', 'rules', 'markers'})
+    require(all(type(item[key]) is int and item[key] > 0 for key in ('document', 'page')))
+    require(item['engine'] in engines and item['form'] in FORMS)
+    require(set(item['rules']) == set(MARKER_RULES) and all(item['rules'][rule] in BRANCHES for rule in MARKER_RULES))
+    require(set(item['markers']) == set(MARKER_CANDIDATES)
+            and all(item['markers'][name] in MARKERS for name in MARKER_CANDIDATES))
+
+
+def build_marker_summary(meta, observations):
+    engines = ('text_layer', *meta['engines'])
+    paths = {}
+    for item in observations:
+        validate_marker_observation(item, engines)
+        key = (item['document'], item['page'], item['engine'])
+        require(key not in paths)
+        paths[key] = item
+    reference = {(document, page): item for (document, page, engine), item in paths.items()
+                 if engine == 'text_layer'}
+    routes, cross, states = [], [], []
+    for rule in MARKER_RULES:
+        for engine in engines:
+            values = [item['rules'][rule] for (_, _, name), item in paths.items() if name == engine]
+            routes.extend(dict(rule=rule, engine=engine, form=branch, pages=values.count(branch))
+                          for branch in BRANCHES)
+        for engine in meta['engines']:
+            pairs = [(reference[(document, page)]['rules'][rule], item['rules'][rule])
+                     for (document, page, name), item in paths.items()
+                     if name == engine and (document, page) in reference]
+            cross.extend(dict(rule=rule, engine=engine, reference_form=left, form=right,
+                              pages=pairs.count((left, right)))
+                         for left in BRANCHES for right in BRANCHES)
+    for name in MARKER_CANDIDATES:
+        for engine in engines:
+            found = [item['markers'][name] for (_, _, path_engine), item in paths.items() if path_engine == engine]
+            states.extend(dict(marker=name, engine=engine, state=state, pages=found.count(state))
+                          for state in MARKERS)
+    return dict(markers=[dict(marker=name, kind=kind) for name, kind in MARKER_KINDS], rules=list(MARKER_RULES),
+                branches=list(BRANCHES), routes=routes, cross=cross, states=states)
+
+
+def validate_marker_summary(value):
+    require(set(value) == {'markers', 'rules', 'branches', 'routes', 'cross', 'states'})
+    require(value['markers'] == [dict(marker=name, kind=kind) for name, kind in MARKER_KINDS])
+    require(value['rules'] == list(MARKER_RULES) and value['branches'] == list(BRANCHES))
+    require(all(set(item) == {'rule', 'engine', 'form', 'pages'} and item['rule'] in MARKER_RULES
+                and item['form'] in BRANCHES for item in value['routes']))
+    require(all(set(item) == {'rule', 'engine', 'reference_form', 'form', 'pages'} and item['rule'] in MARKER_RULES
+                and item['reference_form'] in BRANCHES and item['form'] in BRANCHES for item in value['cross']))
+    require(all(set(item) == {'marker', 'engine', 'state', 'pages'} and item['marker'] in MARKER_CANDIDATES
+                and item['state'] in MARKERS for item in value['states']))
+    require(all(item['engine'] in ('text_layer', 'own', 'applevision')
+                for family in ('routes', 'cross', 'states') for item in value[family]))
+    numbers = [item['pages'] for family in ('routes', 'cross', 'states') for item in value[family]]
+    require(all(type(number) is int and number >= 0 for number in numbers))
+
+
+def marker_failures(value):
+    return sum(item['pages'] for item in value['routes'] if item['form'] == 'ERROR')
+
+
+def marker_lines(value, *, brief=False):
+    lines = [f"MARKER_CAND_RULES {' '.join(value['rules'])}"]
+    lines.extend(f"MARKER_CAND_KIND {item['marker']} {item['kind']}" for item in value['markers'])
+    lines.extend(f"MARKER_CAND {item['marker']} {item['engine']} {item['state']} {item['pages']}"
+                 for item in value['states'] if item['pages'] or not brief or item['state'] != 'NA')
+    lines.extend(f"CANDIDATE_ROUTE {item['rule']} {item['engine']} {item['form']} {item['pages']}"
+                 for item in value['routes'] if item['pages'] or not brief or item['form'] != 'ERROR')
+    lines.extend(f"CANDIDATE_CROSS {item['rule']} {item['engine']} {item['reference_form']} {item['form']} {item['pages']}"
+                 for item in value['cross'] if item['pages'] or not brief)
     return lines

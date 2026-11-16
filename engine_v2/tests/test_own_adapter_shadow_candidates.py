@@ -253,7 +253,7 @@ def test_end_to_end_candidate_rows_distribution_and_marker(locations, monkeypatc
     assert text.index('SHADOW_CHECK') < text.index('CANDIDATE_RULES')
     families = ('CANDIDATE_RULES', 'CANDIDATE_ALIAS', 'CANDIDATE_ROUTE', 'CANDIDATE_CROSS', 'DIST3', 'MARKER')
     new = [line for line in brief.splitlines() if line.split()[0] in families]
-    tokens_allowed = {*shadow.RULES, *shadow.CANDIDATES, *dict(shadow.ALIASES), *shadow.BRANCHES,
+    tokens_allowed = {*shadow.RULES, *shadow.CANDIDATES, *shadow.MARKER_RULES, *dict(shadow.ALIASES), *shadow.BRANCHES,
                       *shadow.MEASURES, *shadow.DISTANCE_BINS, *shadow.MARKERS, *engines}
     assert new and all(token.isdigit() or token in tokens_allowed for line in new for token in line.split()[1:])
     assert_private_output(out, capfd)

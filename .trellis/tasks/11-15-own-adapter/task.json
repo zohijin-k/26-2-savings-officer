@@ -2,7 +2,7 @@
   "id": "own-adapter",
   "name": "own-adapter",
   "title": "own OCR adapter diagnosis and synthetic baseline",
-  "description": "Stage2-3: shadow candidates A_325/A_350/B/L(+L variants), D3 position bins and legacy marker added to own_adapter_diag. Operating routing unchanged. Commit approval pending.",
+  "description": "Stage2-4: legacy-marker candidates from the legacy reader clues (6 markers, 12 rules L_<m>/L_<m>+A_325) added to own_adapter_diag. Operating routing unchanged. Commit approval pending.",
   "status": "in_progress",
   "dev_type": null,
   "scope": "backend",
@@ -15,12 +15,12 @@
   "branch": "work/own-adapter",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": "fd87b4c",
+  "commit": "92361b6",
   "pr_url": null,
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Comparison CLI committed2610a2c. A reverted; 8 failing expectations unchanged. Criteria revised2026-11-16 (prd R44-R50): render12/repro3 must route as generated (LEGACY on all paths), corpus70 and existing route tests keep text/AV routes. Shadow rows SHADOW_ROUTE/SHADOW_CROSS/SHADOW_CHECK added. Corpus70 (111 restored PDFs, fingerprints identical) and render12 per-page shadow equal research for all3 rules on246 paths; CURRENT equals actual on all. S: corpus70 unchanged, render12 LEGACY on all paths (text9/AV2/own12 changed from current), repro3 LEGACY. Existing output byte-identical plus new sections. Engine2072/3skip/3xfail (new71). Diagnostic mirror tests (29) deferred until S enters operating code. Real-document gate: text LEGACY120, AV>=118, own>=114. Stage2-3: real-doc shadow S dropped (text 110), A own 110. Added candidates A_325, A_350, B, L, A_325+L, A_350+L (A_300 alias of A, CURRENT+L alias of L), marker 가입구분 (0 of 259 operating-government suite calls), DIST3/MARKER rows. Suite with candidate as predicate: L 0 failures, A_325/A_350 0 reader failures, B 23, A 8. Native corpus70/grid12 equal to memory evaluation on 246 paths. Engine 2166/3skip/3xfail (new 94).",
+  "notes": "Comparison CLI committed2610a2c. A reverted; 8 failing expectations unchanged. Criteria revised2026-11-16 (prd R44-R50): render12/repro3 must route as generated (LEGACY on all paths), corpus70 and existing route tests keep text/AV routes. Shadow rows SHADOW_ROUTE/SHADOW_CROSS/SHADOW_CHECK added. Corpus70 (111 restored PDFs, fingerprints identical) and render12 per-page shadow equal research for all3 rules on246 paths; CURRENT equals actual on all. S: corpus70 unchanged, render12 LEGACY on all paths (text9/AV2/own12 changed from current), repro3 LEGACY. Existing output byte-identical plus new sections. Engine2072/3skip/3xfail (new71). Diagnostic mirror tests (29) deferred until S enters operating code. Real-document gate: text LEGACY120, AV>=118, own>=114. Stage2-3: real-doc shadow S dropped (text 110), A own 110. Added candidates A_325, A_350, B, L, A_325+L, A_350+L (A_300 alias of A, CURRENT+L alias of L), marker 가입구분 (0 of 259 operating-government suite calls), DIST3/MARKER rows. Suite with candidate as predicate: L 0 failures, A_325/A_350 0 reader failures, B 23, A 8. Native corpus70/grid12 equal to memory evaluation on 246 paths. Engine 2166/3skip/3xfail (new 94). Stage2-4: real-doc 가입구분 marker 0 on all paths; legacy 가입구분 comes from 직장/지역가입 text or 사업장명칭 regex. Markers RRN_LABEL, MEMBER_CLASS_LABEL, LEGACY_ALIAS_LABEL, YEAR_MONTH_ROWS, MONTH_TABLE_ROWS, MEMBER_TYPE_VALUE(value) absent from government reader fixtures (569 suite calls) and synthetic government 20. Suite with marker rule as predicate: 0 reader failures for all 12 rules. Native corpus70/grid12 equal memory evaluation on 246 paths. Engine 2264/3skip/3xfail (new 98).",
   "meta": {}
 }

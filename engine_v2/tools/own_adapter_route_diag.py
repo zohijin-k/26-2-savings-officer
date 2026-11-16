@@ -113,13 +113,14 @@ def analyze(pairs, payment_called, original_result=None):
                 bins={metric: bin_value(metric, value) for metric, value in measurements.items()})
 
 
-def inspect_extraction(page, words, engine, extract, shadow=None, candidates=None):
+def inspect_extraction(page, words, engine, extract, shadow=None, candidates=None, markers=None):
     """Delegate one primary extraction and observe its actual payment inputs.
 
     When shadow is a list, one branch mapping of the candidate header rules is
     appended for the same observed payment inputs. When candidates is a list, one
     record of the additional candidate rules, position bins and marker state is
-    appended for the same inputs.
+    appended for the same inputs. When markers is a list, one record of the
+    legacy-marker candidate states and their rules is appended likewise.
     """
     from engine_v2.extractors import nhis_payment, nhis_payment_gov
     from .ocr_baseline_fields import prepare_pairs
@@ -154,6 +155,12 @@ def inspect_extraction(page, words, engine, extract, shadow=None, candidates=Non
             candidates.append(shadow_route.candidates(payment_inputs[0] if payment_inputs else None, extracted[2]))
         except Exception:
             candidates.append(shadow_route.failed_candidates())
+    if markers is not None:
+        try:
+            require(len(payment_inputs) <= 1)
+            markers.append(shadow_route.marker_candidates(payment_inputs[0] if payment_inputs else None, extracted[2]))
+        except Exception:
+            markers.append(shadow_route.failed_marker_candidates())
     try:
         if payment_inputs:
             require(len(payment_inputs) == len(predicate_results) == 1)

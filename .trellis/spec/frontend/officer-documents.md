@@ -5,8 +5,8 @@ Use for this repository's officer-only React entry: the application list (role s
 
 ## 2. Signatures
 - `pages/officer/list-model.ts`
-  - `queueOf(row: OfficerRow): 'needs_review' | 'pass' | 'done'`
-  - `queueCounts(rows)` returns `{ needs_review, pass, done }`.
+  - `queueOf(row: OfficerRow): 'needs_review' | 'pass' | 'done' | 'rejected'`
+  - `queueCounts(rows)` returns `{ needs_review, pass, done, rejected }`.
   - `matchesFilters(row, { search, from, to })` — search matches `application_no` + `name` (case-insensitive); `from`/`to` are inclusive `YYYY-MM-DD` against `submitted_at`.
   - `importanceOf(row)` counts documents needing a look: non-PASS originals plus required documents with `document_id === null`.
   - `sortRows(rows, 'importance' | 'latest' | 'oldest')` returns a new array; it never mutates rows.
@@ -20,7 +20,7 @@ Use for this repository's officer-only React entry: the application list (role s
 ## 3. Contracts
 Read the officer list API with `program=double_savings`, `page_size=200`, the selected `role`, and `region`/`town` only when the role requires them (`requires_region` / `requires_town`). Send the same role to detail, decision and bulk-decision calls.
 
-Queue classification is display-only: an officer `decision` means `done`; otherwise `ai_status === 'PASS'` means `pass`; every other value (`NEEDS_REVIEW`, `FAIL`, `null`) means `needs_review`. Never write saved verdicts while deriving a queue. Tab counts are computed after search/date filters.
+Queue classification is display-only: an officer `decision` of `reject` means `rejected` (반려 tab, placed after 처리 완료); any other decision means `done`; otherwise `ai_status === 'PASS'` means `pass`; every other value (`NEEDS_REVIEW`, `FAIL`, `null`) means `needs_review`. Never write saved verdicts while deriving a queue. Tab counts are computed after search/date filters.
 
 Sorting is client-side within the shown tab. `importance` (default, 중요도순) puts more documents-to-check first, ties by oldest `submitted_at`; `latest` (최신순) and `oldest` (등록순) order by `submitted_at`, with undated rows last. The 사유 toggle shows the importance count. The list has no score column; scores appear in the detail 심사표 panel.
 
@@ -35,7 +35,8 @@ Design tokens live in `src/index.css` (`--color-*`, status `-5/-10/-50/-60`, `--
 | --- | --- |
 | No decision, AI PASS | 적합 tab |
 | No decision, AI NEEDS_REVIEW / FAIL / null | 확인 필요 tab, 사유 toggle shown |
-| Any officer decision | 처리 완료 tab, chip shows `decision_label` |
+| Officer decision `reject` | 반려 tab; 사유 toggle shows the stored decision memo first, then document reasons |
+| Other officer decision (approve / hold) | 처리 완료 tab, chip shows `decision_label` |
 | Role without `can_bulk` (town) | No checkboxes, no bulk bar |
 | Role requiring region/town | Region/town selects from `scope`; changing them refetches |
 | Multiple API pages | Fetch through `page_count`, then classify |

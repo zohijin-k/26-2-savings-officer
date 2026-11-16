@@ -151,6 +151,9 @@ function apply(id: number, decision: DecisionKey, memo: string, role: RoleKey): 
   entry.detail.decision = { decision, memo, label }
 }
 
+// 미리보기에서 반려 탭이 비지 않도록 부적합 건 하나를 도 역할이 반려해 둔다.
+apply(900008, 'reject', '근로확인서류가 공고일(2026.3.3.) 이전에 발급되어 선발에서 제외합니다.', 'province')
+
 export function mockRoles(): OfficerRole[] {
   return [ROLES.town, ROLES.city, ROLES.province]
 }

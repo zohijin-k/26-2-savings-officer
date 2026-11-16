@@ -24,10 +24,11 @@ function row(id: number, ai: DocStatus | null, decision: DecisionKey | null = nu
 
 test('queues split by officer decision first, then by AI verdict, without changing rows', () => {
   const rows = [row(1, 'PASS'), row(2, 'NEEDS_REVIEW'), row(3, 'FAIL'), row(4, null), row(5, 'PASS', 'approve'), row(6, 'FAIL', 'reject')]
-  const before = structuredClone(rows)
-  assert.deepEqual(rows.map(queueOf), ['pass', 'needs_review', 'needs_review', 'needs_review', 'done', 'done'])
-  assert.deepEqual(queueCounts(rows), { needs_review: 3, pass: 1, done: 2 })
-  assert.deepEqual(rows, before)
+  rows.push(row(7, 'PASS', 'hold'))
+  const clone = structuredClone(rows)
+  assert.deepEqual(rows.map(queueOf), ['pass', 'needs_review', 'needs_review', 'needs_review', 'done', 'rejected', 'done'])
+  assert.deepEqual(queueCounts(rows), { needs_review: 3, pass: 1, done: 2, rejected: 1 })
+  assert.deepEqual(rows, clone)
 })
 
 test('search and submitted-date filters match number, name and inclusive day range', () => {
@@ -139,19 +140,24 @@ function loadList() {
 
 test('actual list component shows one queue tab of application rows with counts', () => {
   const List = loadList()
-  const rows = [row(1, 'PASS'), row(2, 'NEEDS_REVIEW'), row(3, 'PASS', 'approve')]
+  const rows = [row(1, 'PASS'), row(2, 'NEEDS_REVIEW'), row(3, 'PASS', 'approve'), row(4, 'FAIL', 'reject')]
   const role = { key: 'province', name: '도·청년허브센터', can_bulk: true, actions: [] }
   const review = renderToStaticMarkup(createElement(List, { rows, role, onOpen: () => {}, onBulk: async () => {} }))
   assert.match(review, /role="tablist"/)
   assert.match(review, /확인 필요<span class="alist__count alist__count--loud">1<\/span>/)
   assert.match(review, /적합<span class="alist__count">1<\/span>/)
   assert.match(review, /처리 완료<span class="alist__count">1<\/span>/)
+  assert.match(review, /처리 완료<span class="alist__count">1<\/span><\/button><button[^>]*>반려<span class="alist__count">1<\/span>/)
   assert.match(review, /FAKE-2/)
-  assert.doesNotMatch(review, /FAKE-1|FAKE-3/)
+  assert.doesNotMatch(review, /FAKE-1|FAKE-3|FAKE-4/)
   assert.match(review, /aria-label="전체 선택"/)
   const pass = renderToStaticMarkup(createElement(List, { rows, role, initialQueue: 'pass', onOpen: () => {} }))
   assert.match(pass, /FAKE-1/)
-  assert.doesNotMatch(pass, /FAKE-2|FAKE-3/)
+  assert.doesNotMatch(pass, /FAKE-2|FAKE-3|FAKE-4/)
+  const rejected = renderToStaticMarkup(createElement(List, { rows, role, initialQueue: 'rejected', onOpen: () => {}, loadReasons: async () => ({}) }))
+  assert.match(rejected, /FAKE-4/)
+  assert.doesNotMatch(rejected, /FAKE-1|FAKE-2|FAKE-3/)
+  assert.match(rejected, /FAKE-4 반려 사유 보기/)
   // Without bulk permission (읍·면·동) the checkbox column stays but carries no inputs.
   assert.doesNotMatch(pass, /type="checkbox"/)
 })

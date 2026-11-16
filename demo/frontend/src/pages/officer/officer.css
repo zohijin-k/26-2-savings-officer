@@ -107,6 +107,9 @@
 .alist__reason-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; font-size: 14px; }
 .alist__reason-list > li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
 .alist__reason-list ul { flex-basis: 100%; margin: 0; padding-left: var(--space-5); color: #464c53; }
+.alist__reject-memo { display: grid; gap: 2px; width: 100%; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--danger-50); border-radius: 0 var(--radius-6) var(--radius-6) 0; background: var(--danger-5); }
+.alist__reject-memo strong { color: var(--danger-60); font-size: 13px; }
+.alist__reject-memo p { margin: 0; font-size: 14px; white-space: pre-line; overflow-wrap: anywhere; }
 .alist__reasons-note { margin: 0; color: var(--color-text-muted); font-size: 14px; }
 .alist__table .alist__empty-row td { height: 160px; text-align: center; color: var(--color-text-muted); }
 .alist__empty-row p { margin: 0 0 var(--space-2); }

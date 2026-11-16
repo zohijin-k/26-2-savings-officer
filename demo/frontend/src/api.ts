@@ -1,7 +1,9 @@
-import { mockOfficerList, mockReviewDetail, mockDecision } from './pages/officer/mock-data.ts'
+import { mockBulkDecision, mockDecision, mockOfficerList, mockReviewDetail, mockRoles } from './pages/officer/mock-data.ts'
 
 export type DocStatus = 'PASS' | 'FAIL' | 'NEEDS_REVIEW'
 export type DecisionKey = 'approve' | 'reject' | 'hold'
+export type RoleKey = 'town' | 'city' | 'province'
+export const ROLE_KEYS: RoleKey[] = ['town', 'city', 'province']
 export interface Finding {
   code: string
   message: string
@@ -13,6 +15,12 @@ export interface BBox { page: number; x0: number; y0: number; x1: number; y1: nu
 export interface OfficerRole {
   key: string
   name: string
+  stage?: string
+  scope?: string
+  requires_region?: boolean
+  requires_town?: boolean
+  can_bulk?: boolean
+  notes?: string[]
   actions: { key: DecisionKey; label: string; result_label: string; tone: string }[]
 }
 export interface OfficerRowDoc {
@@ -30,9 +38,37 @@ export interface OfficerRow {
   application_no: string
   name: string
   program_code: string
+  region?: string
+  town?: string
+  ai_status?: DocStatus | null
+  ai_status_label?: string
+  total_score?: number | null
+  max_total?: number | null
+  missing_count?: number
+  submitted_at?: string | null
+  decision?: DecisionKey | null
+  decision_label?: string
+  rank?: number | null
   documents?: OfficerRowDoc[]
 }
-export interface OfficerList { rows: OfficerRow[]; page: number; page_count: number; total: number }
+export interface OfficerScope {
+  region: string
+  town: string
+  region_locked: boolean
+  town_locked: boolean
+  regions: string[]
+  towns: string[]
+}
+export interface OfficerList {
+  role?: OfficerRole
+  scope?: OfficerScope
+  rows: OfficerRow[]
+  page: number
+  page_count: number
+  total: number
+}
+/** 목록을 부를 때의 역할과 관할. 역할이 시군·읍면동을 요구할 때만 region·town을 쓴다. */
+export interface OfficerListQuery { role: RoleKey; region?: string; town?: string }
 export interface ScoreItemRow {
   key: string
   label: string
@@ -118,14 +154,26 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 
 // 목업은 명시한 미리보기에서만 사용한다. 빈 DB와 서버 오류는 그대로 표시한다.
 export const isOfficerMockActive = () => new URLSearchParams(window.location.search).get('mock') === '1'
-export const fetchOfficerList = (page: number): Promise<OfficerList> => isOfficerMockActive()
-  ? Promise.resolve(mockOfficerList(page))
-  : json(`/api/officer/applications?role=province&program=double_savings&page_size=200&page=${page}`)
-export const fetchReviewDetail = async (id: number): Promise<ReviewDetailData> => isOfficerMockActive()
-  ? Promise.resolve(mockReviewDetail(id))
-  : json(`/api/officer/applications/${id}?role=province`)
-export const postDecision = (id: number, decision: DecisionKey, memo: string): Promise<unknown> => isOfficerMockActive()
-  ? Promise.resolve(mockDecision(id, decision, memo))
+export const fetchOfficerRoles = (): Promise<OfficerRole[]> => isOfficerMockActive()
+  ? Promise.resolve(mockRoles())
+  : json('/api/officer/roles')
+export const fetchOfficerList = (query: OfficerListQuery, page: number): Promise<OfficerList> => {
+  if (isOfficerMockActive()) return Promise.resolve(mockOfficerList(query, page))
+  const params = new URLSearchParams({ role: query.role, program: 'double_savings', page_size: '200', page: String(page) })
+  if (query.region) params.set('region', query.region)
+  if (query.town) params.set('town', query.town)
+  return json(`/api/officer/applications?${params}`)
+}
+export const fetchReviewDetail = async (id: number, role: RoleKey = 'province'): Promise<ReviewDetailData> => isOfficerMockActive()
+  ? Promise.resolve(mockReviewDetail(id, role))
+  : json(`/api/officer/applications/${id}?role=${role}`)
+export const postDecision = (id: number, decision: DecisionKey, memo: string, role: RoleKey = 'province'): Promise<unknown> => isOfficerMockActive()
+  ? Promise.resolve(mockDecision(id, decision, memo, role))
   : json(`/api/officer/applications/${id}/decision`, {
-    method: 'POST', body: JSON.stringify({ role: 'province', decision, memo }),
+    method: 'POST', body: JSON.stringify({ role, decision, memo }),
+  })
+export const postBulkDecision = (ids: number[], decision: DecisionKey, memo: string, role: RoleKey): Promise<{ processed: number }> => isOfficerMockActive()
+  ? Promise.resolve(mockBulkDecision(ids, decision, memo, role))
+  : json('/api/officer/applications/decisions', {
+    method: 'POST', body: JSON.stringify({ role, decision, memo, application_ids: ids }),
   })

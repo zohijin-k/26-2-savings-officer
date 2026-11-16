@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import logo from './assets/brand/jbyouthhub-logo.png'
 import OfficerConsole from './pages/officer/OfficerConsole.tsx'
 import './app-shell.css'
 
@@ -7,12 +8,14 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="shell">
-        <button className="shell__mark" type="button" aria-label="서류 목록으로 이동" onClick={() => {
-          const mock = new URLSearchParams(window.location.search).get('mock') === '1'
-          window.history.pushState(null, '', mock ? '/officer?mock=1' : '/officer')
-          setHomeKey((value) => value + 1)
-        }}>전북</button>
-        <div><strong>전북청년 함께 두배적금</strong><small>담당자 서류 검토</small></div>
+        <div className="shell__inner">
+          <button className="shell__home" type="button" aria-label="신청 목록으로 이동" onClick={() => {
+            const mock = new URLSearchParams(window.location.search).get('mock') === '1'
+            window.history.pushState(null, '', mock ? '/officer?mock=1' : '/officer')
+            setHomeKey((value) => value + 1)
+          }}><img className="shell__logo" src={logo} alt="전북청년허브센터" /></button>
+          <span className="shell__role">담당자</span>
+        </div>
       </header>
       <OfficerConsole key={homeKey} />
     </div>

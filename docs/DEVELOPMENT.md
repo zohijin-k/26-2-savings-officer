@@ -78,7 +78,7 @@ cd demo/frontend
 npm run dev
 ```
 
-브라우저에서 <http://localhost:5173>을 열면 두배적금 담당자 화면으로 바로 진입합니다. 문서 상태 `PASS`와 그 외 상태를 두 목록으로 표시합니다. FastAPI 문서는 <http://localhost:8000/docs>입니다.
+브라우저에서 <http://localhost:5173>을 열면 두배적금 담당자 화면으로 바로 진입합니다. 신청 건을 확인 필요 · 적합 · 처리 완료 탭으로 나눈 표로 표시합니다. FastAPI 문서는 <http://localhost:8000/docs>입니다.
 
 합성 시연 데이터를 넣거나 그 데이터만 정리할 때는 저장소 루트에서 실행합니다.
 

@@ -186,7 +186,8 @@ export default function ApplicationList({
             const id = row.application_id
             const open = openId === id
             const checked = picked.includes(id)
-            const hasReasons = !row.decision && row.ai_status !== 'PASS'
+            const rejected = row.decision === 'reject'
+            const hasReasons = rejected || (!row.decision && row.ai_status !== 'PASS')
             const importance = importanceOf(row)
             return <Fragment key={id}>
               <tr className={['alist__row', checked ? 'alist__row--checked' : '', open ? 'alist__row--open' : ''].filter(Boolean).join(' ')}
@@ -204,7 +205,7 @@ export default function ApplicationList({
                 <td><StatusChip row={row} /></td>
                 <td className="alist__more" onClick={(event) => event.stopPropagation()}>
                   {hasReasons && loadReasons && <button type="button" className="alist__toggle" aria-expanded={open}
-                    aria-controls={`${uid}-reasons-${id}`} aria-label={`${row.application_no} 확인 필요 사유 보기`}
+                    aria-controls={`${uid}-reasons-${id}`} aria-label={`${row.application_no} ${rejected ? '반려' : '확인 필요'} 사유 보기`}
                     onClick={() => toggleReasons(id)}>사유{importance > 0 && <span className="alist__toggle-count" aria-label={`확인할 서류 ${importance}건`}>{importance}</span>}<span className="alist__chevron" aria-hidden="true" /></button>}
                 </td>
               </tr>
@@ -239,12 +240,17 @@ function Reasons({ id, row, state, onRetry, onOpen }: {
   const documents = data?.documents.filter((doc) => doc.status !== 'PASS') ?? []
   const missing = (row.documents ?? []).filter((doc) => doc.document_id === null && doc.required)
   const general = data?.ai.reasons ?? []
-  return <div className="alist__reasons" id={id} role="region" aria-label={`${row.application_no} 확인 필요 사유`}>
+  const rejected = row.decision === 'reject'
+  return <div className="alist__reasons" id={id} role="region" aria-label={`${row.application_no} ${rejected ? '반려' : '확인 필요'} 사유`}>
     {(!state || state.status === 'loading') && <p className="alist__reasons-note" role="status">사유를 불러오는 중입니다.</p>}
     {state?.status === 'error' && <p className="alist__reasons-note" role="alert">
       사유를 불러오지 못했습니다. <button type="button" className="alist__link" onClick={onRetry}>다시 시도</button>
     </p>}
     {data && <>
+      {rejected && <div className="alist__reject-memo">
+        <strong>반려 사유</strong>
+        <p>{data.decision.memo?.trim() || '담당자가 남긴 반려 사유가 없습니다.'}</p>
+      </div>}
       <ul className="alist__reason-list">
         {documents.map((doc) => <li key={doc.document_id}>
           <strong>{doc.label}</strong>
@@ -256,7 +262,7 @@ function Reasons({ id, row, state, onRetry, onOpen }: {
         </li>)}
         {general.map((reason, index) => <li key={`general-${index}`}>{reason.message}</li>)}
       </ul>
-      {documents.length === 0 && missing.length === 0 && general.length === 0 && <p className="alist__reasons-note">저장된 사유가 없습니다. 심사 화면에서 서류를 확인해 주세요.</p>}
+      {!rejected && documents.length === 0 && missing.length === 0 && general.length === 0 && <p className="alist__reasons-note">저장된 사유가 없습니다. 심사 화면에서 서류를 확인해 주세요.</p>}
       <button type="button" className="alist__link" onClick={onOpen}>심사 화면 열기 →</button>
     </>}
   </div>

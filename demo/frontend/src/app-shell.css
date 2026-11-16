@@ -1,6 +1,16 @@
-.shell { display: flex; align-items: center; gap: 12px; padding: 12px 28px; background: var(--brand); color: white; }
-.shell > div { display: grid; line-height: 1.5; }
-.shell strong { font-size: 16px; }
-.shell small { color: #d9e4f5; }
-.shell__mark { width: 36px; height: 36px; border: 1px solid #ffffffaa; border-radius: 8px; color: white; background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
-button:focus-visible, a:focus-visible { outline: 3px solid #5389df; outline-offset: 3px; }
+/* 담당자 머리글: 흰 바탕 · 로고 · 로고 색 띠. */
+.app-shell { min-height: 100dvh; background: var(--color-surface); }
+.shell { border-bottom: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); }
+/* 맨 위 장식 띠. 로고의 남색 · 빨강 · 노랑 · 초록이며 뜻을 전하는 색이 아니다. */
+.shell::before { content: ''; display: block; height: 4px; background: linear-gradient(90deg, var(--color-primary) 0 59%, var(--accent-red) 59% 76%, var(--accent-yellow) 76% 90%, var(--accent-green) 90% 100%); }
+.shell__inner { display: flex; align-items: center; gap: var(--space-4); min-height: 64px; padding: 0 var(--space-6); }
+.shell__home { display: block; flex: none; padding: var(--space-1); border: 0; border-radius: var(--radius-8); background: transparent; line-height: 0; cursor: pointer; }
+.shell__logo { display: block; width: auto; height: 40px; }
+.shell__role { padding-left: var(--space-4); border-left: 1px solid var(--color-border); color: #33363d; font-size: var(--fs-15); font-weight: 700; line-height: 24px; white-space: nowrap; }
+@media (max-width: 850px) { .shell__inner { padding: 0 var(--space-4); } .shell__logo { height: 34px; } }
+
+/* 넓은 화면: 바깥은 옅은 회색, 화면 전체를 가운데 박스 하나로 묶는다. */
+@media (min-width: 1540px) {
+  html:has(.app-shell), body:has(.app-shell) { background: #e8ecf1; }
+  .app-shell { max-width: 1440px; min-height: calc(100dvh - 48px); margin: 24px auto; overflow: clip; border: 1px solid #d6dce4; border-radius: var(--radius-12); box-shadow: var(--shadow-2); }
+}

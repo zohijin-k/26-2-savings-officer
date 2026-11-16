@@ -169,7 +169,10 @@ function SheetItem({
           >
             {index === 0 && (
               <>
-                <LabelCell rowSpan={row.bands.length}>{row.label}</LabelCell>
+                <LabelCell rowSpan={row.bands.length}>
+                  {row.label}
+                  {row.key === 'income' && <small className="sheet6__estimate">(데모 추정치)</small>}
+                </LabelCell>
                 <LabelCell rowSpan={row.bands.length}>{row.max}</LabelCell>
               </>
             )}

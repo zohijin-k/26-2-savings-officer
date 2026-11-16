@@ -18,7 +18,9 @@ DEMO_ROOT = Path(__file__).resolve().parents[2]
 SAMPLES = DEMO_ROOT / "fixtures" / "samples"
 MARKER_KEY = "_seed_officer_demo"
 MARKER_VERSION = "savings-officer-v1"
-NUMBER_PREFIX = "DS-OFFICER-DEMO-"
+NUMBER_PREFIX = "DS-DEMO-"
+#: 접두사 뒤 무작위 16진수 자리 수. 목록 표의 신청번호 칸에 들어가도록 짧게 둔다.
+NUMBER_SUFFIX_LEN = 8
 SCENARIOS = ("pass", "needs-review")
 SAMPLE_FILES = {
     "resident_abstract": "S2_주민등록초본_적합.pdf",
@@ -28,6 +30,15 @@ SAMPLE_FILES = {
     "work_proof": "S2_4대보험가입내역확인서_적합.pdf",
 }
 REVIEW_SAMPLE = "S8_주민등록초본_저해상도.pdf"
+
+
+def _new_number(session, models) -> str:
+    """짧은 시연 번호(DS-DEMO-xxxxxxxx). 드물게 겹치면 다시 뽑는다."""
+    from sqlmodel import select
+    while True:
+        number = NUMBER_PREFIX + uuid4().hex[:NUMBER_SUFFIX_LEN]
+        if session.exec(select(models.Application).where(models.Application.application_no == number)).first() is None:
+            return number
 
 
 class SeedError(Exception):
@@ -188,8 +199,8 @@ def _create(scenario, samples, storage, allocated):
     # Allocate only this new, marked synthetic row in a separate namespace.
     # The ordinary API's count-based number can collide with surviving rows
     # after deletions; all subsequent handlers remain the unchanged API flow.
-    number = NUMBER_PREFIX + uuid4().hex
     with models.get_session() as session:
+        number = _new_number(session, models)
         row = models.Application(application_no=number, program_code="double_savings",
                                  criteria_version=latest("double_savings").version,
                                  form1_json={MARKER_KEY: _marker(scenario)})

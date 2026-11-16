@@ -97,7 +97,8 @@ def test_mirror_equals_operating_route_on_authored_pages(phrase, expected):
 
 # ---------------------------------------------------------------------------
 # Worst case: a genuine government page carrying a member-type phrase is misrouted to
-# the legacy reader. The final upload assessment must never become PASS.
+# the legacy reader. The final upload assessment must be NEEDS_REVIEW: PASS would accept an
+# unread page and FAIL would wrongly reject a genuine government document.
 
 LABELS = {'고지금액', '납부금액', '건강', '장기요양', '보험료', '보수외', '소득월액'}
 
@@ -149,7 +150,7 @@ def test_worst_case_misrouted_government_page_never_passes(name, phrase, positio
     assert gov.recognizes(pairs) is False
     assert nhis_payment.extract(pairs).form_kind != 'government_payment'
     kind, status = assess(pairs)
-    assert status in ('NEEDS_REVIEW', 'FAIL'), (kind, status)
+    assert status == 'NEEDS_REVIEW', (kind, status)
 
 
 def test_reference_table_region_follows_the_new_route():

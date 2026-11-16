@@ -95,6 +95,23 @@
 
 예측: L_<후보>는 CURRENT에 LEGACY만 더하므로 글자층 120·AV 118 이상이 보장된다. CURRENT own이 GOV 120이므로 own LEGACY는 MARKER_CAND <후보> own O 쪽 수와 같다. L_<후보>+A_325의 own LEGACY는 표시 O 쪽과 A_325 LEGACY 109쪽의 합집합이다. 어느 후보도 own O가 114에 못 미치면, 실서류는 정부형 서식과 같은 인쇄 문구를 공유한다는 뜻이다. 그 경우 표시 방식으로는 풀 수 없으므로 다음 단계에서 다른 접근을 정한다.
 
+### 후속 메모 (실서류 결과 이후, 3단계)
+
+실서류 표시 후보 결과(사용자 실행, 납부확인서 120쪽 중 O 쪽 수):
+
+| 후보 | 글자층 | own | AV |
+| --- | ---: | ---: | ---: |
+| MEMBER_CLASS_LABEL (가입구분 라벨) | 기록 없음 | 0 | 기록 없음 |
+| RRN_LABEL (주민등록번호) | 기록 없음 | 0 | 기록 없음 |
+| YEAR_MONTH_ROWS (연월 줄 구조) | 기록 없음 | 0 | 기록 없음 |
+| MONTH_TABLE_ROWS (월 표 구조) | 기록 없음 | 0 | 기록 없음 |
+| LEGACY_ALIAS_LABEL (별칭 라벨) | 기록 없음 | 2 | 기록 없음 |
+| MEMBER_TYPE_VALUE (값 패턴) | 120 | 120 | 120 |
+
+- own O가 114 이상인 후보는 MEMBER_TYPE_VALUE 하나뿐이다. 라벨·구조 후보는 실서류 own에서 거의 나오지 않았다.
+- MEMBER_TYPE_VALUE를 단독으로 운영 판별에 넣었다(ddfeae4, prd R61~R65). 결과는 stage3-report.md에 있다.
+- 위 표 "여럿이 만족하면" 행의 우선순위(라벨 > 구조 > 값 패턴)는 만족한 후보가 하나뿐이라 적용하지 않았고, 이 우선순위 메모는 철회한다.
+
 ## 검증
 
 - 엔진 시험: 2264 passed / 3 skipped / 3 xfailed / 실패 0 = 2166 + 새 시험 98(test_own_adapter_marker_candidates.py 수집 98).

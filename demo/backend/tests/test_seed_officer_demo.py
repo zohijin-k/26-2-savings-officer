@@ -309,3 +309,15 @@ def test_seed_namespace_works_with_gaps_in_ordinary_api_numbers(isolated_demo, c
     assert tool.main(["--clean"]) == 0
     assert payload(capsys)["deleted_applications"] == 2
     assert tool._snapshot() == before and stored_files(isolated_demo) == files_before
+
+
+def test_seed_numbers_are_short_enough_for_the_list_column(isolated_demo, capsys):
+    assert tool.main([]) == 0
+    result = payload(capsys)
+    numbers = [common.load_application(item["application_id"]).application_no
+               for item in result["applications"].values()]
+    assert all(number.startswith(tool.NUMBER_PREFIX) for number in numbers)
+    assert all(len(number) == len(tool.NUMBER_PREFIX) + tool.NUMBER_SUFFIX_LEN for number in numbers)
+    assert len(set(numbers)) == len(numbers)
+    assert tool.main(["--clean"]) == 0
+    assert payload(capsys)["deleted_applications"] == 2

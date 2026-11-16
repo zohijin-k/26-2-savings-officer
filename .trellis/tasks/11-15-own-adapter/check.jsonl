@@ -1,0 +1,13 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "백엔드 관련 규약과 품질 점검 진입점"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "OCR 공통 형식·원래 엔진 보존"}
+{"file": ".trellis/spec/backend/ocr-baseline.md", "reason": "clean 렌더·참조·마스킹·격리·수치 스키마"}
+{"file": ".trellis/spec/backend/documentai-measurement.md", "reason": "410쌍의 정답·판정 분모·운영 경로 보존"}
+{"file": ".trellis/tasks/11-15-own-adapter/research/source-map.md", "reason": "코드 읽기 지도·생성기 목록·기존 보고 차이"}
+{"file": ".trellis/tasks/11-15-own-adapter/research/corpus-command.md", "reason": "사전 고정 합성 구성과 실행 명령"}
+{"file": ".trellis/tasks/11-15-own-adapter/research/adapter-contract.md", "reason": "실제 baseline 추출 호출과 8개 입력 계약, 서식 차이 한계"}
+{"file": ".trellis/tasks/11-15-own-adapter/research/route-conditions.md", "reason": "Stage 2-1 actual routing predicates, provider geometry, user numeric observations and falsifiable hypotheses"}
+{"file": ".trellis/spec/backend/own-adapter-diagnostics.md", "reason": "Closed diagnostic output, original extraction and route-denominator contracts"}
+{"file": ".trellis/tasks/11-15-own-adapter/research/route-stage22.md", "reason": "2-2단계 구조/실제합성 수치, 후보비교, 시험 영향과 수용기준"}
+{"file": ".trellis/spec/backend/document-form-contracts.md", "reason": "정부형·legacy 경계와 기존 금액/신뢰도/판정 계약 보존"}
+{"file": ".trellis/tasks/11-15-own-adapter/stage23-report.md", "reason": "2-3단계 그림자 후보·legacy 표시 근거·D3 분포·합성 평가와 실서류 판정 기준"}
+{"file": ".trellis/tasks/11-15-own-adapter/stage24-report.md", "reason": "2-4단계 legacy 추출기 단서·표시 후보·정부형 0회 근거·합성 평가와 실서류 판정 기준"}

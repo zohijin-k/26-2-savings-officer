@@ -8,8 +8,11 @@ predicate. Nothing here changes routing or extraction; the operating result
 remains the one observed by the caller.
 
 Rules (H = median positive box height, C = first-month centre, page percent):
-  CURRENT  first_month.y0 - 3 * first-month height <= word.y0 and word.cy < first_month.y0
-           (independent restatement of the operating predicate).
+  CURRENT  OLD_CURRENT and no member-type value (직장가입|지역가입 within one grouped line
+           after the legacy-marker character removal below); an independent restatement of
+           the operating predicate.
+  OLD_CURRENT  first_month.y0 - 3 * first-month height <= word.y0 and word.cy < first_month.y0
+           (the operating predicate before the member-type value was adopted).
   A        C - 3H <= word.cy < C - 0.5H.
   S        the contiguous header-line block directly above the first month. Words
            at least 0.5H above C are grouped into lines nearest first (a word joins
@@ -18,6 +21,11 @@ Rules (H = median positive box height, C = first-month centre, page percent):
            (고지금액/납부금액) or a line without header vocabulary.
 A path without an observed payment dispatch keeps its actual branch under every
 rule, because every rule differs only inside the payment dispatch.
+
+Candidate and legacy-marker rules keep the OLD_CURRENT base, so their outputs stay comparable
+with measurements taken before the member-type value was adopted; inside their definitions
+"CURRENT" (including the CURRENT+L alias) means OLD_CURRENT. L_MEMBER_TYPE_VALUE therefore
+equals CURRENT by construction.
 
 Candidate rules (a separate summary section; CURRENT, A and S above are unchanged):
   A_325, A_350  A with the far bound at C - 3.25H and C - 3.50H (near bound C - 0.5H).
@@ -49,7 +57,7 @@ from __future__ import annotations
 import re
 from statistics import median
 
-RULES = ('CURRENT', 'A', 'S')
+RULES = ('CURRENT', 'OLD_CURRENT', 'A', 'S')
 BRANCHES = ('LEGACY', 'GOVERNMENT', 'OTHER', 'ERROR')
 FORMS = ('LEGACY', 'GOVERNMENT', 'OTHER')
 A_FAR, A_NEAR = 3.0, .5
@@ -138,7 +146,7 @@ def _block_s(words, first, general):
     return selected
 
 
-SELECTIONS = {'CURRENT': _current, 'A': _band_a, 'S': _block_s}
+SELECTIONS = {'OLD_CURRENT': _current, 'A': _band_a, 'S': _block_s}
 
 
 def government(pairs, rule):
@@ -146,6 +154,8 @@ def government(pairs, rule):
     from engine_v2.extractors import nhis_common as common, nhis_payment_gov as gov
     from engine_v2.pipeline.layout import line_text, squash
 
+    if rule == 'CURRENT':
+        return government(pairs, 'OLD_CURRENT') and not member_type_value(pairs)
     words, first, general = _geometry(pairs)
     header = SELECTIONS[rule](words, first, general)
     top = gov._component_top(header)
@@ -153,6 +163,16 @@ def government(pairs, rule):
     text = ' '.join(squash(''.join(line_text(row) for row in common.group_lines(cluster, tol=.25)))
                     for cluster in gov._header_clusters(header))
     return bool(_gates(pairs) and text.count('보수외') >= 3 and text.count('소득월액') >= 3)
+
+
+def member_type_value(pairs):
+    """Shadow restatement of the operating member-type check (직장가입|지역가입 in one line)."""
+    from engine_v2.extractors import nhis_common as common
+    from engine_v2.pipeline.layout import line_text
+
+    return any(phrase in MARKER_NOISE.sub('', line_text(row))
+               for page, result in pairs for row in common.page_lines(page, result)
+               for phrase in MARKER_PHRASES['MEMBER_TYPE_VALUE'])
 
 
 def branches(pairs, actual):
@@ -297,7 +317,7 @@ def candidate_government(pairs, rule):
         return structure(pairs)
     base, _, marker = rule.partition('+')
     if rule == 'L':
-        base, marker = 'CURRENT', 'L'
+        base, marker = 'OLD_CURRENT', 'L'
     if marker and legacy_marker(pairs):
         return False
     return government(pairs, base)
@@ -499,7 +519,7 @@ def marker_government(pairs, rule, found=None):
     name, _, band = rule[2:].partition('+')
     if (legacy_markers(pairs) if found is None else found)[name]:
         return False
-    return government(pairs, band or 'CURRENT')
+    return government(pairs, band or 'OLD_CURRENT')
 
 
 def failed_marker_candidates():

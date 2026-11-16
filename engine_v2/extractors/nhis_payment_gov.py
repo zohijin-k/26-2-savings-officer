@@ -20,6 +20,17 @@ HEADERS = ("월별", *COMPONENTS, *COMPONENTS)
 OPTIONAL_COLUMNS = (3, 4, 7, 8)
 GROUPS = ("고지금액", "납부금액")
 SETTLEMENT_LABEL = "연말정산"
+# 직장가입·지역가입 문구는 구형 납부확인서에만 있다. 한 줄 안에서 공백과
+# 괄호·콜론·가운뎃점·마침표를 지운 뒤 찾고, 글자 오인식 교정은 하지 않는다.
+MEMBER_TYPE_VALUES = ("직장가입", "지역가입")
+MEMBER_TYPE_NOISE = re.compile(r"[\s\[\]()（）:：·ㆍ・.]")
+
+
+def member_type_value(pages) -> bool:
+    """True when any grouped line carries the legacy member-type value phrase."""
+    return any(value in MEMBER_TYPE_NOISE.sub("", line_text(row))
+               for page, result in pages for row in common.page_lines(page, result)
+               for value in MEMBER_TYPE_VALUES)
 
 
 def recognizes(pages) -> bool:
@@ -39,7 +50,8 @@ def recognizes(pages) -> bool:
     header_text = " ".join(squash("".join(line_text(row) for row in common.group_lines(cluster, tol=.25)))
                            for cluster in _header_clusters(header_words))
     eight_columns = header_text.count("보수외") >= 3 and header_text.count("소득월액") >= 3
-    return bool(title and (government_number or information_grid) and eight_columns)
+    layout = bool(title and (government_number or information_grid) and eight_columns)
+    return layout and not member_type_value(pages)
 
 
 def _unique_label(lines, label):

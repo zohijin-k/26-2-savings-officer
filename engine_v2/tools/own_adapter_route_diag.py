@@ -12,7 +12,7 @@ CONDITIONS = (
     'DOCUMENT_NUMBER_PATTERN', 'GOV_NUMBER_GATE', 'PAYER_NUMBER_LABEL',
     'WORKPLACE_LABEL', 'INFO_GRID_GATE', 'COMPONENT_TOP_FOUND',
     'FIRST_MONTH_FOUND', 'HEADER_COMPONENT_TOP_FOUND', 'HEADER_BOSUOE_GE3',
-    'HEADER_INCOME_GE3', 'GOV_PREDICATE', 'LEGACY_TITLE',
+    'HEADER_INCOME_GE3', 'GOV_PREDICATE', 'LEGACY_TITLE', 'MEMBER_TYPE_ABSENT',
 )
 FORMS = ('LEGACY', 'GOVERNMENT', 'OTHER')
 STATUSES = (
@@ -61,6 +61,7 @@ def analyze(pairs, payment_called, original_result=None):
     from engine_v2.extractors import nhis_common as common, nhis_payment_gov as gov
     from engine_v2.extractors.format_text import normalize_format_text
     from engine_v2.pipeline.layout import line_text, squash
+    from . import own_adapter_shadow_route as shadow_route
 
     require(len(pairs) == 1)
     page, result = pairs[0]
@@ -89,8 +90,9 @@ def analyze(pairs, payment_called, original_result=None):
                            for cluster in gov._header_clusters(header_words))
     bosuoe = header_text.count('보수외')
     income = header_text.count('소득월액')
+    member_type = shadow_route.member_type_value(pairs)
     predicate = bool(title and ((number_label and number_pattern) or (payer and workplace))
-                     and bosuoe >= 3 and income >= 3)
+                     and bosuoe >= 3 and income >= 3 and not member_type)
     actual = gov.recognizes(pairs) if original_result is None else original_result
     if predicate != actual:
         raise RouteDiagnosticError('PREDICATE_DIVERGENCE')
@@ -98,7 +100,7 @@ def analyze(pairs, payment_called, original_result=None):
         payment_called, title, number_label, number_pattern, number_label and number_pattern,
         payer, workplace, payer and workplace, math.isfinite(component_top), first_month is not None,
         math.isfinite(header_top), bosuoe >= 3, income >= 3, predicate,
-        any(label in text for label in ('보험료납부확인', '건강보험료납부확인')),
+        any(label in text for label in ('보험료납부확인', '건강보험료납부확인')), not member_type,
     )))
     heights = [(word.y1 - word.y0) / 100 for word in words]
     lengths = [len(squash(word.text)) for word in words]

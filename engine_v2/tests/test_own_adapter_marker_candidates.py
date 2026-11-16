@@ -178,7 +178,8 @@ def test_render_grid_carries_only_the_member_type_value(font, gap):
     form, value = capture(*text_layer(grid_pdf(font, gap)), 'text_layer')
     assert states(value) == 'XXXXXO'
     assert code(value) == ('GGGGGGGGGGLL' if gap < 4.5 else 'L' * 12)
-    assert form == ('GOVERNMENT' if gap < 4.5 else 'LEGACY')
+    # The member-type value now routes the grid to the legacy reader at every gap.
+    assert form == value['rules']['L_MEMBER_TYPE_VALUE'] == 'LEGACY'
 
 
 REPRODUCED = {('own', 4): 'GGGGGGGGGGLL', ('own', 8): 'GLGLGLGLGLLL', ('own', 12): 'GLGLGLGLGLLL',
@@ -191,7 +192,7 @@ def test_actual_ocr_reproductions_under_marker_rules(case, engine):
     form, value = capture(*ocr_case(case, engine), engine)
     assert states(value) == 'XXXXXO'
     assert code(value) == REPRODUCED[(engine, case)]
-    assert form == ('GOVERNMENT' if engine == 'own' else 'LEGACY')
+    assert form == value['rules']['L_MEMBER_TYPE_VALUE'] == 'LEGACY'
 
 
 def test_path_without_payment_dispatch_keeps_actual_branch_and_na_markers():

@@ -1,4 +1,4 @@
-"""Shadow routing rules CURRENT, A and S: authored layouts, OCR reproductions and value-free aggregates."""
+"""Shadow routing rules CURRENT, OLD_CURRENT, A and S: authored layouts, OCR reproductions and value-free aggregates."""
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -67,18 +67,21 @@ def rules(pairs):
 @pytest.mark.parametrize('font', (8, 10, 12))
 @pytest.mark.parametrize('gap', (3.0, 3.5, 4.0, 4.5))
 def test_render_grid_text_layer_routes_legacy_only_under_structure_rule(font, gap):
+    # The authored grid carries 직장가입자, so the operating route is LEGACY at every gap;
+    # OLD_CURRENT keeps the earlier band decision.
     form, value = observe(*text_layer(grid_pdf(font, gap)), 'text_layer')
-    assert value['CURRENT'] == form
-    assert form == ('LEGACY' if gap == 4.5 else 'GOVERNMENT')
-    assert value['A'] == form
+    assert value['CURRENT'] == form == 'LEGACY'
+    assert value['OLD_CURRENT'] == ('LEGACY' if gap == 4.5 else 'GOVERNMENT')
+    assert value['A'] == value['OLD_CURRENT']
     assert value['S'] == 'LEGACY'
 
 
 @pytest.mark.parametrize('case', sorted(REPRODUCTION))
-@pytest.mark.parametrize('engine,actual', [('own', 'GOVERNMENT'), ('applevision', 'LEGACY')])
-def test_actual_ocr_reproductions(case, engine, actual):
+@pytest.mark.parametrize('engine,old', [('own', 'GOVERNMENT'), ('applevision', 'LEGACY')])
+def test_actual_ocr_reproductions(case, engine, old):
     form, value = observe(*ocr_case(case, engine), engine)
-    assert form == value['CURRENT'] == actual
+    assert form == value['CURRENT'] == 'LEGACY'
+    assert value['OLD_CURRENT'] == old
     assert value['A'] == value['S'] == 'LEGACY'
 
 
@@ -153,7 +156,7 @@ def test_rule_failure_is_a_fixed_error_branch(monkeypatch):
         raise RuntimeError(SENTINEL)
     monkeypatch.setitem(shadow.SELECTIONS, 'S', fail)
     form, value = observe(canvas(), tokens(), 'own')
-    assert value == {'CURRENT': form, 'A': 'LEGACY', 'S': 'ERROR'}
+    assert value == {'CURRENT': form, 'OLD_CURRENT': form, 'A': 'LEGACY', 'S': 'ERROR'}
 
 
 def test_end_to_end_shadow_rows_and_current_parity(locations, monkeypatch, capfd):
@@ -163,7 +166,7 @@ def test_end_to_end_shadow_rows_and_current_parity(locations, monkeypatch, capfd
     summary = json.loads((out/'summary.json').read_text())
     value = summary['shadow_routes']
     routes = {(r['rule'], r['engine'], r['form']): r['pages'] for r in value['routes'] if r['pages']}
-    assert routes == {(rule, engine, 'GOVERNMENT' if rule == 'CURRENT' else 'LEGACY'): 1
+    assert routes == {(rule, engine, 'GOVERNMENT' if rule in ('CURRENT', 'OLD_CURRENT') else 'LEGACY'): 1
                       for rule in shadow.RULES for engine in ('text_layer', 'own', 'applevision')}
     actual = {(r['engine'], r['form']): r['pages'] for r in summary['routes']['distributions']}
     assert all(actual[(engine, form)] == routes.get(('CURRENT', engine, form), 0)
@@ -201,7 +204,8 @@ def test_rule_error_or_current_mismatch_sets_failure_exit(locations, monkeypatch
 
 
 def observation(document, engine, current='LEGACY', a='LEGACY', s='LEGACY', form='LEGACY'):
-    return dict(document=document, page=1, engine=engine, form=form, rules={'CURRENT': current, 'A': a, 'S': s})
+    return dict(document=document, page=1, engine=engine, form=form,
+                rules={'CURRENT': current, 'OLD_CURRENT': current, 'A': a, 'S': s})
 
 
 def test_cross_uses_same_rule_text_layer_branch_and_counts_each_page_once():
@@ -214,6 +218,7 @@ def test_cross_uses_same_rule_text_layer_branch_and_counts_each_page_once():
     shadow.validate_summary(value)
     cross = {(r['rule'], r['reference_form'], r['form']): r['pages'] for r in value['cross'] if r['pages']}
     assert cross == {('CURRENT', 'GOVERNMENT', 'GOVERNMENT'): 1, ('CURRENT', 'LEGACY', 'LEGACY'): 1,
+                     ('OLD_CURRENT', 'GOVERNMENT', 'GOVERNMENT'): 1, ('OLD_CURRENT', 'LEGACY', 'LEGACY'): 1,
                      ('A', 'LEGACY', 'GOVERNMENT'): 1, ('A', 'LEGACY', 'LEGACY'): 1,
                      ('S', 'LEGACY', 'LEGACY'): 1, ('S', 'LEGACY', 'GOVERNMENT'): 1}
     routes = {(r['rule'], r['engine'], r['form']): r['pages'] for r in value['routes'] if r['pages']}

@@ -40,10 +40,11 @@ def code(value):
     return ''.join(value[rule][0] for rule in ALL)
 
 
-# Rule order: CURRENT A S A_325 A_350 B L A_325+L A_350+L (G = GOVERNMENT, L = LEGACY).
-GRID_TEXT = {3.0: 'GGLGGLGGG', 3.5: 'GGLGGLGGG', 4.0: 'GGLGGLGGG', 4.5: 'LLLLGLLLG'}
-REPRODUCED = {('own', 4): 'GLLGGLGGG', ('own', 8): 'GLLLLLGLL', ('own', 12): 'GLLLLLGLL',
-              ('applevision', 4): 'LLLLGLLLG', ('applevision', 8): 'LLLLLLLLL', ('applevision', 12): 'LLLLLLLLL'}
+# Rule order: CURRENT OLD_CURRENT A S A_325 A_350 B L A_325+L A_350+L (G = GOVERNMENT, L = LEGACY).
+# The grid and its reproductions carry 직장가입자, so CURRENT is LEGACY; candidates keep the OLD_CURRENT base.
+GRID_TEXT = {3.0: 'LGGLGGLGGG', 3.5: 'LGGLGGLGGG', 4.0: 'LGGLGGLGGG', 4.5: 'LLLLLGLLLG'}
+REPRODUCED = {('own', 4): 'LGLLGGLGGG', ('own', 8): 'LGLLLLLGLL', ('own', 12): 'LGLLLLLGLL',
+              ('applevision', 4): 'LLLLLGLLLG', ('applevision', 8): 'L' * 10, ('applevision', 12): 'L' * 10}
 
 
 @pytest.mark.parametrize('font', (8, 10, 12))
@@ -101,7 +102,7 @@ def test_legacy_marker_normalization(text, expected):
         words += [word(text, 500, 100)]
     pairs = pairs_of(words)
     assert shadow.legacy_marker(pairs) is expected
-    assert shadow.government(pairs, 'CURRENT') is True
+    assert shadow.government(pairs, 'OLD_CURRENT') is True
     assert decide(pairs)['L'] == ('LEGACY' if expected else 'GOVERNMENT')
 
 
@@ -213,7 +214,7 @@ def test_candidate_failure_is_a_fixed_error_and_keeps_existing_shadow(monkeypatc
         raise RuntimeError(SENTINEL)
     monkeypatch.setattr(shadow, 'structure', fail)
     form, value = observe(canvas(), tokens(), 'own')
-    assert value == {'CURRENT': form, 'A': 'LEGACY', 'S': 'LEGACY'}
+    assert value == {'CURRENT': form, 'OLD_CURRENT': form, 'A': 'LEGACY', 'S': 'LEGACY'}
     _, combined, measures = capture(canvas(), tokens(), 'own')
     assert combined['B'] == 'ERROR' and combined['L'] == form
     assert measures['MARKER'] == 'X'

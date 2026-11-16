@@ -276,3 +276,14 @@ New108 and existing focused127 tests pass. Full engine1983/3skip/3xfail reconcil
 2. own_adapter_shadow_route에 표시 후보 여섯 개(라벨 3, 구조 2, 값 패턴 1)와 L_<후보>·L_<후보>+A_325 규칙 열두 개, 별도 요약 절 shadow_markers를 추가했다. inspect_extraction의 markers 목록과 own_adapter_diag 출력(MARKER_CAND_*, 새 CANDIDATE_ROUTE/CROSS 줄)에 연결했다.
 3. 엔진 시험 판별 호출 569회를 조사해 정부형 입력에 나오는 단서를 뺐다. 새 규칙을 운영 판별 자리에 넣어도 판별·판독 시험 실패는 0이다. 메모리 평가와 native 재실행은 246경로에서 같다.
 4. 엔진 시험 2264 passed / 3 skipped / 3 xfailed = 2166 + 새 시험 98. 결과 표는 stage24-report.md에 있다.
+
+## 3단계 실행 결과
+
+1. ddfeae4: 묶인 줄 하나에 직장가입·지역가입 문구가 있으면(공백과 []()（）:：·ㆍ・. 제거 뒤, 오인식 교정 없음) 정부형 판별을 False로 두어 legacy 판독기로 보낸다. 진단 CURRENT = OLD_CURRENT and not member_type_value, 후보·표시 규칙은 OLD_CURRENT 기준 유지.
+2. 최악의 경우 48개(정부형 6서식 × 문구 2 × 위치 4) 시험을 NEEDS_REVIEW만 허용하도록 좁혔다. 전후 모두 NEEDS_REVIEW 48, PASS 0, FAIL 0. 대조군 3개 정부형·PASS 유지.
+3. 합성: 엔진 시험 2,338 / 3 skipped / 3 xfailed(2,264 + 새 시험 74), 판별·판독 기대값 변경 0. 410쌍 own 잘못된 통과 0/235, 글자층 참조 15/235, 납부 5/50 그대로, 바뀐 행 0/410. 합성 ocr_baseline 필드·인식 변화 0. 렌더 12쪽·재현 3쪽 세 경로 모두 LEGACY, 원 70쪽 분기 그대로.
+4. 실서류 진단(납부확인서 120쪽, 전 → 후): own 경로 LEGACY 0 → 120, AV 118 → 120, 글자층 120 → 120. own 가입구분·고지월·발급일 OK 0·1·86 → 120·120·120. 경로 불일치 own 119~120 → 0, AV 1~2 → 0.
+5. 실서류 ocr_baseline(문서 1,694 / 쪽 1,944 / 측정 3,618 전후 같음): 납부확인서 own 비율(%, clean/scan/phone)은 가입구분 0/0/5.8 → 100/100/100, 고지월 0.8/0.8/5.8 → 100/100/100, 발급일 71.7/100/72.5 → 100/100/100으로 올랐다. 감소 2건(MONTHLY_OTHER_INCOME_HEALTH own clean 1/10 → 0/10, BIRTH_DATE applevision phone 113/120 → 112/120)은 원인 확인 중. 인식 지표 변화 0, 시간 지표는 환경 차이로 근거에서 제외.
+6. 결과 표는 stage3-report.md에 있다.
+
+보류: ocr_baseline 결과에 값 유무(actual_present)가 저장되지 않아 빈칸과 틀린 값을 구분할 수 없음. 다음 실서류 재측정 전에 측정 도구에 저장을 추가할 것.

@@ -1,12 +1,13 @@
 import type { OfficerDocument, OfficerList, OfficerRow } from '../../api.ts'
 
 /** 신청 목록의 탭. 저장값을 바꾸지 않고 화면 분류만 만든다. */
-export type Queue = 'needs_review' | 'pass' | 'done'
+export type Queue = 'needs_review' | 'pass' | 'done' | 'rejected'
 
 export const QUEUES: { key: Queue; label: string; empty: string }[] = [
   { key: 'needs_review', label: '확인 필요', empty: '확인이 필요한 신청이 없습니다.' },
   { key: 'pass', label: '적합', empty: '적합으로 판정된 미처리 신청이 없습니다.' },
   { key: 'done', label: '처리 완료', empty: '처리를 마친 신청이 없습니다.' },
+  { key: 'rejected', label: '반려', empty: '반려한 신청이 없습니다.' },
 ]
 
 export type SortKey = 'importance' | 'latest' | 'oldest'
@@ -27,10 +28,12 @@ export interface ListFilters {
 export const EMPTY_FILTERS: ListFilters = { search: '', from: '', to: '' }
 
 /**
- * 담당자 판단이 있으면 처리 완료다. 판단이 없으면 AI 판정이 적합인 건만 적합 탭에,
- * 나머지(확인필요·부적합·미심사)는 확인 필요 탭에 둔다.
+ * 담당자가 반려한 건은 반려 탭, 그 밖의 판단(선정·완비 확인·보류)이 있으면 처리 완료다.
+ * 판단이 없으면 AI 판정이 적합인 건만 적합 탭에, 나머지(확인필요·부적합·미심사)는
+ * 확인 필요 탭에 둔다.
  */
 export function queueOf(row: OfficerRow): Queue {
+  if (row.decision === 'reject') return 'rejected'
   if (row.decision) return 'done'
   return row.ai_status === 'PASS' ? 'pass' : 'needs_review'
 }
@@ -46,7 +49,7 @@ export function matchesFilters(row: OfficerRow, filters: ListFilters): boolean {
 }
 
 export function queueCounts(rows: OfficerRow[]): Record<Queue, number> {
-  const counts: Record<Queue, number> = { needs_review: 0, pass: 0, done: 0 }
+  const counts: Record<Queue, number> = { needs_review: 0, pass: 0, done: 0, rejected: 0 }
   for (const row of rows) counts[queueOf(row)] += 1
   return counts
 }

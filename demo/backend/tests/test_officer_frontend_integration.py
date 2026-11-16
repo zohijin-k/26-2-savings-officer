@@ -69,7 +69,7 @@ const List = load('src/pages/officer/ApplicationList.tsx').default;
 const {createElement} = localRequire('react');
 const {renderToStaticMarkup} = localRequire('react-dom/server');
 const html = {};
-for (const queue of ['needs_review', 'pass', 'done']) {
+for (const queue of ['needs_review', 'pass', 'done', 'rejected']) {
   html[queue] = renderToStaticMarkup(createElement(List, {rows, role, initialQueue: queue, onOpen: () => {}}));
 }
 process.stdout.write(JSON.stringify({queues: rows.map(model.queueOf), counts: model.queueCounts(rows), html}));
@@ -83,7 +83,7 @@ process.stdout.write(JSON.stringify({queues: rows.map(model.queueOf), counts: mo
     queue_of = {row["application_id"]: queue for row, queue in zip(rows, rendered["queues"])}
     assert queue_of[pass_id] == "pass"
     assert queue_of[review_id] == "needs_review"
-    assert rendered["counts"] == {"needs_review": 1, "pass": 1, "done": 0}
+    assert rendered["counts"] == {"needs_review": 1, "pass": 1, "done": 0, "rejected": 0}
 
     text = {}
     for queue, html in rendered["html"].items():
@@ -96,5 +96,6 @@ process.stdout.write(JSON.stringify({queues: rows.map(model.queueOf), counts: mo
     assert normal["application_no"] not in text["needs_review"]
     assert review["application_no"] in text["needs_review"]
     assert review["application_no"] not in text["pass"]
-    assert normal["application_no"] not in text["done"] and review["application_no"] not in text["done"]
+    for queue in ("done", "rejected"):
+        assert normal["application_no"] not in text[queue] and review["application_no"] not in text[queue]
     assert tool._snapshot() == before

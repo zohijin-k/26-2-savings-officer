@@ -1,13 +1,34 @@
-/* 담당자 머리글: 흰 바탕 · 로고 · 로고 색 띠. */
+/* 담당자 머리글: 맨 위 강조 띠 · 흰 바탕 · 두배적금 로고(jb-banner.png에서 배경만 투명하게 뺀 jb-logo.png). */
 .app-shell { min-height: 100dvh; background: var(--color-surface); }
 .shell { border-bottom: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); }
-/* 맨 위 장식 띠. 노랑 · 초록 · 파랑 · 빨강을 같은 폭으로 잇는다. 뜻을 전하는 색이 아니다. */
-.shell::before { content: ''; display: block; height: 4px; background: linear-gradient(90deg, var(--accent-yellow) 0 25%, var(--accent-green) 25% 50%, var(--accent-blue) 50% 75%, var(--accent-red) 75% 100%); }
-.shell__inner { display: flex; align-items: center; gap: var(--space-4); min-height: 64px; padding: 0 var(--space-6); }
-.shell__home { display: block; flex: none; padding: var(--space-1); border: 0; border-radius: var(--radius-8); background: transparent; line-height: 0; cursor: pointer; }
-.shell__logo { display: block; width: auto; height: 40px; }
-.shell__role { padding-left: var(--space-4); border-left: 1px solid var(--color-border); color: #33363d; font-size: var(--fs-15); font-weight: 700; line-height: 24px; white-space: nowrap; }
-@media (max-width: 850px) { .shell__inner { padding: 0 var(--space-4); } .shell__logo { height: 34px; } }
+
+/* 맨 위 강조 띠: 로고의 주 색 · 청록 · 자홍. 경계를 끊어서 나누는 장식이며 뜻을 전하지 않는다. */
+.shell::before {
+  content: '';
+  display: block;
+  height: 4px;
+  background: linear-gradient(90deg,
+    var(--brand-60) 0 62%,
+    var(--brand-accent-1) 62% 84%,
+    var(--brand-accent-2) 84% 100%);
+}
+
+/* 머리글 안쪽은 본문(.officer)과 같은 최대 폭 · 좌우 여백을 써서 로고 왼쪽 끝을 본문 여백 선에 맞춘다. */
+.shell__inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; max-width: 1440px; min-height: 72px; margin: 0 auto; padding: 8px 24px; }
+/* 로고 = 처음으로 버튼. 안쪽 여백만큼 왼쪽으로 당겨 로고 왼쪽 끝을 여백 선에 맞춘다. */
+.shell__home { display: block; flex: none; line-height: 0; cursor: pointer; margin-left: -8px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; transition: background-color 160ms ease; }
+.shell__home:hover { background: var(--brand-5); }
+.shell__logo { display: block; width: auto; height: 36px; }
+/* 역할 표시는 로고 바로 옆에 둔다(오른쪽 도구 자리는 비어 있다). */
+.shell__role { margin-right: auto; padding-left: var(--space-4); border-left: 1px solid var(--color-border); color: #33363d; font-size: var(--fs-15); font-weight: 700; line-height: 24px; white-space: nowrap; }
+
+/* 본문 좌우 여백이 16px로 줄어드는 폭에서 머리글도 같이 줄인다. */
+@media (max-width: 800px) { .shell__inner { padding-inline: 16px; } }
+@media (max-width: 600px) {
+  .shell__inner { gap: 8px; min-height: 64px; padding-inline: 16px; }
+  .shell__home { margin-left: -4px; padding: 4px; }
+  .shell__logo { height: 28px; }
+}
 
 /* 넓은 화면: 바깥은 옅은 회색, 화면 전체를 가운데 박스 하나로 묶는다. */
 @media (min-width: 1540px) {

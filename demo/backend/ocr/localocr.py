@@ -123,9 +123,10 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
     fields: dict[str, str] = {}
     bboxes: dict[str, BBox] = {}
 
-    fields["쪽표기자료"] = json.dumps({
-        "markers": ex.page_markers, "confidence": ex.page_marker_confidence,
-    })
+    page_data = {"markers": ex.page_markers, "confidence": ex.page_marker_confidence}
+    if getattr(ex, "blank_pages", 0):
+        page_data["blank_pages"] = ex.blank_pages  # 쪽 수 확인에서 뺀 내용 없는 쪽
+    fields["쪽표기자료"] = json.dumps(page_data)
     from engine_v2.extractors.address_dates import assess
     if ex.detected_type == v2types.RESIDENT_ABSTRACT:
         fields["주소날짜검증자료"] = json.dumps(assess(pages, type_confidence=ex.type_confidence), ensure_ascii=False)

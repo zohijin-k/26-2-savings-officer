@@ -48,6 +48,10 @@ ISSUER = re.compile(r"(시장|군수|구청장)")
 
 # --- 영역 (페이지 대비 %) — 실측값. 양식이 바뀌면 여기만 고친다 ------------
 HEADER_MAX_Y = 16.0
+#: 쪽마다 되풀이되는 머리 상자(제목·쪽표기·성명·주민등록번호 줄) 아래부터 본문으로 본다.
+BODY_TOP_Y = 26.0
+#: 본문 영역 글자가 이 수 이하이면 내용 없는 쪽(스캔 잡티 허용).
+BLANK_BODY_MAX_CHARS = 3
 COL_NO_MAX_X = 11.5
 COL_ADDR_MAX_X = 50.0
 COL_OCCUR_X = (50.0, 61.0)
@@ -123,6 +127,8 @@ class ResidentAbstractResult:
     page_markers: list[tuple[int, int] | None] = field(default_factory=list)
     page_marker_confidence: float = 0.0
     classification_evidence: str = ""
+    #: 쪽 수 확인에서 뺀 내용 없는 쪽 수 (page_markers에 들어 있지 않다).
+    blank_pages: int = 0
 
 
 # --- 유틸 ---------------------------------------------------------------
@@ -365,12 +371,16 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
     observed_numbers: list[int] = []
     warnings: list[str] = []
 
+    contentless: list[bool] = []
     for p, r in pages:
         lines = group_lines(normalize(r.words, p.page, p.pixel_size))
         if p.page == 0:
             first_page_lines = lines
         headers.append(_parse_header(lines))
         bounds = _table_bounds(lines)
+        body_chars = sum(len(re.sub(r"\s+", "", w.text)) for line in lines for w in line
+                         if BODY_TOP_Y <= w.cy < FOOTER_Y)
+        contentless.append(bounds is None and body_chars <= BLANK_BODY_MAX_CHARS)
         if bounds:
             _parse_rows(lines, *bounds, p.page, entries, pending, note_numbers, observed_numbers)
         else:
@@ -516,11 +526,23 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
         for extracted in fields.values():
             extracted.confidence = min(extracted.confidence, .4)
 
+    # 내용 없는 쪽(빈 쪽, 머리 상자만 되풀이된 쪽)은 쪽표기가 없거나 다른 쪽과 같은 쪽표기일 때만
+    # 쪽 수 확인에서 뺀다. 내용이 있는 쪽은 중복이어도 그대로 센다.
+    kept = [i for i in range(len(headers)) if not contentless[i]]
+    kept_markers = {headers[i]["page_no"] for i in kept}
+    for i in range(len(headers)):
+        if contentless[i] and headers[i]["page_no"] is not None and headers[i]["page_no"] not in kept_markers:
+            kept.append(i)
+            kept_markers.add(headers[i]["page_no"])
+    kept.sort()
+    if not kept:
+        kept = list(range(len(headers)))
     return ResidentAbstractResult(
         detected, tconf, fields, entries, validations, warnings,
-        page_markers=[h["page_no"] for h in headers],
+        page_markers=[headers[i]["page_no"] for i in kept],
         classification_evidence=classification_evidence,
-        page_marker_confidence=min((h["page_confidence"] for h in headers), default=0.0),
+        page_marker_confidence=min((headers[i]["page_confidence"] for i in kept), default=0.0),
+        blank_pages=len(headers) - len(kept),
     )
 
 

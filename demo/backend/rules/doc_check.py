@@ -372,7 +372,11 @@ def _check_resident_pages(ocr: OcrResult, req: DocRequirement) -> list[CheckFind
                                for name in failed))
         if history_limited:
             confidence = min(float(data["confidence"]), ocr.classification_confidence)
-        if (not markers or len(markers) != ocr.page_count
+        # 내용 없는 쪽(빈 쪽·머리 상자만 되풀이된 쪽)은 추출기가 쪽표기 목록에서 빼고 수만 남긴다.
+        blank_pages = data.get("blank_pages", 0)
+        if type(blank_pages) is not int or blank_pages < 0:
+            return [unreadable]
+        if (not markers or len(markers) + blank_pages != ocr.page_count
                 or not confidence >= engine_config.OCR_CONFIDENCE_THRESHOLD):
             return [unreadable]
         if any(not isinstance(m, list) or len(m) != 2

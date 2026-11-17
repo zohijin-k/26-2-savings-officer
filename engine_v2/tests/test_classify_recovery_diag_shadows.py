@@ -103,8 +103,9 @@ def test_c2_turns_only_the_quality_fail_into_review_for_every_form():
         ocr = OcrResult(detected_doc_type=doc_type, confidence=.9, image_quality=.5)
         result = doc_check.CheckResult('NEEDS_REVIEW', [doc_check.CheckFinding(code, 'x', severity='NEEDS_REVIEW')])
         return doc_check.finalize_image_quality(req, ocr, result, 'pdf').status
-    assert finalize('REQUIRED_FIELD_UNREADABLE') == 'FAIL'
-    assert finalize('UNKNOWN_DOCUMENT_TYPE', None) == 'FAIL'
+    # 11-18 S5: C2 is production; the shadow patch no longer changes anything (was FAIL).
+    assert finalize('REQUIRED_FIELD_UNREADABLE') == 'NEEDS_REVIEW'
+    assert finalize('UNKNOWN_DOCUMENT_TYPE', None) == 'NEEDS_REVIEW'
     with tool.c2_patch():
         assert finalize('REQUIRED_FIELD_UNREADABLE') == 'NEEDS_REVIEW'
         assert finalize('UNKNOWN_DOCUMENT_TYPE', None) == 'NEEDS_REVIEW'

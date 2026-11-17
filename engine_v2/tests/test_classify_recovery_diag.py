@@ -380,11 +380,12 @@ def test_c1_shadow_turns_only_the_consent_quality_fail_into_review():
         return doc_check.finalize_image_quality(req, ocr, result, 'pdf').status
     # 11-18 O4: C1 is production; the shadow patch is now a no-op for the consent codes.
     assert finalize('ADMIN_CONSENT_MARK_UNREADABLE') == 'NEEDS_REVIEW'
-    assert finalize('REQUIRED_FIELD_UNREADABLE') == 'FAIL'
+    # 11-18 S5: the quality grade alone is never FAIL (was FAIL with an unreadable required field).
+    assert finalize('REQUIRED_FIELD_UNREADABLE') == 'NEEDS_REVIEW'
     with tool.c1_patch():
         assert finalize('ADMIN_CONSENT_MARK_UNREADABLE') == 'NEEDS_REVIEW'
         assert finalize('ADMIN_CONSENT_SIGNATURE_UNREADABLE') == 'NEEDS_REVIEW'
-        assert finalize('REQUIRED_FIELD_UNREADABLE') == 'FAIL'
+        assert finalize('REQUIRED_FIELD_UNREADABLE') == 'NEEDS_REVIEW'  # 11-18 S5: was FAIL
     assert doc_check.ESSENTIAL_FIELD_UNREADABLE_CODES is original
 
 

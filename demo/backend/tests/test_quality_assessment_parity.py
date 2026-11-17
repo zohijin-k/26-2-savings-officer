@@ -118,8 +118,12 @@ def test_accepted_exam_matching_without_quality_review_keeps_existing_behavior(e
         residence_region="전주시", program=PROGRAMS[JOB_PACKAGE], income_percent=None,
     )
     pipeline = run_pipeline(applicant, to_engine_documents([fact]), [req])
-    assert pipeline.stage1.status == Status.FAIL
-    assert "WRONG_DOCUMENT_TYPE" in {f.code.value for f in pipeline.stage1.findings}
+    if evidence == "good-quality":
+        assert pipeline.stage1.status == Status.FAIL
+        assert "WRONG_DOCUMENT_TYPE" in {f.code.value for f in pipeline.stage1.findings}
+    else:
+        # 11-18 S5: low quality alone is reviewed (was stage1 FAIL with WRONG_DOCUMENT_TYPE).
+        assert pipeline.stage1.status == Status.NEEDS_REVIEW
 
 
 @pytest.mark.parametrize("variant", ["unknown", "unreadable"])
@@ -134,7 +138,7 @@ def test_quality_failure_cannot_be_shadowed_by_another_readable_exam(variant, re
     for req, read in zip(requirements, reads):
         result = check_document(req, read)
         facts.append(document_fact(_row(req, Path("FAKE-exam.png"), read, result)))
-    assert facts[0]["status"] == "FAIL" and facts[1]["status"] == "PASS"
+    assert facts[0]["status"] == "NEEDS_REVIEW" and facts[1]["status"] == "PASS"  # 11-18 S5: quality score alone is reviewed (was FAIL)
     if reverse:
         facts.reverse()
     applicant = to_engine_applicant(
@@ -142,9 +146,9 @@ def test_quality_failure_cannot_be_shadowed_by_another_readable_exam(variant, re
         residence_region="전주시", program=PROGRAMS[JOB_PACKAGE], income_percent=None,
     )
     pipeline = run_pipeline(applicant, to_engine_documents(facts), requirements)
-    assert pipeline.stage1.status == Status.FAIL
+    assert pipeline.stage1.status == Status.NEEDS_REVIEW  # 11-18 S5: was FAIL
     quality = [f for f in pipeline.stage1.findings if f.code.value == "LOW_IMAGE_QUALITY"]
-    assert quality and all(f.message != IMAGE_QUALITY_REVIEW_MESSAGE for f in quality)
+    assert quality and all(f.message == IMAGE_QUALITY_REVIEW_MESSAGE for f in quality)  # 11-18 S5: was FAIL
 
 
 @pytest.mark.parametrize("quality", [.59, .6, .9])
@@ -158,9 +162,8 @@ def test_upload_and_submission_share_quality_boundary_and_required_readability(q
     )
     result = check_document(req, read, file_format="png")
     pipeline, converted = pipeline_for(req, read, result)
-    expected = "FAIL" if quality < .6 and variant != "complete" else (
-        "PASS" if quality >= .6 and variant == "complete" else "NEEDS_REVIEW"
-    )
+    # 11-18 S5: below the threshold the quality grade is NEEDS_REVIEW for every variant (was FAIL).
+    expected = "PASS" if quality >= .6 and variant == "complete" else "NEEDS_REVIEW"
     assert result.status == pipeline.stage1.status.value == pipeline.status.value == expected
     assert converted.image_quality_score == quality
     quality_findings = [f for f in result.findings if f.code == "LOW_IMAGE_QUALITY"]
@@ -171,7 +174,7 @@ def test_upload_and_submission_share_quality_boundary_and_required_readability(q
         assert quality_findings[0].message == engine_findings[0].message == IMAGE_QUALITY_REVIEW_MESSAGE
         assert quality_findings[0].how_to_fix == QUALITY_REVIEW_GUIDANCE
     if quality < .6 and variant != "complete":
-        assert quality_findings[0].severity == "FAIL"
+        assert quality_findings[0].severity == "NEEDS_REVIEW"  # 11-18 S5: was FAIL
 
 
 def test_quality_review_preserves_independent_required_content_failure_in_submission():
@@ -202,7 +205,7 @@ def test_legacy_quality_evidence_keeps_conservative_failure(evidence):
         converted.image_quality_score,
         classification_succeeded=converted.classification_succeeded,
         required_fields_readable=converted.required_fields_readable,
-    ) == Status.FAIL
+    ) == Status.NEEDS_REVIEW  # 11-18 S5: was FAIL
     assert image_quality_status(.6) == Status.PASS
 
 
@@ -217,7 +220,7 @@ def test_saved_quality_review_cannot_override_failed_classification_or_good_qual
         converted.image_quality_score,
         classification_succeeded=converted.classification_succeeded,
         required_fields_readable=converted.required_fields_readable,
-    ) == Status.FAIL
+    ) == Status.NEEDS_REVIEW  # 11-18 S5: was FAIL
     row.update(doc_type=str(DocType.FARM_BIZ_CERT), image_quality=.9, status="FAIL")
     assert to_engine_documents([row])[0].has_confirmed_document_failure is False
 
@@ -249,11 +252,11 @@ def test_late_receipt_ocr_unavailability_changes_quality_review_to_failure(tmp_p
                      issue_date=ISSUED, fields={"결제금액": "1000"}, tier="none")
     assert check_document(req, read).status == "NEEDS_REVIEW"
     _, result = upload_assessment.assess_upload(tmp_path / "FAKE-receipt.png", req, reader=lambda *_: read)
-    assert result.status == "FAIL"
+    assert result.status == "NEEDS_REVIEW"  # 11-18 S5: was FAIL
     assert "RECEIPT_OCR_UNAVAILABLE" in result.codes
-    assert next(f.severity for f in result.findings if f.code == "LOW_IMAGE_QUALITY") == "FAIL"
+    assert next(f.severity for f in result.findings if f.code == "LOW_IMAGE_QUALITY") == "NEEDS_REVIEW"  # 11-18 S5: was FAIL
     pipeline, _ = pipeline_for(req, read, result)
-    assert pipeline.stage1.status == Status.FAIL
+    assert pipeline.stage1.status == Status.NEEDS_REVIEW  # 11-18 S5: was FAIL
 
 
 def test_quality_finalization_retains_one_warning_and_independent_reading_evidence():
@@ -262,7 +265,7 @@ def test_quality_finalization_retains_one_warning_and_independent_reading_eviden
     result = CheckResult("NEEDS_REVIEW", [CheckFinding("MISSING_BILLING_MONTHS", "합성 미판독", severity="NEEDS_REVIEW")])
     for _ in range(2):
         finalize_image_quality(req, read, result)
-    assert result.status == "FAIL"
+    assert result.status == "NEEDS_REVIEW"  # 11-18 S5: was FAIL
     assert result.codes.count("LOW_IMAGE_QUALITY") == 1
     assert "MISSING_BILLING_MONTHS" in result.codes
 
@@ -292,7 +295,8 @@ def test_actual_upload_final_check_submission_and_officer_quality_agree(client, 
     )
     assert response.status_code == 200
     body = response.json()
-    expected = "NEEDS_REVIEW" if variant == "complete" else "FAIL"
+    # 11-18 S5: only the content failure still fails (was FAIL unless complete).
+    expected = "FAIL" if variant == "content-failure" else "NEEDS_REVIEW"
     assert body["status"] == expected
     listed = client.get(f"/api/applications/{app.id}/documents").json()
     assert next(row for row in listed if row["document_id"] == body["document_id"])["status"] == expected
@@ -302,7 +306,7 @@ def test_actual_upload_final_check_submission_and_officer_quality_agree(client, 
     with models.get_session() as session:
         stored = session.get(models.Document, body["document_id"])
         quality = next(f for f in stored.findings_json if f["code"] == "LOW_IMAGE_QUALITY")
-        assert quality["severity"] == ("NEEDS_REVIEW" if variant in {"complete", "content-failure"} else "FAIL")
+        assert quality["severity"] == "NEEDS_REVIEW"  # 11-18 S5: was FAIL for unreadable/unknown
         assert officer._document_view(stored, {})["findings"] == stored.findings_json
     rerun = _run_review(app)
     assert rerun.stage1_status == rerun.final_status == expected

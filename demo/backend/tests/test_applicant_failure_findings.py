@@ -161,7 +161,8 @@ def test_daily_unknown_checkbox_reference_metadata_survives_existing_boundary(pa
 
 
 @pytest.mark.parametrize("case,slot,expected", [
-    ("5", "resident_abstract", [("MISSING_ADDRESS_DATES", "FAIL"), ("LOW_IMAGE_QUALITY", "FAIL")]),
+    # 11-18 S5: LOW_IMAGE_QUALITY is reviewed (was an applicant FAIL reason).
+    ("5", "resident_abstract", [("MISSING_ADDRESS_DATES", "FAIL")]),
     ("7", "nhis_payment", [("MISSING_BILLING_MONTHS", "FAIL")]),
 ])
 def test_source_shaped_case_cli_shows_only_applicant_failures(

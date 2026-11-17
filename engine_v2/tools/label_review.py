@@ -8,6 +8,10 @@ Print the summary (numbers and codes only)::
 
     python -B -m engine_v2.tools.label_review summary --out OUT [--round N]
 
+List labeled disagreements (ordinal and codes only)::
+
+    python -B -m engine_v2.tools.label_review mismatch --out OUT [--round N]
+
 Inputs are a doc_timing ``rows.jsonl`` (row format 2 or later) and the PDF folder its 16-hex document keys
 were computed from. Samples: B = every FAIL document, C = PASS documents stratified by form (fixed seed).
 The label file keeps keys, stage, state/reason codes, item O/X, time and criteria version only. Values the
@@ -1024,6 +1028,56 @@ def summarize(plan, records, round_number=None):
     return '\n'.join(lines) + '\n'
 
 
+def mismatches(plan, records, round_number=None):
+    """One line per labeled disagreement: ordinal and fixed codes only (no keys, paths or values).
+
+    B: truth is not FAIL. C: truth is not PASS, or an item was marked X in this round's values.
+    The ordinal is the screen order (seeded rank over B ∪ C of the round); it matches the screen when no
+    document of the round is missing from the root.
+    """
+    rounds = {item['round']: item for item in plan['rounds']}
+    round_number = max(rounds) if round_number is None else round_number
+    _require(round_number in rounds, 'ARGUMENT_ERROR')
+    current = rounds[round_number]
+    best = latest(records)
+    order = sorted(current['b'] + current['c'], key=lambda key: rank(plan['seed'], 'order', key))
+    b_keys = set(current['b'])
+    lines = ['MISMATCH round n set form engine_decision engine_reasons truth r_codes x_items']
+    count = 0
+    for number, key in enumerate(order, 1):
+        record = best.get(('blind', key))
+        if record is None:
+            continue
+        values = best.get(('values', key, round_number))
+        if key in b_keys:
+            if record['status'] == 'FAIL':
+                continue
+            name, x_items = 'B', '-'
+        else:
+            marked = [item for item, mark in values['fields'] if mark == 'X'] if values else []
+            if record['status'] == 'PASS' and not marked:
+                continue
+            name = 'C'
+            x_items = ','.join(marked) if marked else ('VALUES_PENDING' if values is None else '-')
+        doc = current['docs'][key]
+        codes = sorted({code for code, _ in doc['reasons']})
+        lines.append(_line('MISMATCH', round_number, number, name, doc['form'], doc['decision'],
+                           ','.join(codes) or '-', record['status'], ','.join(record['reasons']) or '-', x_items))
+        count += 1
+    lines.append(_line('MISMATCH_COUNT', count))
+    return '\n'.join(lines) + '\n'
+
+
+def mismatch(out, round_number=None):
+    """Read-only: prints ordinals and codes only."""
+    out = Path(out).absolute()
+    _require(out.is_dir() and not out.is_symlink(), 'INPUT_UNAVAILABLE')
+    plan = read_plan(out)
+    _require(plan is not None, 'INPUT_UNAVAILABLE')
+    print(mismatches(plan, read_labels(out), round_number).rstrip('\n'), flush=True)
+    return 0
+
+
 def summary(out, round_number=None):
     """Read-only: never repairs or writes."""
     out = Path(out).absolute()
@@ -1051,6 +1105,9 @@ def parser():
     report = commands.add_parser('summary')
     report.add_argument('--out', required=True)
     report.add_argument('--round', type=int)
+    listing = commands.add_parser('mismatch')
+    listing.add_argument('--out', required=True)
+    listing.add_argument('--round', type=int)
     return result
 
 
@@ -1064,7 +1121,7 @@ def main(argv=None):
             return serve(args.rows, args.root, args.out, sample=args.sample, seed=args.seed, port=args.port)
         if args.round is not None and args.round < 1:
             _fail('ARGUMENT_ERROR')
-        return summary(args.out, args.round)
+        return (mismatch if args.command == 'mismatch' else summary)(args.out, args.round)
     except KeyboardInterrupt:
         return 130
     except ToolError as error:

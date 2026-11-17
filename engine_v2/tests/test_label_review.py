@@ -640,3 +640,53 @@ def test_v01_labels_stay_and_summary_counts_versions(corpus):
     assert pick(lines, 'LABEL_VERSION', 'blind', 'v0.2')[3] == '1'
     with pytest.raises(ValueError):
         tool.validate_label(dict(old, criteria='v9.9'))
+
+
+# ---------------------------------------------------------------- mismatch listing
+
+
+def test_mismatch_lists_ordinals_and_codes_only(corpus, capsys):
+    import re
+    sess = session(corpus)
+    http = client(sess)
+    b, c = sess.current['b'], sess.current['c']
+
+    def blind(key, status, reasons=()):
+        assert post(http, sess, f'/api/doc/{key}/blind', {'status': status, 'reasons': list(reasons)}).status_code == 200
+
+    def marks(key, x=()):
+        names = [item['name'] for item in http.get(f'/api/doc/{key}/values').json()['items']]
+        body = {'fields': {name: 'X' if name in x else 'O' for name in names}}
+        assert post(http, sess, f'/api/doc/{key}/values', body).status_code == 200
+
+    blind(b[0], 'FAIL', ['R3'])                       # agrees: not listed
+    blind(b[1], 'NEEDS_REVIEW')                       # listed
+    blind(b[2], 'HOLD')                               # listed
+    blind(c[0], 'PASS'); marks(c[0])                  # agrees: not listed
+    blind(c[1], 'PASS'); marks(c[1], x=('성명', '발급일'))  # listed with X items
+    blind(c[2], 'FAIL', ['R5', 'R2']); marks(c[2])    # listed
+    blind(c[3], 'PASS')                               # values pending, nothing known yet: not listed
+    blind(c[4], 'NEEDS_REVIEW')                       # listed, values pending
+
+    capsys.readouterr()
+    assert tool.main(['mismatch', '--out', str(corpus['out'])]) == 0
+    out = capsys.readouterr().out
+    lines = [line.split() for line in out.splitlines()]
+    assert lines[0][0] == 'MISMATCH' and lines[-1] == ['MISMATCH_COUNT', '5']
+    rows = {int(line[2]): line for line in lines[1:-1]}
+    number = {key: sess.queue.index(key) + 1 for key in sess.queue}
+    assert set(rows) == {number[k] for k in (b[1], b[2], c[1], c[2], c[4])}
+    assert rows[number[b[1]]][3:] == ['B', 'NHIS_PAYMENT', 'FAIL', 'DOCUMENT_ISSUED_TOO_EARLY', 'NEEDS_REVIEW', '-', '-']
+    assert rows[number[b[2]]][7] == 'HOLD'
+    assert rows[number[c[1]]][3:] == ['C', sess.current['docs'][c[1]]['form'], 'PASS', '-', 'PASS', '-', '성명,발급일']
+    assert rows[number[c[2]]][7:] == ['FAIL', 'R2,R5', '-']
+    assert rows[number[c[4]]][7:] == ['NEEDS_REVIEW', '-', 'VALUES_PENDING']
+
+    # Never a path, file name, read value or document content: ordinals and codes only.
+    for marker in ('/', '\\', '.pdf', '.PDF', SENTINEL, 'secret', 'person', corpus['root'].name, corpus['out'].name):
+        assert marker not in out, marker
+    assert not re.search(r'\d{4}\s*[-./년]\s*\d{1,2}', out)
+    assert not re.search(r'\d{1,2}\s*[./]\s*\d{1,2}\s*[./]\s*\d{2,4}', out)
+    assert not any(key in out for key in sess.queue)
+    assert tool.main(['mismatch', '--out', str(corpus['tmp'] / 'missing')]) == 2
+    assert capsys.readouterr().out == 'ERROR INPUT_UNAVAILABLE\n'

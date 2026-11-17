@@ -10,6 +10,7 @@ changes operating code; values are recomputed through the service path only for 
 ```text
 python -B -m engine_v2.tools.label_review serve --rows FAKE-rows.jsonl --root FAKE-input --out FAKE-labels [--sample 150] [--seed 20261117] [--port 8765]
 python -B -m engine_v2.tools.label_review summary --out FAKE-labels [--round N]
+python -B -m engine_v2.tools.label_review mismatch --out FAKE-labels [--round N]
 ```
 
 ## Contracts
@@ -58,6 +59,14 @@ FAIL or any item X in that round's values; documents count only with blind and v
 (`k = 0` → `1 − 0.05^(1/n)`). Also truth NEEDS_REVIEW among PASS, per form, per R code, per engine FAIL
 reason, per value item, revised counts and cross-check agreement (status, status+reasons). The bound is
 computed by bisection on the exact binomial tail; no new dependency.
+
+## Mismatch listing
+
+Read-only. One line per labeled disagreement of a round: B with truth not FAIL; C with truth not PASS or
+any item X (C values not yet saved print `VALUES_PENDING`; truth PASS without values is not listed). Columns
+are round, screen ordinal (seeded order over B ∪ C; equals the screen when no document is missing), set,
+form code, engine decision, engine reason codes, truth state, R codes and X item names from the fixed
+vocabulary. Never keys, paths, file names, values or dates.
 
 ## Tests
 

@@ -221,7 +221,9 @@ def diagnose(pairs, labels):
 
     def observe_legacy(pages):
         parsed = original_legacy(pages)
-        result["month_count"] = len(parsed[11])
+        # Printed month rows (all_months); out-of-query calendar rows are kept out of the
+        # billing months (parsed[11]) but are still printed rows of the table.
+        result["month_count"] = len(set(parsed[10]))
         result["month_count_scope"] = "LEGACY_TABLE"
         return parsed
 

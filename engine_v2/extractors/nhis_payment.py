@@ -165,6 +165,7 @@ def _closest_amount(amounts, x):
     return min(amounts, key=lambda item: abs((item[0].x0 + item[0].x1) / 2 - x)) if amounts else None
 
 
+
 def _extract_monthly(pages):
     charge_xs = _header_x(pages, ("고지금액", "고지보험료"))
     paid_xs = _header_x(pages, ("납부금액", "납부보험료", "실납부"))
@@ -191,14 +192,20 @@ def _extract_monthly(pages):
     target_words: dict[tuple[int, int], list[common.Word]] = {}
     money_numeric = True
     nonpositive = False
-    period_start = None
+    period_start = period_end = None
     for _, result in pages:
         match = PERIOD_RE.search(normalize_format_text(result.text))
         if match:
             period_start = (int(match.group(1)), int(match.group(2)))
+            period_end = (int(match.group(3)), int(match.group(4)))
             break
-    if period_start is None:
-        period_start = None
+
+    def label_year(month):
+        # 연도 없는 'N월' 줄의 연도는 조회기간 제목에서 정한다. 같은 해 안의 조회기간이면 1~12월
+        # 고정 표의 모든 줄이 그 해다. 해를 넘는 조회기간이면 시작 월 앞의 달이 다음 해다.
+        if period_end is not None and period_end[0] == period_start[0]:
+            return period_start[0]
+        return period_start[0] if month >= period_start[1] else period_start[0] + 1
     for page, result in pages:
         # 쪽별 표 인식이 머리글 일부를 빠뜨려도 같은 양식의 다른 쪽에서 찾은
         # 열 위치를 쓴다. 페이지마다 같은 표 너비·열 순서를 유지하는 서식이다.
@@ -244,17 +251,12 @@ def _extract_monthly(pages):
             compact = COMPACT_MONTH_RE.findall(normalize_format_text(text))
             matches = MONTH_RE.findall(normalize_format_text(text)) + compact
             months = [(int(y), int(m)) for y, m in matches]
+            calendar_row = False
             if not months:
                 labels = MONTH_ONLY_RE.findall(text)
                 if labels and period_start:
-                    month = int(labels[0])
-                    year = period_start[0] if month >= period_start[1] else period_start[0] + 1
-                    months = [(year, month)]
-                    if len(labels) > 1:
-                        for label in labels[1:]:
-                            next_month = int(label)
-                            next_year = period_start[0] if next_month >= period_start[1] else period_start[0] + 1
-                            months.append((next_year, next_month))
+                    months = [(label_year(int(label)), int(label)) for label in labels]
+                    calendar_row = True
             if not months:
                 if "합계" in squash(text):
                     amounts = _money_words(line)
@@ -266,6 +268,11 @@ def _extract_monthly(pages):
             for ym in months:
                 all_months.append(ym)
             target = months
+            if calendar_row and period_end is not None:
+                # 1~12월 고정 표에서 조회기간 밖 줄은 고지월·월별 금액에 넣지 않는다.
+                target = [ym for ym in months if period_start <= ym <= period_end]
+                if not target:
+                    continue
             target_seen.update(target)
             for ym in target:
                 target_words.setdefault(ym, list(line))
@@ -286,6 +293,15 @@ def _extract_monthly(pages):
                 money_numeric = False
                 continue
             billed = _closest_amount(amounts, health_x if health_x is not None else charge_x)
+            if billed and component_columns and not combined:
+                # _closest_amount has no distance bound: when the 건강보험료 cell is unread the nearest
+                # remaining cell can be the 장기요양보험료 cell (11-18 A3). 장기요양보험료 is a fraction
+                # of 건강보험료, so a row is kept only with a distinct care cell not above a non-negative
+                # billed one (negative rows are refunds/adjustments and keep the existing checks).
+                care_check = _closest_amount([item for item in amounts if item is not billed], care_x)
+                if care_check is None or 0 <= billed[1] < care_check[1]:
+                    billed = None
+                    money_numeric = False
             paid = _closest_amount(amounts, paid_x) if paid_x is not None else None
             if billed and paid_x is not None and len(amounts) > 1:
                 if paid is billed:

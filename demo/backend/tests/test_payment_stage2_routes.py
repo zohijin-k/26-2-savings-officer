@@ -96,7 +96,8 @@ def test_short_month_boxes_can_select_legacy_but_no_billing_finding_is_not_pass(
     pages = [base.page(changed, size=size)]
     extraction = nhis_payment.extract(pages)
     assert extraction.form_kind is None
-    assert len(json.loads(extraction.fields["월별고지금액"].value)) == 12
+    # 11-18 L2: the title period (2025-10~2025-12) bounds the billing months of the 1~12 calendar.
+    assert sorted(json.loads(extraction.fields["월별고지금액"].value)) == ["2025-10", "2025-11", "2025-12"]
     result = _from_nhis(extraction, pages, V2DocType)
     assert _check_billing_months(result, requirement()) == []
     assert check_document(requirement(), result).status == "NEEDS_REVIEW"

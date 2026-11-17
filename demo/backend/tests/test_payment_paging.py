@@ -195,14 +195,14 @@ def test_exact_v2_s1_pages_incomplete_is_fail_in_both_paths(tmp_path, monkeypatc
 @pytest.mark.parametrize("marker,status", [("1/1", "PASS"), ("1/2", "FAIL"), (None, "PASS")])
 def test_actual_image_upload_persists_independent_paging(client, tmp_path, monkeypatch, marker, status):
     from demo.backend.tests.test_p2_nhis_uploads import image_pdf, use_own_words
-    from demo.backend.tests.test_portal_uploads import new_app, upload
+    from demo.backend.tests.test_portal_uploads import assert_upload_status, new_app, upload
     cells, size = base.payment()
     if marker is not None:
         cells.append(base.cell(1770, 35, 1930, 82, marker, 1))
     use_own_words(monkeypatch, cells, size)
     path = image_pdf(tmp_path / "FAKE-paging-upload.pdf", size)
     response, stored = upload(client, new_app(client, name=base.NAME, birth=base.BIRTH), path, "nhis_payment")
-    assert response["status"] == status
+    assert_upload_status(response, status)
     assert FIELD in stored["fields"]
 
 
@@ -229,6 +229,7 @@ def test_paging_review_or_failure_cannot_establish_income(marker):
 def test_api_list_and_final_check_keep_paging_severity(client, tmp_path, monkeypatch, marker, expected):
     from demo.backend.tests.test_income_review import make_application
     from demo.backend.tests.test_eligibility_blockers import ready
+    from demo.backend.tests.test_portal_uploads import assert_upload_status
     from demo.backend.api import documents
     from PIL import Image
     application = ready(make_application(premium=0))
@@ -245,9 +246,9 @@ def test_api_list_and_final_check_keep_paging_severity(client, tmp_path, monkeyp
         data={"slot_key": "nhis_payment", "declared_issue_date": "2026-04-07"})
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == expected
+    assert_upload_status(body, expected)
     listed = client.get(f"/api/applications/{application.id}/documents").json()
-    assert next(r for r in listed if r["document_id"] == body["document_id"])["status"] == expected
+    assert next(r for r in listed if r["document_id"] == body["document_id"])["status"] == body["status"]
     final = client.get(f"/api/applications/{application.id}/final-check").json()
     blocking = [r for r in final["blockers"] if r["kind"] == "document" and r["target"] == "nhis_payment"]
     assert bool(blocking) is (expected == "FAIL")

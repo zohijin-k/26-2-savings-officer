@@ -267,6 +267,7 @@ def test_quality_finalization_retains_one_warning_and_independent_reading_eviden
 
 @pytest.mark.parametrize("variant", ["complete", "unreadable", "unknown", "content-failure"])
 def test_actual_upload_final_check_submission_and_officer_quality_agree(client, tmp_path, monkeypatch, variant):
+    from demo.backend.tests.test_portal_uploads import assert_upload_status
     app = ready(make_application(premium=0))
     fields = {
         "성명": "가상신청", "생년월일": "1999-01-01", "발급일": ISSUED.isoformat(),
@@ -291,9 +292,9 @@ def test_actual_upload_final_check_submission_and_officer_quality_agree(client, 
     assert response.status_code == 200
     body = response.json()
     expected = "NEEDS_REVIEW" if variant == "complete" else "FAIL"
-    assert body["status"] == expected
+    assert_upload_status(body, expected)
     listed = client.get(f"/api/applications/{app.id}/documents").json()
-    assert next(row for row in listed if row["document_id"] == body["document_id"])["status"] == expected
+    assert next(row for row in listed if row["document_id"] == body["document_id"])["status"] == body["status"]
     final = client.get(f"/api/applications/{app.id}/final-check").json()
     document_blockers = [row for row in final["blockers"] if row["kind"] == "document" and row["target"] == "resident_abstract"]
     assert bool(document_blockers) is (expected == "FAIL")

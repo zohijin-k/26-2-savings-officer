@@ -241,7 +241,7 @@ def test_label_files_hold_codes_only(corpus, caplog, capfd):
     assert set(records[0]) == {'v', 'key', 'stage', 'status', 'reasons', 'fields', 'round', 'revised', 'at',
                                'criteria'}
     assert records[1]['fields'] == [['서류종류', 'O'], ['성명', 'X'], ['발급일', 'O']]
-    assert records[1]['round'] == 1 and records[0]['criteria'] == 'v0.1'
+    assert records[1]['round'] == 1 and records[0]['criteria'] == 'v0.2'
     captured = capfd.readouterr()
     texts = [(corpus['out'] / name).read_text(encoding='utf-8') for name in ('labels.jsonl', 'plan.json')]
     texts += [captured.out, captured.err, caplog.text]
@@ -557,3 +557,86 @@ def test_cli_errors_print_codes_only(corpus, capsys):
     assert out == 'ERROR INPUT_UNAVAILABLE\n' and SENTINEL not in out
     assert tool.main(['serve', '--rows', str(corpus['rows']), '--root', str(corpus['root']), '--out',
                       str(corpus['out']), '--port', '80']) == 2
+
+
+# ---------------------------------------------------------------- per-form checks and criteria v0.2
+
+
+def test_checks_read_values_from_the_measurement_criteria(env, monkeypatch):
+    from engine import config as engine_config
+    from demo.backend.ocr import file_evidence
+    from demo.backend.rules.criteria import default_criteria
+    criteria = default_criteria('double_savings')
+    payment = tool.checks('NHIS_PAYMENT')
+    text = ' '.join(item['text'] for item in payment)
+    assert all(month in text for month in criteria['nhis_payment_months'])
+    assert '2026-03-03 이후' in text and timing.requirement('NHIS_PAYMENT').label in text
+    assert str(engine_config.IMAGE_QUALITY_THRESHOLD) in text and f'{file_evidence.MIN_SHORT_EDGE}px' in text
+    assert {code for item in payment for code in item['codes']} == {'R1', 'R2', 'R3', 'R4', 'R5'}
+    assert all(item['source'] for item in payment)
+    years = ' '.join(item['text'] for item in tool.checks('NHIS_ACQUISITION_LOSS'))
+    assert f"최근 {criteria['nhis_acquisition_loss_years']}년" in years
+    consent = tool.checks('ADMIN_INFO_CONSENT')
+    assert [item['codes'] for item in consent if 'R6' in item['codes']] == [['R6'], ['R6']]
+    assert '발급일 기준 없음' in [item['text'] for item in consent]
+    resident = [item for item in tool.checks('RESIDENT_ABSTRACT') if item['codes'] in (['R2'], ['R5'])]
+    assert len(resident) == 3
+    assert tool.checks('X') == [] and tool.checks('DAILY_WORK_RECORD') == []
+
+    # Values follow the slot, not text baked into the tool.
+    from copy import deepcopy
+    changed = deepcopy(timing.requirement('NHIS_PAYMENT'))
+    changed.premium_months = ['2024-01']
+    monkeypatch.setattr(timing, 'requirement', lambda form: changed)
+    assert '2024-01' in ' '.join(item['text'] for item in tool.checks('NHIS_PAYMENT'))
+
+
+def test_checks_endpoint_is_per_form_and_verdict_free(corpus):
+    sess = session(corpus)
+    http = client(sess)
+    data = http.get('/api/checks').json()
+    assert set(data) == {'NHIS_PAYMENT', 'INSURANCE_4'}
+    assert set(data['NHIS_PAYMENT']) == {'label', 'items'} and data['NHIS_PAYMENT']['items'] == tool.checks('NHIS_PAYMENT')
+    text = json.dumps(data, ensure_ascii=False)
+    for secret in ('FAIL', 'PASS', 'DOCUMENT_ISSUED', SENTINEL, *sess.queue):
+        assert secret not in text
+    key = sess.queue[0]
+    assert http.get(f'/api/doc/{key}/engine').json() == {'error': 'BLIND_FIRST'}
+
+
+def test_fail_is_not_saved_without_a_reason_code(corpus):
+    sess = session(corpus)
+    http = client(sess)
+    key = sess.queue[0]
+    response = post(http, sess, f'/api/doc/{key}/blind', {'status': 'FAIL', 'reasons': []})
+    assert response.status_code == 422 and response.json() == {'error': 'REASONS_REQUIRED'}
+    assert not (corpus['out'] / 'labels.jsonl').exists() and sess.blind(key) is None
+    assert post(http, sess, f'/api/doc/{key}/blind', {'status': 'FAIL', 'reasons': ['R5', 'R2']}).status_code == 200
+    assert sess.blind(key)['reasons'] == ['R2', 'R5']
+    app_js = (tool.STATIC / 'app.js').read_text(encoding='utf-8')
+    assert "app.status === 'FAIL' && !app.reasons.size" in app_js  # the screen refuses before sending
+
+
+def test_v01_labels_stay_and_summary_counts_versions(corpus):
+    sess = session(corpus)
+    plan_path = corpus['out'] / 'plan.json'
+    plan = json.loads(plan_path.read_text())
+    plan['criteria'] = 'v0.1'  # an out folder started with the v0.1 tool
+    plan_path.write_text(json.dumps(plan))
+    old_key, new_key = sess.current['b'][:2]
+    old = dict(tool.label(old_key, 'blind', status='FAIL', reasons=['R3']), criteria='v0.1')
+    tool.append_label(corpus['out'], old)
+    before = (corpus['out'] / 'labels.jsonl').read_bytes()
+
+    sess = session(corpus)
+    assert sess.plan['criteria'] == 'v0.1' and sess.blind(old_key)['criteria'] == 'v0.1'
+    http = client(sess)
+    assert post(http, sess, f'/api/doc/{new_key}/blind', {'status': 'PASS', 'reasons': []}).status_code == 200
+    data = (corpus['out'] / 'labels.jsonl').read_bytes()
+    assert data.startswith(before)
+    assert json.loads(data.splitlines()[-1])['criteria'] == tool.CRITERIA == 'v0.2'
+    lines = summary_lines(tool.summarize(sess.plan, sess.records))
+    assert pick(lines, 'LABEL_VERSION', 'blind', 'v0.1')[3] == '1'
+    assert pick(lines, 'LABEL_VERSION', 'blind', 'v0.2')[3] == '1'
+    with pytest.raises(ValueError):
+        tool.validate_label(dict(old, criteria='v9.9'))

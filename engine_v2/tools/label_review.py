@@ -35,7 +35,9 @@ from . import batch_assess as batch
 from . import doc_timing as timing
 
 VERSION = 1
-CRITERIA = 'v0.1'
+CRITERIA = 'v0.2'
+#: Label criteria versions this tool reads. Records keep the version they were saved with.
+CRITERIA_VERSIONS = ('v0.1', 'v0.2')
 #: Fixed bind address. There is deliberately no option to change it.
 HOST = '127.0.0.1'
 DEFAULT_PORT = 8765
@@ -167,6 +169,52 @@ def cutoff(form):
                 max=req.max_issue_date.isoformat() if req.max_issue_date else None)
 
 
+def checks(form):
+    """What to check for a form, with values read from the slot doc_timing assesses against.
+
+    The slot comes from ``doc_timing.requirement`` (double-savings default criteria, the same code path as the
+    measurement); thresholds come from the engine constants. Never depends on a document or its verdict.
+    """
+    from engine import config as engine_config
+    from demo.backend.ocr import file_evidence
+    req = timing.requirement(form)
+    if req is None:
+        return []
+    items = []
+
+    def add(text, codes, source):
+        items.append(dict(text=text, codes=list(codes), source=source))
+
+    add(f'요구 서류: {req.label}', ['R1'], 'required_docs.py')
+    basis = {'issue_date': '발급일', 'payment_date': '결제일', 'interview_date': '면접일',
+             'exam_date': '응시일'}.get(req.date_basis, '발급일')
+    if req.date_basis == 'none' or (req.min_issue_date is None and req.max_issue_date is None):
+        add('발급일 기준 없음', [], 'criteria.py')
+    else:
+        bounds = [f'{req.min_issue_date.isoformat()} 이후'] if req.min_issue_date else []
+        bounds += [f'{req.max_issue_date.isoformat()} 이전'] if req.max_issue_date else []
+        add(f'{basis}이 {" · ".join(bounds)}', ['R3'], 'criteria.py · programs.py')
+    if req.premium_months:
+        add(f'조회기간에 심사 대상 고지월 {", ".join(req.premium_months)}이 모두 들어 있고 그 달의 고지금액이 있음',
+            ['R5'], 'criteria.py')
+        add('서류에 표시된 전체 쪽수만큼 쪽이 모두 있음', ['R2'], 'doc_check.py')
+    if req.recent_years:
+        add(f'최근 {req.recent_years}년 자격 변동내역이 포함됨(조회기간 또는 이력)', ['R5'], 'criteria.py')
+    if form == 'RESIDENT_ABSTRACT':
+        add('쪽 표기(예: 1/3)의 모든 쪽이 있고 중복 쪽이 없음', ['R2'], 'doc_check.py')
+        add('과거 주소 변동사항(최근 5년)이 포함됨', ['R5'], 'doc_check.py')
+        add('주소 이력에 발생일·신고일 날짜가 있음', ['R5'], 'doc_check.py')
+    if form == 'ADMIN_INFO_CONSENT':
+        add("동의 표시가 '동의함'", ['R6'], 'upload_assessment.py')
+        if req.requires_signature:
+            add('자필 서명이 있음', ['R6'], 'required_docs.py')
+    add(f'사람이 핵심 항목(성명·생년월일·발급일 등)을 읽을 수 있음. 엔진은 화질 점수 '
+        f'{engine_config.IMAGE_QUALITY_THRESHOLD} 미만이거나 원본 이미지가 짧은 변 {file_evidence.MIN_SHORT_EDGE}px·'
+        f'긴 변 {file_evidence.MIN_LONG_EDGE}px 미만이면서 핵심 항목을 못 읽을 때만 재업로드로 봄',
+        ['R4'], 'config.py · file_evidence.py')
+    return items
+
+
 # ---------------------------------------------------------------- rows and samples
 
 
@@ -236,7 +284,7 @@ def validate_plan(plan):
     try:
         batch._require(isinstance(plan, dict) and set(plan) == {'schema_version', 'criteria', 'seed', 'sample',
                                                                  'cross_size', 'rounds', 'cross'})
-        batch._require(plan['schema_version'] == VERSION and plan['criteria'] == CRITERIA)
+        batch._require(plan['schema_version'] == VERSION and plan['criteria'] in CRITERIA_VERSIONS)
         batch._require(all(type(plan[k]) is int and plan[k] >= 0 for k in ('seed', 'sample', 'cross_size')))
         batch._require(isinstance(plan['rounds'], list) and plan['rounds'])
         for number, item in enumerate(plan['rounds'], 1):
@@ -299,7 +347,7 @@ def validate_label(record):
         batch._require(isinstance(record, dict) and set(record) == {'v', 'key', 'stage', 'status', 'reasons',
                                                                      'fields', 'round', 'revised', 'at',
                                                                      'criteria'})
-        batch._require(record['v'] == VERSION and record['criteria'] == CRITERIA)
+        batch._require(record['v'] == VERSION and record['criteria'] in CRITERIA_VERSIONS)
         batch._require(isinstance(record['key'], str) and KEY_RE.fullmatch(record['key']))
         batch._require(record['stage'] in STAGES and record['revised'] in MARKS)
         batch._require(isinstance(record['at'], str) and len(record['at']) <= 40)
@@ -495,6 +543,10 @@ class Session:
             self.latest = latest(self.records)
 
     # -- views
+
+    def checklists(self):
+        forms = sorted({self.doc(key)['form'] for key in self.queue + self.cross_queue()})
+        return {form: dict(label=form_label(form), items=checks(form)) for form in forms}
 
     def overview(self):
         queue = []
@@ -695,6 +747,11 @@ def create_app(session):
     @app.get('/api/session')
     def overview():
         return session.overview()
+
+    @app.get('/api/checks')
+    def form_checks():
+        """Per-form checklist for every form in this session; no key, decision or reason."""
+        return session.checklists()
 
     @app.get('/api/doc/{key}')
     def doc(key: str):
@@ -940,6 +997,15 @@ def summarize(plan, records, round_number=None):
             items[(current['docs'][key]['form'], name)][mark] += 1
     for (form, name), marks in sorted(items.items()):
         lines.append(_line('VALUE_ITEM', form, name, marks['O'], marks['X']))
+
+    lines.append('LABEL_VERSION stage version documents')
+    cross_keys = plan['cross']['keys'] if plan['cross'] else []
+    staged = (('blind', list(blind.values())), ('values', list(values.values())),
+              ('cross', [best[('cross', k)] for k in cross_keys if ('cross', k) in best]))
+    for stage, items in staged:
+        versions = Counter(record['criteria'] for record in items)
+        for version in CRITERIA_VERSIONS:
+            lines.append(_line('LABEL_VERSION', stage, version, versions[version]))
 
     lines.append('REVISED stage documents')
     lines.append(_line('REVISED', 'blind', sum(blind[k]['revised'] == 'O' for k in blind)))

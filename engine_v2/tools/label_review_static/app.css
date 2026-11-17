@@ -65,6 +65,10 @@ button.primary kbd { background: transparent; color: #fff; border-color: rgba(25
 #values button.on-O { background: #e3f3e4; border-color: var(--pass); font-weight: 700; }
 #values button.on-X { background: #fbe4e2; border-color: var(--fail); font-weight: 700; }
 .guide { margin: 6px 0 0; padding-left: 18px; line-height: 1.5; }
+.checks { margin: 4px 0 0; padding-left: 18px; line-height: 1.45; }
+.checks .codes-tag { font: 11px ui-monospace, Menlo, monospace; color: var(--accent); margin-left: 4px; }
+.checks .source { display: block; font-size: 11px; color: var(--muted); }
+#all-checks h4 { font-size: 13px; margin: 10px 0 2px; }
 @media (max-width: 900px) {
   #layout { grid-template-columns: 1fr; height: auto; }
   #page-box { max-height: 70vh; }

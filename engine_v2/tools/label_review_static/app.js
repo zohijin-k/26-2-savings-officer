@@ -11,7 +11,7 @@
   const app = {
     token: null, session: null, mode: 'main', index: 0, doc: null,
     page: 0, zoom: 2, status: null, reasons: new Set(), saved: null,
-    stage2: false, engine: null, values: null, focus: 0, marks: {}, busy: false,
+    stage2: false, engine: null, values: null, focus: 0, marks: {}, busy: false, checks: {},
   };
 
   async function api(method, url, body) {
@@ -101,6 +101,7 @@
     app.reasons = new Set(app.saved ? app.saved.reasons : []);
     $('form-label').textContent = app.doc.form_label + ' (' + app.doc.form + ')';
     $('cutoff').textContent = cutoffText(app.doc.cutoff);
+    checkList($('checks'), (app.checks[app.doc.form] || {}).items);
     $('stage1').hidden = false;
     $('cross-start-box').hidden = true;
     setMsg('blind-msg', app.saved ? '저장됨 · 고치려면 다시 고르고 저장' : '');
@@ -117,8 +118,41 @@
     $('page-info').textContent = '-';
     $('form-label').textContent = '-';
     $('cutoff').textContent = '-';
+    $('checks').textContent = '';
     hideStage2();
     renderBar();
+  }
+
+  function checkList(target, items) {
+    target.textContent = '';
+    (items || []).forEach((item) => {
+      const li = document.createElement('li');
+      li.appendChild(document.createTextNode(item.text));
+      if (item.codes.length) {
+        const tag = document.createElement('span');
+        tag.className = 'codes-tag';
+        tag.textContent = item.codes.join(' ');
+        li.appendChild(tag);
+      }
+      const source = document.createElement('span');
+      source.className = 'source';
+      source.textContent = '출처: ' + item.source;
+      li.appendChild(source);
+      target.appendChild(li);
+    });
+  }
+
+  function renderAllChecks() {
+    const box = $('all-checks');
+    box.textContent = '';
+    Object.keys(app.checks).forEach((form) => {
+      const head = document.createElement('h4');
+      head.textContent = '서식별 확인할 것 · ' + app.checks[form].label;
+      const list = document.createElement('ul');
+      list.className = 'checks';
+      checkList(list, app.checks[form].items);
+      box.append(head, list);
+    });
   }
 
   function cutoffText(c) {
@@ -450,6 +484,8 @@
   (async function start() {
     try {
       await refresh();
+      app.checks = await api('GET', '/api/checks');
+      renderAllChecks();
     } catch (e) {
       notice('서버에 연결하지 못했습니다: ' + e.message);
       return;

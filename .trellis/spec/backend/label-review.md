@@ -31,11 +31,16 @@ python -B -m engine_v2.tools.label_review summary --out FAKE-labels [--round N]
   Queue order uses a separate rank so position never reveals B vs C. Cross-check keys (20, `seed:cross`)
   are frozen in plan.json and only after the main queue is complete.
 - Blind order: `GET /api/doc/{key}` returns ordinal, page count, form, issue-date bounds from
-  `doc_timing.requirement(form)` and the own earlier label only. Engine decision/reasons (`/engine`) and
+  `doc_timing.requirement(form)` and the own earlier label only. `GET /api/checks` returns, per form in the
+  session, the "확인할 것" list (text, R codes, source file name) built by `checks(form)` from the same slot
+  (`doc_timing.requirement`, double-savings default criteria) and the engine/file-evidence constants; it
+  carries no key, decision or reason. Engine decision/reasons (`/engine`) and
   values (`/values`) return 409 BLIND_FIRST until a blind label exists. Cross-check documents show neither
   the earlier label nor the verdict.
 - `labels.jsonl` is append-only, latest record per key+stage (values: per key+round) wins. Closed record:
-  `v, key, stage, status, reasons, fields, round, revised, at, criteria`. Item names are a fixed vocabulary
+  `v, key, stage, status, reasons, fields, round, revised, at, criteria`. New records use criteria `v0.2`; `v0.1`
+  records and plans stay valid and unchanged (`CRITERIA_VERSIONS`), and the summary counts latest labels per
+  stage and version (`LABEL_VERSION`). Item names are a fixed vocabulary
   (`batch_assess.FIELDS`, resident display keys, 서류종류, 발급일); O/X must cover exactly the items shown.
   No values, names, memos, paths or hashes of values. An incomplete final line is ignored by summary and
   truncated by serve; any other invalid line is LABELS_INVALID.

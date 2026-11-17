@@ -114,3 +114,12 @@ candidate rules would change, without changing production behaviour.
   (`in_local` off); exit and cause codes still describe where the 1st path gave up, and
   the "X" summary lines cover documents whose 1st path gave up (still X or recovered),
   with `XFINAL` and `RECOVERY` lines for the outcome.
+- Row keys `s1`–`s4` (format 3 additions): S1 counts header-band page markers per sheet
+  (2-up printing, markers >= `S1_SPREAD` apart, one document number) and scores the merged
+  set; S2 re-reads sheets with fewer than `S2_MIN_HANGUL` Hangul characters (or of
+  unclassified documents) at 90/180/270 degrees and keeps a rotation only with
+  `S2_RATIO`/`S2_MIN_GAIN`/`S2_CONF_FLOOR`, recording extra seconds; S3 classifies where the
+  final 발급일 appears (LABEL, LABEL_TEXT, HEADER_BAND, CONFIRM_BAND, OUTPUT_LABEL,
+  LABEL_LEFT, OTHER, NONE) and counts '열람용'; S4 counts absence FAILs with unreadable or
+  low-confidence evidence and whether the address table header was seen. Converter pages,
+  resident pages and preprocess images are captured in memory for one document only.

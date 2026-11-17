@@ -269,6 +269,9 @@ class Trace:
         self.ocr_chars = None
         self.exceptions = {}
         self.payment = None      # (pages, result) of the last production payment extraction, memory only
+        self.resident = None     # pages of the last production resident extraction, memory only
+        self.read_pages = None   # pages handed to the last production form converter, memory only
+        self.images = None       # page images of the last production preprocess, memory only
         self.page_texts = None   # squeezed per-page reading text, memory only
         self.retries = []        # (code, outcome) of production render retries
         self.ocr_cache.clear()
@@ -324,6 +327,8 @@ def _wrap_preprocess(trace, original):
     def preprocess(*args, **kwargs):
         try:
             pages = original(*args, **kwargs)
+            if trace.capture and trace.in_local:
+                trace.images = pages
         except Exception as exc:
             if trace.active and trace.in_local:
                 trace.exceptions.setdefault('preprocess', class_name(exc))
@@ -393,6 +398,23 @@ def _wrap_classify_pages(trace, original):
     return classify_pages_with_evidence
 
 
+def _wrap_resident_extract(trace, original):
+    def extract(pages, *args, **kwargs):
+        result = original(pages, *args, **kwargs)
+        if trace.capture:
+            trace.resident = pages
+        return result
+    return extract
+
+
+def _wrap_capture_pages(trace, original, position):
+    def converter(*args, **kwargs):
+        if trace.capture and len(args) > position:
+            trace.read_pages = args[position]
+        return original(*args, **kwargs)
+    return converter
+
+
 def _wrap_payment_extract(trace, original):
     def extract(pages, *args, **kwargs):
         result = original(pages, *args, **kwargs)
@@ -429,11 +451,15 @@ def instrument(trace):
             _wrap_classify_pages(trace, pdftext.classify_pages_with_evidence))
         from engine_v2.extractors import nhis_payment
         put(nhis_payment, 'extract', _wrap_payment_extract(trace, nhis_payment.extract))
+        from engine_v2.extractors import resident_abstract
+        put(resident_abstract, 'extract', _wrap_resident_extract(trace, resident_abstract.extract))
+        put(localocr, '_from_supported_form', _wrap_capture_pages(trace, localocr._from_supported_form, 1))
+        put(localocr, '_from_resident', _wrap_capture_pages(trace, localocr._from_resident, 1))
         put(file_evidence, 'independent_page_markers',
             _wrap_value(trace, file_evidence.independent_page_markers, 'markers',
                         lambda r: 'NONE' if r is None else 'FOUND'))
-        put(localocr, '_generic', _wrap_value(trace, localocr._generic, 'generic',
-                                              lambda r: 'NONE' if r is None else _kind(r.detected_doc_type)))
+        put(localocr, '_generic', _wrap_capture_pages(trace, _wrap_value(
+            trace, localocr._generic, 'generic', lambda r: 'NONE' if r is None else _kind(r.detected_doc_type)), 0))
         yield trace
 
 
@@ -593,6 +619,31 @@ MEMBER_CODES = {'직장': 'WORK', '지역': 'LOCAL', 'X': 'X'}
 #: low-resolution original (objective quality below the production threshold).
 A2_TRIGGER = 'REQUIRED_FIELD_UNREADABLE'
 SEVERITY_CODES = ('FAIL', 'NEEDS_REVIEW', 'X')
+#: S1: resident abstract sheets carrying several page markers side by side (2-up printing).
+S1_SPREAD = 25.0              # minimum horizontal distance (page-width %) between markers on one sheet
+S1_SHEETS = ('M0', 'M1', 'M2P')
+S1_RESULTS = ('COMPLETE', 'INCOMPLETE', 'DUPLICATED', 'UNREADABLE', 'DOC_NO_DIFFERS', 'NOT_MULTI')
+#: S3: where the final 발급일 value is found on the read pages (first legitimate match wins).
+ISSUE_LABELS = ('발급일시', '발급일자', '발급일', '발행일자', '발행일', '발급년월일', '교부일자')
+S3_SOURCES = ('LABEL', 'LABEL_TEXT', 'HEADER_BAND', 'CONFIRM_BAND', 'OUTPUT_LABEL', 'LABEL_LEFT', 'OTHER', 'NONE')
+#: Sources the held production candidate keeps; the rest leave 발급일 empty (NEEDS_REVIEW).
+S3_ACCEPTED = ('LABEL', 'LABEL_TEXT', 'HEADER_BAND', 'CONFIRM_BAND')
+#: S4: FAIL codes that reject because something is absent (page codes excluded) and the
+#: unreadable/low-confidence codes that make such an absence uncertain.
+S4_ABSENT = ('MISSING_ADDRESS_HISTORY', 'MISSING_ADDRESS_DATES', 'MISSING_BILLING_MONTHS',
+             'NHIS_HISTORY_PERIOD_MISSING', 'MISSING_REQUIRED_FIELD')
+S4_UNREADABLE = ('REQUIRED_FIELD_UNREADABLE', 'LOW_OCR_CONFIDENCE')
+S4_COOCCUR = ('RFU', 'LOWCONF', 'BOTH', 'NONE')
+S4_REGIONS = ('FOUND', 'NOT_FOUND', 'NA')
+#: S2: sheets read poorly (few Hangul characters) or of unclassified documents are re-read rotated.
+S2_MIN_HANGUL = 50      # a sheet with fewer Hangul characters counts as poorly read
+S2_RATIO = 2.0          # a rotation must read at least this many times the Hangul characters
+S2_MIN_GAIN = 30        # ... and at least this many more
+S2_CONF_FLOOR = .8      # ... with this mean word confidence
+S2_ANGLES = (90, 180, 270)
+S2_BETTER = ('B0', 'B1', 'B2P')
+S3_FORMS = ('RESIDENT_ABSTRACT', 'RESIDENT_CERTIFICATE', 'NHIS_PAYMENT', 'NHIS_QUALIFICATION',
+            'NHIS_ACQUISITION_LOSS', 'INSURANCE_4', 'ADMIN_INFO_CONSENT')
 C1_EXCLUDED = frozenset({'ADMIN_CONSENT_MARK_UNREADABLE', 'ADMIN_CONSENT_SIGNATURE_UNREADABLE'})
 #: Phase-correlation peak (z-score of the correlation surface) treated as a confident alignment.
 PEAK_STRONG = 20.0
@@ -782,6 +833,238 @@ def member_type_candidate(pages):
     work = '직장가입' in flat or workplace
     local = '지역가입' in flat
     return '직장' if work and not local else '지역' if local and not work else 'X'
+
+
+def sheet_markers(pages):
+    """S1: page markers in the header band of each sheet; (markers, multi, doc numbers) per sheet.
+
+    A sheet is multi when two or more n/m markers in the header band are at least ``S1_SPREAD``
+    apart horizontally (2-up printing). Values stay in memory; only codes leave the tool.
+    """
+    from engine_v2.extractors import resident_abstract as ra
+    from engine_v2.pipeline.layout import group_lines, line_text, normalize
+    sheets = []
+    for page, result in pages:
+        lines = group_lines(normalize(result.words, page.page, page.pixel_size))
+        found, numbers = [], set()
+        for line in lines:
+            if line[0].cy >= ra.HEADER_MAX_Y:
+                continue
+            numbers.update(ra.DOC_NO.findall(ra.normalize_format_text(line_text(line))))
+            for word in line:
+                match = ra.PAGE_NO.match(word.text)
+                if match:
+                    found.append((word.x0, (int(match.group(1)), int(match.group(2)))))
+        xs = [x for x, _ in found]
+        multi = len(found) >= 2 and max(xs) - min(xs) >= S1_SPREAD
+        sheets.append(([marker for _, marker in sorted(found)], multi, numbers))
+    return sheets
+
+
+def s1_result(sheets, production_markers):
+    """Merged page check when every multi sheet's markers count; codes mirror _check_resident_pages."""
+    if not any(multi for _, multi, _ in sheets):
+        return 'NOT_MULTI', None
+    if any(multi and len(numbers) > 1 for _, multi, numbers in sheets):
+        return 'DOC_NO_DIFFERS', None
+    merged = []
+    for (markers, multi, _), single in zip(sheets, production_markers):
+        merged.extend(markers if multi else [single])
+    if any(m is None or not 1 <= m[0] <= m[1] for m in merged) or len({m[1] for m in merged}) != 1:
+        return 'UNREADABLE', merged
+    total = merged[0][1]
+    seen = {m[0] for m in merged}
+    if len(seen) < total:
+        return 'INCOMPLETE', merged
+    if len(seen) != len(merged):
+        return 'DUPLICATED', merged
+    return 'COMPLETE', merged
+
+
+def resident_sheet_shadow(trace, path, row, ocr):
+    if trace.resident is None:
+        return
+    sheets = sheet_markers(trace.resident)
+    count = sum(multi for _, multi, _ in sheets)
+    try:
+        data = json.loads(ocr.fields.get('쪽표기자료', 'null'))
+        production = data['markers']
+    except (TypeError, ValueError, KeyError):
+        data, production = None, None
+    result, merged = (s1_result(sheets, [tuple(m) if m else None for m in production])
+                      if production is not None and len(production) == len(sheets) else ('NOT_MULTI', None))
+    if count and production is None:
+        result = 'UNREADABLE'
+    after = None
+    if merged is not None and data is not None:
+        # Shadow only: the merged markers are scored as if each marker were its own page.
+        changed = deepcopy(ocr)
+        changed.fields['쪽표기자료'] = json.dumps(dict(data, markers=[list(m) for m in merged]))
+        changed.page_count = len(merged) + int(data.get('blank_pages', 0) or 0)
+        after = _assess(path, row['form'], changed)[0]
+    row['s1'] = dict(sheets='M0' if count == 0 else 'M1' if count == 1 else 'M2P', result=result, decision=after)
+
+
+def _starts_label(text, following):
+    """A word is an issue-date label, or the first half of one split across two words."""
+    return any(label in text or (text and label.startswith(text) and label in text + following)
+               for label in ISSUE_LABELS)
+
+
+def issue_source(form, pages, value):
+    """S3: classify where the final 발급일 appears on the pages the production converter read."""
+    from engine_v2.extractors import nhis_common as common
+    from engine_v2.pipeline.layout import line_text, squash
+    if not value:
+        return 'NONE'
+    if pages is None:
+        return 'LABEL_TEXT'  # PdfText: only the labeled-date regex sets the value
+    target = str(value)[:10]
+    found = set()
+    for page, result in pages:
+        lines = common.page_lines(page, result)
+        flats = [squash(line_text(line)) for line in lines]
+        confirms = [i for i, flat in enumerate(flats) if '확인합니다' in flat]
+        for index, line in enumerate(lines):
+            for day, words in common.dates_in_line(line):
+                if day.isoformat() != target:
+                    continue
+                date_x = min(w.x0 for w in words) if words else 0.0
+                label_x = next((w.x0 for i, w in enumerate(line) if _starts_label(
+                    squash(w.text), squash(line[i + 1].text) if i + 1 < len(line) else '')), None)
+                if label_x is not None:
+                    found.add('LABEL' if date_x >= label_x else 'LABEL_LEFT')
+                elif '출력일' in flats[index]:
+                    found.add('OUTPUT_LABEL')
+                elif any(c <= index for c in confirms) and not any(
+                        '국민건강보험공단' in flats[j] for j in range(max(c for c in confirms if c <= index), index)):
+                    found.add('CONFIRM_BAND')
+                elif form in ('RESIDENT_ABSTRACT', 'RESIDENT_CERTIFICATE') and line[0].cy < 16.0:
+                    found.add('HEADER_BAND')
+                else:
+                    found.add('OTHER')
+    order = ('LABEL', 'HEADER_BAND', 'CONFIRM_BAND', 'OUTPUT_LABEL', 'LABEL_LEFT', 'OTHER')
+    return next((code for code in order if code in found), 'OTHER')
+
+
+def _yeollam(pages, path):
+    from engine_v2.pipeline.layout import squash
+    if pages is not None:
+        text = ''.join(result.text for _, result in pages)
+    else:
+        import pymupdf
+        with pymupdf.open(path) as document:
+            text = ''.join(page.get_text() for page in document)
+    return 'O' if '열람용' in squash(text) else 'X'
+
+
+def issue_shadow(trace, path, row, ocr):
+    pages = trace.read_pages if ocr.tier == 'localocr' else None
+    source = issue_source(row['form'], pages, ocr.fields.get('발급일'))
+    after = None
+    if source not in S3_ACCEPTED and source != 'NONE':
+        changed = deepcopy(ocr)
+        changed.fields.pop('발급일', None)
+        changed.issue_date = None
+        after = _assess(path, row['form'], changed)[0]
+    row['s3'] = dict(source=source, yeollam=_yeollam(pages, path), decision=after)
+
+
+def _address_region(pages, path):
+    """S4: was the address-history table header seen on the pages the reader used?"""
+    from engine_v2.extractors import resident_abstract as ra
+    from engine_v2.pipeline.layout import group_lines, normalize, squash
+    if pages is not None:
+        found = any(ra._table_bounds(group_lines(normalize(result.words, page.page, page.pixel_size)))
+                    for page, result in pages)
+        return 'FOUND' if found else 'NOT_FOUND'
+    import pymupdf
+    with pymupdf.open(path) as document:
+        text = squash(document[0].get_text()) if document.page_count else ''
+    # PdfText decides 주소변동내역 from page 0 only; the table header names its columns.
+    return 'FOUND' if '번호' in text and any(h in text for h in ('세대주', '신고일', '발생일')) else 'NOT_FOUND'
+
+
+def absence_shadow(trace, path, row, ocr):
+    """S4: an absence FAIL together with unreadable/low-confidence evidence becomes NEEDS_REVIEW."""
+    absent = sorted({code for code, severity in row['reasons'] if code in S4_ABSENT and severity == 'FAIL'})
+    if not absent:
+        return
+    codes = {code for code, _ in row['reasons']}
+    rfu, low = 'REQUIRED_FIELD_UNREADABLE' in codes, 'LOW_OCR_CONFIDENCE' in codes
+    cooccur = 'BOTH' if rfu and low else 'RFU' if rfu else 'LOWCONF' if low else 'NONE'
+    region = 'NA'
+    if 'MISSING_ADDRESS_HISTORY' in absent or 'MISSING_ADDRESS_DATES' in absent:
+        pages = (trace.resident if trace.resident is not None else None) if ocr.tier == 'localocr' else None
+        region = _address_region(pages, path)
+    after = None
+    if cooccur != 'NONE':
+        severities = [('NEEDS_REVIEW' if code in absent else severity) for code, severity in row['reasons']]
+        after = ('FAIL' if 'FAIL' in severities else 'NEEDS_REVIEW' if 'NEEDS_REVIEW' in severities else 'PASS')
+    row['s4'] = dict(codes=absent, cooccur=cooccur, region=region, decision=after)
+
+
+def _hangul(words):
+    return sum(len(re.findall(r'[가-힣]', word.text)) for word in words)
+
+
+def _rotated(page, angle):
+    from io import BytesIO
+    from dataclasses import replace
+    from PIL import Image
+    with Image.open(BytesIO(page.png)) as image:
+        turned = image.rotate(angle, expand=True)
+        data = BytesIO()
+        turned.save(data, 'PNG')
+        size = turned.size
+    width, height = page.page_size_pt
+    page_size = (height, width) if angle in (90, 270) else (width, height)
+    return replace(page, png=data.getvalue(), pixel_size=size, page_size_pt=page_size)
+
+
+def rotation_shadow(trace, path, row, ocr):
+    """S2: re-read poorly read sheets at 90/180/270 degrees with own; codes and seconds only."""
+    from engine_v2.pipeline import ocr as v2ocr, preprocess as v2pre
+    from engine_v2 import engine as v2engine
+    images = [page for page in (trace.images or []) if page.png]
+    if not images:
+        return
+    recognize = v2ocr.ENGINES['own']
+    started = time.perf_counter()
+    choices, tried = {}, 0
+    for page in images:
+        words = recognize(page.png, page.pixel_size)
+        base = _hangul(words)
+        if base >= S2_MIN_HANGUL and row['form'] != 'X':
+            continue
+        tried += 1
+        best = None
+        for angle in S2_ANGLES:
+            turned = _rotated(page, angle)
+            found = recognize(turned.png, turned.pixel_size)
+            count = _hangul(found)
+            confidence = sum(w.confidence for w in found) / len(found) if found else 0.0
+            if (count >= max(S2_RATIO * base, base + S2_MIN_GAIN) and confidence >= S2_CONF_FLOOR
+                    and (best is None or count > best[1])):
+                best = (angle, count, turned)
+        if best is not None:
+            choices[page.page] = best[2]
+    seconds = round(time.perf_counter() - started, 2)
+    result = dict(tried=tried, better='B0' if not choices else 'B1' if len(choices) == 1 else 'B2P',
+                  form=None, decision=None, s1=None, seconds=seconds)
+    if choices:
+        def preprocess(file_path, _original=v2pre.preprocess):
+            return [choices.get(page.page, page) for page in _original(file_path)]
+        with patch.object(v2pre, 'preprocess', preprocess), patch.object(v2engine, 'preprocess', preprocess):
+            shadow = _shadow_read(trace, path, lambda stack: None)
+        result['form'] = _kind(shadow.detected_doc_type)
+        result['decision'] = _assess(path, result['form'], shadow)[0]
+        if result['form'] in ('RESIDENT_ABSTRACT', 'RESIDENT_CERTIFICATE'):
+            turned = [(page, v2ocr.OcrResult('own', recognize(page.png, page.pixel_size)))
+                      for page in (choices.get(p.page, p) for p in images)]
+            sheets = sheet_markers(turned)
+            result['s1'] = 'MULTI' if any(multi for _, multi, _ in sheets) else 'SINGLE'
+    row['s2'] = result
 
 
 def _json_field(fields, name):
@@ -1048,7 +1331,7 @@ def blank_row(key, code='NONE'):
                 struct=None, scan=None, scan_code=None, text_all=None,
                 g1={name: None for name in CANDIDATES}, g1_decision={name: None for name in CANDIDATES},
                 consent=None, c1=None, payment=None, p1=None, c2=None, a2=None, a4=None, recovery=None,
-                shadow_errors=[])
+                s1=None, s2=None, s3=None, s4=None, shadow_errors=[])
 
 
 def gave_up(row):
@@ -1084,6 +1367,11 @@ def process(path, key, trace):
                                     ('PAYMENT', row['form'] == 'NHIS_PAYMENT',
                                      lambda: payment_shadow(trace, path, row, ocr)),
                                     ('A4', row['form'] == 'NHIS_PAYMENT', lambda: member_type_shadow(trace, row, ocr)),
+                                    ('S3', row['form'] in S3_FORMS, lambda: issue_shadow(trace, path, row, ocr)),
+                                    ('S4', True, lambda: absence_shadow(trace, path, row, ocr)),
+                                    ('S2', True, lambda: rotation_shadow(trace, path, row, ocr)),
+                                    ('S1', row['form'] in ('RESIDENT_ABSTRACT', 'RESIDENT_CERTIFICATE'),
+                                     lambda: resident_sheet_shadow(trace, path, row, ocr)),
                                     ('QUALITY', True, lambda: quality_shadows(trace, path, row, ocr))):
         if not applies:
             continue
@@ -1106,7 +1394,8 @@ def validate_row(row):
     req = batch._require
     keys = {'schema_version', 'key', 'code', 'form', 'tier', 'decision', 'reasons', 'exit', 'reclass',
             'exceptions', 'ocr_chars', 'cause', 'struct', 'scan', 'scan_code', 'text_all', 'g1', 'g1_decision',
-            'consent', 'c1', 'payment', 'p1', 'c2', 'a2', 'a4', 'recovery', 'shadow_errors'}
+            'consent', 'c1', 'payment', 'p1', 'c2', 'a2', 'a4', 'recovery', 's1', 's2', 's3', 's4',
+            'shadow_errors'}
     req(isinstance(row, dict) and set(row) == keys and row['schema_version'] == VERSION)
     req(isinstance(row['key'], str) and timing.KEY_RE.fullmatch(row['key']) is not None)
     req(row['code'] in ROW_CODES and row['form'] in KINDS and row['tier'] in TIERS and row['decision'] in DECISIONS)
@@ -1130,7 +1419,24 @@ def validate_row(row):
     req(set(row['g1_decision']) == set(CANDIDATES)
         and all(_code_in(v, DECISIONS, True) for v in row['g1_decision'].values()))
     req(isinstance(row['shadow_errors'], list)
-        and set(row['shadow_errors']) <= {'G1', 'CONSENT', 'PAYMENT', 'A4', 'QUALITY'})
+        and set(row['shadow_errors']) <= {'G1', 'CONSENT', 'PAYMENT', 'A4', 'QUALITY', 'S1', 'S2', 'S3', 'S4'})
+    req(row['s2'] is None or (isinstance(row['s2'], dict)
+                              and set(row['s2']) == {'tried', 'better', 'form', 'decision', 's1', 'seconds'}
+                              and type(row['s2']['tried']) is int and row['s2']['better'] in S2_BETTER
+                              and _code_in(row['s2']['form'], KINDS, True)
+                              and _code_in(row['s2']['decision'], DECISIONS, True)
+                              and _code_in(row['s2']['s1'], ('MULTI', 'SINGLE'), True)
+                              and isinstance(row['s2']['seconds'], (int, float))))
+    req(row['s4'] is None or (isinstance(row['s4'], dict) and set(row['s4']) == {'codes', 'cooccur', 'region', 'decision'}
+                              and isinstance(row['s4']['codes'], list) and set(row['s4']['codes']) <= set(S4_ABSENT)
+                              and row['s4']['cooccur'] in S4_COOCCUR and row['s4']['region'] in S4_REGIONS
+                              and _code_in(row['s4']['decision'], DECISIONS, True)))
+    req(row['s3'] is None or (isinstance(row['s3'], dict) and set(row['s3']) == {'source', 'yeollam', 'decision'}
+                              and row['s3']['source'] in S3_SOURCES and row['s3']['yeollam'] in ('O', 'X')
+                              and _code_in(row['s3']['decision'], DECISIONS, True)))
+    req(row['s1'] is None or (isinstance(row['s1'], dict) and set(row['s1']) == {'sheets', 'result', 'decision'}
+                              and row['s1']['sheets'] in S1_SHEETS and row['s1']['result'] in S1_RESULTS
+                              and _code_in(row['s1']['decision'], DECISIONS, True)))
     req(_code_in(row['c2'], DECISIONS, True))
     req(row['a2'] is None or (isinstance(row['a2'], dict)
                               and set(row['a2']) == {'form', 'decision', 'required', 'quality', 'quality_before'}
@@ -1348,6 +1654,45 @@ def _stage_summary(done):
     _counted(lines, 'A4_DECISION before after decision n',
              ((MEMBER_CODES[r['a4']['before']], MEMBER_CODES[r['a4']['after']], r['decision']) for r in a4
               if r['a4']['before'] != r['a4']['after']))
+    s3 = [r for r in done if r['s3'] is not None]
+    fallback = [r for r in s3 if r['s3']['decision'] is not None]
+    lines.append('S3 docs fallback_docs fallback_pass fallback_fail_changed yeollam_docs')
+    lines.append(_line('S3', len(s3), len(fallback), sum(r['decision'] == 'PASS' for r in fallback),
+                       sum(r['decision'] == 'FAIL' and r['s3']['decision'] != 'FAIL' for r in fallback),
+                       sum(r['s3']['yeollam'] == 'O' for r in s3)))
+    _counted(lines, 'S3_SOURCE form source n', ((r['form'], r['s3']['source']) for r in s3))
+    _counted(lines, 'S3_DECISION form source before after n',
+             ((r['form'], r['s3']['source'], r['decision'], r['s3']['decision']) for r in fallback))
+    _counted(lines, 'S3_YEOLLAM form source decision n',
+             ((r['form'], r['s3']['source'], r['decision']) for r in s3 if r['s3']['yeollam'] == 'O'))
+    s4 = [r for r in done if r['s4'] is not None]
+    lines.append('S4 absence_fail_docs with_unreadable fail_to_review')
+    lines.append(_line('S4', len(s4), sum(r['s4']['cooccur'] != 'NONE' for r in s4),
+                       sum(r['decision'] == 'FAIL' and r['s4']['decision'] == 'NEEDS_REVIEW' for r in s4)))
+    _counted(lines, 'S4_CODE form code cooccur region n',
+             ((r['form'], code, r['s4']['cooccur'], r['s4']['region']) for r in s4 for code in r['s4']['codes']))
+    _counted(lines, 'S4_DECISION form before after n',
+             ((r['form'], r['decision'], r['s4']['decision']) for r in s4 if r['s4']['decision'] is not None))
+    s2 = [r for r in done if r['s2'] is not None and r['s2']['tried']]
+    better = [r for r in s2 if r['s2']['better'] != 'B0']
+    lines.append('S2 tried_docs tried_sheets better_docs better_sheets_b2p form_gained mean_s p95_s')
+    seconds = sorted(r['s2']['seconds'] for r in s2)
+    p95 = seconds[min(len(seconds) - 1, int(.95 * len(seconds)))] if seconds else 0.0
+    lines.append(_line('S2', len(s2), sum(r['s2']['tried'] for r in s2), len(better),
+                       sum(r['s2']['better'] == 'B2P' for r in better),
+                       sum(r['form'] == 'X' and r['s2']['form'] not in (None, 'X') for r in better),
+                       f"{sum(seconds) / len(seconds):.2f}" if seconds else '0.00', f'{p95:.2f}'))
+    _counted(lines, 'S2_DECISION form_before form_after before after n',
+             ((r['form'], r['s2']['form'], r['decision'], r['s2']['decision']) for r in better))
+    _counted(lines, 'S2_S1 form_after s1 n', ((r['s2']['form'], r['s2']['s1']) for r in better if r['s2']['s1']))
+    s1 = [r for r in done if r['s1'] is not None]
+    lines.append('S1 resident_docs multi_sheet_docs')
+    lines.append(_line('S1', len(s1), sum(r['s1']['sheets'] != 'M0' for r in s1)))
+    _counted(lines, 'S1_SHEETS sheets n', ((r['s1']['sheets'],) for r in s1))
+    _counted(lines, 'S1_MULTI sheets result decision_before n',
+             ((r['s1']['sheets'], r['s1']['result'], r['decision']) for r in s1 if r['s1']['sheets'] != 'M0'))
+    _counted(lines, 'S1_DECISION result before after n',
+             ((r['s1']['result'], r['decision'], r['s1']['decision']) for r in s1 if r['s1']['decision'] is not None))
     _counted(lines, 'P1_DECISION margin before after n',
              ((key, r['decision'], r['p1'][key]['decision']) for r in payment for key in P1_KEYS
               if r['p1'] is not None and r['p1'][key]['decision'] != r['decision']))

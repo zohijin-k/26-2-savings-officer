@@ -259,3 +259,15 @@ own OCR의 묶음 머리글 상자 아래쪽이 글자층보다 조금 아래(�
 - 두 기준이 다른 이유: 0.6은 DPI(또는 사진 짧은 변) 구간으로 만든 상대 점수이고 데모 가정값(engine/config.py)이다. 600/800은 절대 화소 크기의 좁은 하한으로,
   미판독일 때만 쓰도록 11-13 실패 사례 작업에서 추정해 정했다(archive 11-13-fail-cases design.md). 그래서 900×1200 사진은 0.55로 화질 미달이지만 600/800 규칙에는 걸리지 않는다.
   라벨 도구 화면 문구의 위치는 저장소 허용 범위에서 찾지 못했다(doc_check.py의 IMAGE_RESOLUTION_TOO_LOW 상세 문구에 같은 숫자가 있다).
+
+### 11-18 S3·S4·S5 (운영 반영)과 보관 패치
+
+- S3 발급일 출처: 순수 대체 경로(최댓값·표 날짜 선택)는 없었다. 느슨한 곳은 `nhis_common.header_for_page`(발급일·발행일·**출력일** 줄의 아무 날짜, 이름표 왼쪽 날짜 포함)였다.
+  수정 후 이름표 오른쪽만 인정, 출력일 제외, 발급일 없으면 ISSUE_DATE_MISSING(발급일이 인쇄되는 여섯 서식). 410쌍 바뀐 행 0 → 합성에서 대체 경로로 PASS였던 경우 없음.
+  확인한 별도 공백: 취업지원 서류 슬롯(결제영수증·면접확인서·응시확인서)은 date_basis가 issue_date인데 서류에 발급일이 없어 기간 규칙이 원래 돌지 않는다(이번 수정 범위 밖, 보고만).
+- S5: 화질 점수만으로는 FAIL 없음. 410쌍 own 저해상도 25행 FAIL→NEEDS_REVIEW, PASS 수 그대로.
+- S4: MISSING_ADDRESS_HISTORY는 PdfText가 첫 쪽 글자만으로 '미포함'을 정하고(pdftext.py `has_address_history`) 규칙에 신뢰도 조건이 없었다. 영역 자체 근거가 없는
+  MISSING_ADDRESS_HISTORY·MISSING_REQUIRED_FIELD만 판독 불확실 코드와 겹치면 NEEDS_REVIEW. 영역을 0.85 이상으로 읽어야 나오는 MISSING_ADDRESS_DATES·확정 MISSING_BILLING_MONTHS·
+  NHIS_HISTORY_PERIOD_MISSING은 기존 설계(무관한 신뢰도 상한에도 확정)를 유지했다(그대로 넓히면 기존 시험 13건이 FAIL→NEEDS_REVIEW).
+- 보관 패치(커밋 안 함, `<WORK>/patches/`): HELD-A4(가입구분 인적 사항 영역만, 기대값 변경 2), HELD-S1(모아찍기 쪽표기 합치기, 기대값 변경 0),
+  HELD-S2(판별 실패 문서의 판독량 적은 쪽만 회전 재판독, 기대값 변경 2: OCR 호출 수를 고정한 시험).

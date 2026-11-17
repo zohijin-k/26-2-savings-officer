@@ -74,3 +74,7 @@
 | R29 | D1 납부 ARITH 하위 원인 코드, 두 doc_timing 실행 비교(`compare`), D2 C절 핵심 항목 표 |
 | R30 | 그림자: C2(화질 점수만으로 FAIL 안 함, 모든 서식), A2(필수 항목 미판독+저해상도 문서 300dpi 재판독), A4(가입구분을 안내문 빼고 인적 사항 영역에서만) |
 | R31 | 각 운영 커밋마다 회귀 전체, 410쌍, G1·G2 두 세트 전후 보고. 기존 시험 기대값 변경이 필요하면 커밋하지 않고 목록과 이유를 보고(R20 그대로) |
+| R32 | (11-18 갱신) 판정을 NEEDS_REVIEW 쪽으로만 바꾸는 S3·S4·S5는 운영 반영(기대값은 FAIL→NEEDS_REVIEW·PASS→NEEDS_REVIEW만 승인), PASS를 늘릴 수 있는 S1·S2·A4는 그림자 + 보관 패치 |
+| R33 | S3 발급일: 이름표 오른쪽(발급일·발급일자·발행일) 또는 서식 고정 위치만 인정, 출력일은 발급일 아님, 없으면 ISSUE_DATE_MISSING(NEEDS_REVIEW, 발급일이 인쇄되는 여섯 서식만), 열람용은 담당자 메모만 |
+| R34 | S5 화질 점수만으로는 FAIL 없음(engine `image_quality_status`), IMAGE_RESOLUTION_TOO_LOW는 FAIL 유지 |
+| R35 | S4 영역 자체의 신뢰도 근거가 없는 '없음' FAIL(MISSING_ADDRESS_HISTORY·MISSING_REQUIRED_FIELD)은 REQUIRED_FIELD_UNREADABLE·LOW_OCR_CONFIDENCE와 겹치면 NEEDS_REVIEW("판독 불확실"). 영역을 0.85 이상으로 읽어야 하는 MISSING_ADDRESS_DATES·확정 MISSING_BILLING_MONTHS·NHIS_HISTORY_PERIOD_MISSING은 그대로 |

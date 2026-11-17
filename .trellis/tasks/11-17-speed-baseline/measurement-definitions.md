@@ -84,7 +84,7 @@ cd <REPO> && caffeinate -i .venv/bin/python -B -m engine_v2.tools.batch_assess -
 | 건강보험료 납부확인서 | **월별고지금액 (판정 대상 석 달)**, 고지월검증자료(조회기간·금액 없는 달), 납부쪽표기자료, 납부표완전성자료, **가입구분**, 사업장명칭, 성명·가입자성명 | doc_check.py `_check_billing_months`·`_check_payment_paging`, facts.py `_monthly_premium`(월별고지금액만 사용, 건강보험료 평균은 쓰지 않음)·`_insurance_facts`(가입구분) → scoring.py `score_income` | 소득 140% 상한 판정(보험료·가입구분 상한 행), 소득 점수, 고지월 누락 통과 |
 | 건강보험 자격확인서 | 가구원목록·가구원수, 가입구분, 사업장관리번호(·상태), 성명·생년월일, 양식판독상태 | doc_check.py `_check_document`(양식판독상태·필수 항목), facts.py `build_facts`(가구원수)·`_insurance_facts` | 가구원 수(소득 상한 행), 가입구분 |
 | 자격득실확인서 | 자격이력자료(조회기간·취득·상실 행), 발급일, 성명·생년월일 | doc_check.py 자격이력 확인, work_continuity.py | 근로 지속 요건, 이력 기간 누락 통과 |
-| 4대보험 가입내역확인서 | 가입내역 행(보험·상태·자격취득일), 성명·생년월일, 양식판독상태 | doc_check.py `_insurance_identity_unreadable`, work_continuity.py | 근로 지속 요건, 본인 아닌 서류 통과 |
+| 4대보험 가입내역확인서 | **가입내역 행(보험·상태·자격취득일): 판정에 쓰임**(work_continuity.py 근로 지속 판정), 성명·생년월일, 양식판독상태. **사업장명칭목록: 판정에 쓰이지 않음**(추출·표시만) | doc_check.py `_insurance_identity_unreadable`, work_continuity.py | 근로 지속 요건, 본인 아닌 서류 통과 |
 | 행정정보 공동이용 동의서 | 동의여부, 서명잉크확인, 성명·생년월일 | upload_assessment.py `assess_upload`(종이 동의서) | 동의 없음·서명 없음 통과 |
 | 사업자등록증명 | 개업일, 사업자상태, 사업자등록번호, 성명·생년월일, 양식판독상태 | doc_check.py `_check_document`, work_continuity.py | 휴·폐업 또는 기준일 뒤 개업 통과 |
 
@@ -140,3 +140,4 @@ cd <REPO> && caffeinate -i .venv/bin/python -B -m engine_v2.tools.batch_assess -
 - 2026-11-17 (숫자를 보기 전, 작업 E): A7·A8 도구를 doc_timing 결과 행의 `reasons`(형식 버전 2 이상)로 고정.
 - 2026-11-17 (숫자를 보기 전): A를 A(주 지표, 운영 판독 경로·doc_timing)와 A-스캔(보조 지표, batch_assess)으로 나눔. J를 이번 주 측정 제외로 바꿈. E3의 6과 단위를 진 확인 대기로 표시. 사유 표시 문구를 화면 그대로로 고정.
 - 2026-11-18 (라벨 결과를 보기 전): C절에 라벨 핵심 항목 표를 고정. 판정·재업로드·확인 필요·소득 판정 규칙이 실제로 읽는 필드만 넣음.
+- 2026-11-18 (라벨 결과를 보기 전): C절 4대보험 행에 가입내역(판정에 쓰임)·사업장명칭목록(쓰이지 않음) 표시.

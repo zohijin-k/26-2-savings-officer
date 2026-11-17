@@ -132,7 +132,8 @@ def test_candidates_only_add_insurance4_to_unclassified_inputs():
     broken = '4대 사회보험\n확인용 가입자 가입내역 확인서'
     other = '4대 사회보험\n제출용 가입자 가입내역 확인서'
     apart = '가입자 가입내역 확인서 …… 4대 사회보험'
-    assert pdftext.classify_with_evidence(broken)[0] is None
+    # 11-18 O2: production now takes E (both title fragments) when no keyword matches.
+    assert [pdftext.classify_with_evidence(text)[0] for text in (broken, other, apart)] == [DocType.INSURANCE_4] * 3
     for name, expected in (('N', (True, False, False)), ('W', (True, True, False)), ('E', (True, True, True))):
         assert tuple(tool.candidate_fires(name, text) for text in (broken, other, apart)) == expected
         classify = tool.candidate_classifier(name, pdftext.classify_with_evidence)
@@ -189,10 +190,11 @@ def test_g1_shadow_counts_only_unclassified_insurance_titles(tmp_path, fake_ocr)
     out = tmp_path / 'out'
     assert tool.run(root, out) == 0
     (row,) = rows(out)
-    assert row['form'] == 'X'
+    # 11-18 O2: production classifies the interleaved title, so no candidate changes the form.
+    assert row['form'] == 'INSURANCE_4'
     assert row['g1'] == {'N': 'INSURANCE_4', 'W': 'INSURANCE_4', 'E': 'INSURANCE_4'}
-    assert all(value in tool.DECISIONS for value in row['g1_decision'].values())
-    assert 'G1 N 0 0 1 0 1' in (out / 'summary.txt').read_text()
+    assert row['g1_decision'] == {'N': None, 'W': None, 'E': None}
+    assert 'G1 N 1 0 0 0 0' in (out / 'summary.txt').read_text()
     assert pdftext.classify_with_evidence is original
 
 

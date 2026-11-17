@@ -105,6 +105,12 @@ def classify(text: str) -> DocType | None:
     return classify_with_evidence(text)[0]
 
 
+#: 4대보험 대체 판별: 고정 키워드가 하나도 맞지 않을 때만 본다. 제목 두 조각이 떨어져 있어도
+#: (예: 둘째 줄 왼쪽의 용도 표시 '확인용'이 끼어든 제목) 4대보험 추출기의 서식 인식
+#: (engine_v2/extractors/insurance_4.py)과 같은 범위로 받아들인다.
+INSURANCE_4_FRAGMENTS = ("4대사회보험", "가입자가입내역확인서")
+
+
 def classify_with_evidence(text: str) -> tuple[DocType | None, str]:
     """기대 슬롯과 무관하게 본문 제목·서식 키워드로 종류와 근거를 고른다."""
     flat = _squeeze(text)
@@ -112,6 +118,8 @@ def classify_with_evidence(text: str) -> tuple[DocType | None, str]:
         for keyword in keywords:
             if _squeeze(keyword) in flat:
                 return doc_type, f"본문에서 '{keyword}' 제목·서식 단서를 확인했습니다."
+    if all(fragment in flat for fragment in INSURANCE_4_FRAGMENTS):
+        return DocType.INSURANCE_4, "본문에서 '4대사회보험'과 '가입자가입내역확인서' 제목 조각을 함께 확인했습니다."
     return None, "본문에서 지원 서류의 제목·서식 단서를 찾지 못했습니다."
 
 

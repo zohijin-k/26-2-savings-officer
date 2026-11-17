@@ -1,6 +1,8 @@
 """Read-only, value-free comparison of two ocr_baseline result directories.
 
-Use ``python -B -m engine_v2.tools.ocr_baseline_compare --before DIR --after DIR``.
+Use ``python -B -m engine_v2.tools.ocr_baseline_compare --before DIR --after DIR [--outcomes]``.
+``--outcomes`` appends per-field MATCH/BLANK/WRONG/OTHER/NA counts per side and
+before→after transitions; results without recorded value presence give NA.
 Only run.json and results.jsonl are read, through the original closed validators.
 Documents are never opened. Output contains fixed codes, registered ASCII type/field
 codes, integers, finite numbers and NA only: no IDs, paths, values, hashes or
@@ -11,6 +13,7 @@ from __future__ import annotations
 import sys
 sys.dont_write_bytecode = True
 
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from . import batch_assess as batch
@@ -23,6 +26,9 @@ RECOGNITION_HEADER = ('RECOGNITION type engine variant metric before_pct after_p
                       'before_measured after_measured')
 TIME_HEADER = ('TIME type engine variant metric before_s after_s delta_s '
                'before_measured after_measured before_attempted after_attempted')
+OUTCOMES = ('MATCH', 'BLANK', 'WRONG', 'OTHER', 'NA')
+OUTCOME_HEADER = 'OUTCOME type field engine variant side ' + ' '.join(OUTCOMES)
+TRANSITION_HEADER = 'TRANSITION type field engine variant before after count'
 
 
 class CompareError(Exception):
@@ -93,7 +99,62 @@ def cohort(before_rows, after_rows):
     )
 
 
-def compare(before, after):
+def outcome(item, field):
+    """Classify one eligible field measurement; None for a missing reference.
+
+    BLANK/WRONG need the recorded value presence. Results written before it was
+    recorded give NA instead of an error. A different detected kind is OTHER.
+    """
+    if not field['eligible']:
+        return None
+    if field['match']:
+        return 'MATCH'
+    if not item['type_match']:
+        return 'OTHER'
+    present = field.get(baseline.PRESENCE)
+    if present is None:
+        return 'NA'
+    return 'WRONG' if present else 'BLANK'
+
+
+def outcomes(rows):
+    """{(id, page, engine, variant, field): (type, field, outcome)} for eligible fields only."""
+    found = {}
+    for row in rows:
+        for page in row['pages']:
+            for item in page['measurements']:
+                for key, field in item['fields'].items():
+                    value = outcome(item, field)
+                    if value is not None:
+                        found[(row['id'], page['page'], item['engine'], item['variant'], key)] = (
+                            page['type'], key, value)
+    return found
+
+
+def outcome_lines(before_rows, after_rows, codes):
+    """Per-field outcome distribution per side and nonzero before→after transitions."""
+    sides = [outcomes(before_rows), outcomes(after_rows)]
+    distribution = defaultdict(lambda: [Counter(), Counter()])
+    transitions = Counter()
+    for index, side in enumerate(sides):
+        for (_, _, engine, variant, _), (kind, key, value) in side.items():
+            distribution[(kind, key, engine, variant)][index][value] += 1
+    for identity in sides[0].keys() | sides[1].keys():
+        b, a = sides[0].get(identity), sides[1].get(identity)
+        kind, key, _ = a or b
+        transitions[(kind, key, identity[2], identity[3], b[2] if b else 'ABSENT', a[2] if a else 'ABSENT')] += 1
+    lines = [OUTCOME_HEADER]
+    for (kind, key, engine, variant), counters in sorted(distribution.items()):
+        for side, counter in zip(('BEFORE', 'AFTER'), counters):
+            lines.append(_line('OUTCOME', kind, codes[key], engine, variant, side,
+                               *(counter[name] for name in OUTCOMES)))
+    lines.append(TRANSITION_HEADER)
+    for (kind, key, engine, variant, b, a), count in sorted(transitions.items()):
+        lines.append(_line('TRANSITION', kind, codes[key], engine, variant, b, a, count))
+    return lines
+
+
+def compare(before, after, *, with_outcomes=False):
     (before_meta, before_rows), (after_meta, after_rows) = before, after
     lines = ['OCR_BASELINE_COMPARE', 'STATUS key value']
     lines.append(_line('ROOT_DIGEST', 'SAME' if before_meta['root_digest'] == after_meta['root_digest'] else 'DIFFERENT'))
@@ -160,6 +221,8 @@ def compare(before, after):
     lines.append('GRID cells measured_cells')
     lines.append(_line('GRID', 'FIELD', cells['field'], cells['field_measured']))
     lines.append(_line('GRID', 'GROUP', cells['group'], cells['group_measured']))
+    if with_outcomes:
+        lines.extend(outcome_lines(before_rows, after_rows, codes))
     return '\n'.join(lines) + '\n'
 
 
@@ -168,13 +231,15 @@ def parser():
                               description='Value-free before/after comparison of two ocr_baseline result folders')
     result.add_argument('--before', required=True)
     result.add_argument('--after', required=True)
+    result.add_argument('--outcomes', action='store_true',
+                        help='append per-field MATCH/BLANK/WRONG/OTHER/NA distribution and transitions')
     return result
 
 
 def main(argv=None):
     try:
         args = parser().parse_args(argv)
-        text = compare(load(args.before), load(args.after))
+        text = compare(load(args.before), load(args.after), with_outcomes=args.outcomes)
     except KeyboardInterrupt:
         return 130
     except CompareError as error:

@@ -66,12 +66,15 @@ def _canonical_field(key, value):
     return mask_data(canonicalize(key, _semantic_field(key, value)))
 
 
-def compare_fields(kind, ref_raw, obs_raw, observed_kind, reference_text="", observed_text=""):
+def compare_fields(kind, ref_raw, obs_raw, observed_kind, reference_text="", observed_text="", *,
+                   presence=False):
     """Return only reviewed field keys and numeric comparison/attribution counts.
 
     Type disagreement remains a mismatch. A missing reference never enters the
     agreement denominator. Derived/nonliteral reference values are not assigned
-    a made-up OCR/structure cause.
+    a made-up OCR/structure cause. With ``presence=True`` each field also stores
+    ``actual_present`` (0/1): the already computed observed-value presence, 0 for
+    missing references. It never changes the six counts.
     """
     from engine_v2.pipeline.privacy import mask_rrn
     from engine_v2.tools.batch_assess import FIELDS, _present, _typed_equal
@@ -81,6 +84,8 @@ def compare_fields(kind, ref_raw, obs_raw, observed_kind, reference_text="", obs
     metrics = {}
     for key in FIELDS.get(kind, ()):
         counts = dict.fromkeys(FIELD_COUNTS, 0)
+        if presence:
+            counts["actual_present"] = 0
         metrics[key] = counts
         if key not in ref_raw or not _present(ref_raw[key]):
             counts["missing_reference"] = 1
@@ -88,6 +93,8 @@ def compare_fields(kind, ref_raw, obs_raw, observed_kind, reference_text="", obs
         expected = _canonical_field(key, ref_raw[key])
         counts["eligible"] = 1
         actual_present = key in obs_raw and _present(obs_raw[key])
+        if presence:
+            counts["actual_present"] = int(actual_present)
         if observed_kind == kind and actual_present and _typed_equal(expected, _canonical_field(key, obs_raw[key])):
             counts["match"] = 1
             continue

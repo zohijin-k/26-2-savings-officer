@@ -72,6 +72,25 @@ cd <REPO> && caffeinate -i .venv/bin/python -B -m engine_v2.tools.batch_assess -
 - C3 = 잘못된 통과 비율의 95% 단측 상한: k > 0이면 Beta(0.95; k + 1, n − k)의 값, **k = 0이면 1 − 0.05^(1/n)**.
 - 합성 410쌍의 잘못된 통과(own 0/235)는 C와 다른 지표다. 둘을 섞지 않는다.
 
+**C 라벨 핵심 항목 (2026-11-18 고정, 라벨 결과를 보기 전).** 라벨은 "PASS가 맞는가"를 아래 항목만으로 판단한다.
+판정(서류 단위 `check_document`·`assess_upload`), 재업로드(FAIL), 확인 필요(NEEDS_REVIEW) 규칙이나 신청 건 소득·자격 판정(`facts.build_facts` → `scoring`·`eligibility_blockers`)이
+실제로 읽는 필드만 넣었다. 추출만 되고 어떤 규칙도 읽지 않는 필드(예: 납부확인서 `고지월`, 초본 `과거주소미포함의심`)는 넣지 않는다.
+기준 커밋 `bafa2f9`. 함수 이름으로 적고, 행 번호는 바뀔 수 있다.
+
+| 서식 | 핵심 항목 (OCR 필드) | 읽는 규칙 (파일 · 함수) | 잘못 읽으면 바뀌는 것 |
+| --- | --- | --- | --- |
+| 공통 | 서식 종류(`detected_doc_type`), 발급일, 원본 화질(`image_quality`·원본이미지크기) | doc_check.py `_check_document`·`finalize_image_quality`, file_evidence.py `resolution_defect`, engine stage1 | 다른 서식 통과, 발급일 기간 밖 통과, 저화질 통과 |
+| 주민등록초본 | 주소변동내역 (미포함·없음 → FAIL), **주소이력건수 (1건 → PAST_ADDRESS_OMISSION_SUSPECTED, 확인 필요)**, 주소날짜검증자료, 쪽표기자료(쪽 누락·중복), 초본신청인성명·생년월일, 전입일(거주 점수) | doc_check.py `_check_document`(주소이력건수·주소변동내역), `_check_resident_pages`, facts.py `build_facts`(전입일) → scoring.py `score_residence` | 과거 주소 빠진 초본 통과, 쪽 빠진 초본 통과, 본인 아닌 초본 통과, 거주 점수 |
+| 건강보험료 납부확인서 | **월별고지금액 (판정 대상 석 달)**, 고지월검증자료(조회기간·금액 없는 달), 납부쪽표기자료, 납부표완전성자료, **가입구분**, 사업장명칭, 성명·가입자성명 | doc_check.py `_check_billing_months`·`_check_payment_paging`, facts.py `_monthly_premium`(월별고지금액만 사용, 건강보험료 평균은 쓰지 않음)·`_insurance_facts`(가입구분) → scoring.py `score_income` | 소득 140% 상한 판정(보험료·가입구분 상한 행), 소득 점수, 고지월 누락 통과 |
+| 건강보험 자격확인서 | 가구원목록·가구원수, 가입구분, 사업장관리번호(·상태), 성명·생년월일, 양식판독상태 | doc_check.py `_check_document`(양식판독상태·필수 항목), facts.py `build_facts`(가구원수)·`_insurance_facts` | 가구원 수(소득 상한 행), 가입구분 |
+| 자격득실확인서 | 자격이력자료(조회기간·취득·상실 행), 발급일, 성명·생년월일 | doc_check.py 자격이력 확인, work_continuity.py | 근로 지속 요건, 이력 기간 누락 통과 |
+| 4대보험 가입내역확인서 | 가입내역 행(보험·상태·자격취득일), 성명·생년월일, 양식판독상태 | doc_check.py `_insurance_identity_unreadable`, work_continuity.py | 근로 지속 요건, 본인 아닌 서류 통과 |
+| 행정정보 공동이용 동의서 | 동의여부, 서명잉크확인, 성명·생년월일 | upload_assessment.py `assess_upload`(종이 동의서) | 동의 없음·서명 없음 통과 |
+| 사업자등록증명 | 개업일, 사업자상태, 사업자등록번호, 성명·생년월일, 양식판독상태 | doc_check.py `_check_document`, work_continuity.py | 휴·폐업 또는 기준일 뒤 개업 통과 |
+
+확인한 후보: 주소이력건수(1건이면 확인 필요)는 핵심 항목이다. 납부확인서 가입구분은 서류 판정은 바꾸지 않지만 신청 건 소득 상한 행을 정하므로 핵심 항목이다
+(직장 상한이 모든 가구원 수에서 지역 상한보다 높아, 지역을 직장으로 잘못 읽으면 소득 요건을 잘못 충족시키는 방향이다).
+
 ## J. 전북AI OCR 비교 (J1~J4)
 
 **이번 주 측정하지 않음** — 도구 없음(ocr_baseline 엔진은 own·applevision뿐), 대상 120쪽이 실서류라 외부 전송이 필요함, 운영에서 쓰지 않는 엔진.
@@ -120,3 +139,4 @@ cd <REPO> && caffeinate -i .venv/bin/python -B -m engine_v2.tools.batch_assess -
 
 - 2026-11-17 (숫자를 보기 전, 작업 E): A7·A8 도구를 doc_timing 결과 행의 `reasons`(형식 버전 2 이상)로 고정.
 - 2026-11-17 (숫자를 보기 전): A를 A(주 지표, 운영 판독 경로·doc_timing)와 A-스캔(보조 지표, batch_assess)으로 나눔. J를 이번 주 측정 제외로 바꿈. E3의 6과 단위를 진 확인 대기로 표시. 사유 표시 문구를 화면 그대로로 고정.
+- 2026-11-18 (라벨 결과를 보기 전): C절에 라벨 핵심 항목 표를 고정. 판정·재업로드·확인 필요·소득 판정 규칙이 실제로 읽는 필드만 넣음.

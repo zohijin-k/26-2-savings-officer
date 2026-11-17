@@ -81,3 +81,30 @@ candidate rules would change, without changing production behaviour.
   `doc_check.ESSENTIAL_FIELD_UNREADABLE_CODES` without the two consent codes for a
   re-assessment of a deep copy of the baseline reading. Tests assert both
   production objects are restored.
+
+## Run comparison, ARITH causes and quality/member-type shadows (row format 3)
+
+- `compare --before <RUN_1>/rows.jsonl --after <RUN_2>/rows.jsonl` joins two existing
+  doc_timing runs by key (first measured repeat per document) and prints decision,
+  form and tier transitions, per-form changed counts and per-reason document counts.
+  Both runs must use the same root (`WARNING ROOT_MISMATCH` otherwise). Rows without
+  `reasons` (doc_timing format 1) count as having no reasons.
+- D1 `arith_*` keys are filled only for LEGACY payment rows whose first failing stage
+  is ARITH. They recompute `nhis_payment._extract_monthly` and name the gap between
+  the printed total and the month sum (+ settlement) with the first match of
+  MONTHS_MISSING, DIFF_EQ_SETTLE, DIFF_EQ_CARE, DIFF_EQ_ONE_MONTH, SUM_GT_TOTAL,
+  SUM_LT_TOTAL. Amounts never leave the function.
+- C2 patches `doc_check.engine_image_quality_status` so FAIL becomes NEEDS_REVIEW and
+  re-assesses a deep copy of the baseline reading, only for rows whose baseline
+  LOW_IMAGE_QUALITY severity is FAIL.
+- A2 re-reads (`_shadow_read`) only documents with a known form, a
+  REQUIRED_FIELD_UNREADABLE finding and an original quality below 0.6, with
+  `preprocess` replaced in both `engine_v2.pipeline.preprocess` and `engine_v2.engine`
+  by a 300 dpi render of every page. The final image quality is still measured from
+  the original file, so LOW_IMAGE_QUALITY can only change severity, not disappear by
+  rendering.
+- A4 recomputes 가입구분 for payment rows from the pages passed to the extractor:
+  only lines above the monthly table header (or the confirmation sentence), never
+  lines starting with ※; both or neither of 직장가입/지역가입 leaves it empty. The
+  upload verdict does not read 가입구분 (it is an application-level income fact), so
+  A4 reports value transitions with the unchanged upload decision.

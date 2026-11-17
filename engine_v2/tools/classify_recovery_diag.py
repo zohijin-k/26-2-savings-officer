@@ -214,6 +214,37 @@ def crosstab(timing_path, scan_path):
     return '\n'.join(lines) + '\n'
 
 
+def compare(before_path, after_path):
+    """Per-document verdict cross table of two doc_timing runs over the same root; nothing is re-read."""
+    before, skipped_before = _timing_rows(before_path)
+    after, skipped_after = _timing_rows(after_path)
+    matched = sorted(before.keys() & after.keys())
+    lines = ['COMPARE before_docs after_docs matched before_only after_only',
+             _line('COMPARE', len(before), len(after), len(matched), len(before.keys() - after.keys()),
+                   len(after.keys() - before.keys())),
+             _line('SKIPPED before after', skipped_before, skipped_after)]
+    if not matched:
+        lines.append('WARNING ROOT_MISMATCH')
+    pairs = [(before[key], after[key]) for key in matched]
+    changed = [(a, b) for a, b in pairs if a['decision'] != b['decision'] or a['form'] != b['form']]
+    lines.append(_line('CHANGED decision form either', sum(a['decision'] != b['decision'] for a, b in pairs),
+                       sum(a['form'] != b['form'] for a, b in pairs), len(changed)))
+    _counted(lines, 'DECISION before after n', ((a['decision'], b['decision']) for a, b in pairs))
+    _counted(lines, 'FORM before after n', ((a['form'], b['form']) for a, b in pairs if a['form'] != b['form']))
+    _counted(lines, 'FORM_DECISION form_before form_after decision_before decision_after n',
+             ((a['form'], b['form'], a['decision'], b['decision']) for a, b in changed))
+    _counted(lines, 'FORM_TOTAL form_before docs changed n',
+             ((form, len([1 for a, _ in pairs if a['form'] == form]),
+               len([1 for a, b in changed if a['form'] == form])) for form in sorted({a['form'] for a, _ in pairs})))
+    _counted(lines, 'TIER before after n', ((a['tier'], b['tier']) for a, b in pairs if a['tier'] != b['tier']))
+    codes = sorted({(c, s) for a, b in pairs for c, s in a.get('reasons', []) + b.get('reasons', [])})
+    lines.append('REASON code severity before_docs after_docs')
+    for code, severity in codes:
+        lines.append(_line('REASON', code, severity, sum([code, severity] in a.get('reasons', []) for a, _ in pairs),
+                           sum([code, severity] in b.get('reasons', []) for _, b in pairs)))
+    return '\n'.join(lines) + '\n'
+
+
 # ---------------------------------------------------------------- run: trace wrappers
 
 
@@ -521,6 +552,20 @@ PAYMENT_DETAILS = ('HEADER_GROUPS', 'HEADER_BAND_CUT', 'HEADER_LABEL', 'MONTH_HE
                    'CHARGE_HEADER_MISSING', 'NONE')
 PAGING_STATES = ('COMPLETE', 'INCOMPLETE', 'NOT_REQUIRED', 'UNCERTAIN', 'ABSENT', 'INVALID')
 COMPLETENESS_KEYS = ('period_status', 'printed_total_observed', 'arithmetic_complete', 'issue_information_read')
+#: D1: sub-causes of a legacy-table ARITH failure (codes only; amounts stay in memory).
+ARITH_KEYS = ('arith_check', 'arith_diff', 'arith_settle', 'arith_totals', 'arith_outside', 'arith_zero',
+              'arith_combined')
+ARITH_CHECKS = ('MONTHLY', 'PAID', 'BOTH', 'NA')
+ARITH_DIFFS = ('MONTHS_MISSING', 'DIFF_EQ_SETTLE', 'DIFF_EQ_CARE', 'DIFF_EQ_ONE_MONTH', 'SUM_GT_TOTAL',
+               'SUM_LT_TOTAL', 'NA')
+ARITH_TOTALS = ('T0', 'T1', 'T2P', 'NA')
+#: A4: payment insurance-type values (production field 가입구분 and the candidate rule).
+MEMBER_TYPES = ('직장', '지역', 'X')
+MEMBER_CODES = {'직장': 'WORK', '지역': 'LOCAL', 'X': 'X'}
+#: A2: documents re-read at 300 dpi when the form is known but required fields are unreadable on a
+#: low-resolution original (objective quality below the production threshold).
+A2_TRIGGER = 'REQUIRED_FIELD_UNREADABLE'
+SEVERITY_CODES = ('FAIL', 'NEEDS_REVIEW', 'X')
 C1_EXCLUDED = frozenset({'ADMIN_CONSENT_MARK_UNREADABLE', 'ADMIN_CONSENT_SIGNATURE_UNREADABLE'})
 #: Phase-correlation peak (z-score of the correlation surface) treated as a confident alignment.
 PEAK_STRONG = 20.0
@@ -596,6 +641,120 @@ def payment_table_stage(pages, result):
     if not ok('monthly_total_matches', 'paid_total_matches'):
         return route, 'ARITH', 'NONE'
     return route, 'TABLE_OK', 'NONE'
+
+
+def arith_causes(pages, route, stage):
+    """D1: why the legacy monthly table failed its sum checks, as fixed codes only.
+
+    Recomputes the production legacy parse (``nhis_payment._extract_monthly``). Compares the
+    printed total with the month sum (+ year-end settlement) exactly as the extractor does and
+    names the first matching explanation of the difference; no amount leaves this function.
+    """
+    blank = {key: 'NA' for key in ARITH_KEYS}
+    if route != 'LEGACY' or stage != 'ARITH' or pages is None:
+        return blank
+    from engine_v2.extractors import nhis_payment as legacy
+    (monthly, care, _outside, totals, paid_monthly, paid_totals, settle_billed, settle_paid, has_billed,
+     has_paid, all_months, target, _words, _numeric, combined, _negative) = legacy._extract_monthly(pages)
+    found = sorted(target)
+    charge_sum = sum(monthly[m][0] for m in found if m in monthly) + (settle_billed if has_billed else 0)
+    paid_sum = sum(paid_monthly[m][0] for m in found if m in paid_monthly) + (settle_paid if has_paid else 0)
+    monthly_ok = not totals or (all(m in monthly for m in found) and sum(totals) == charge_sum)
+    paid_ok = not paid_totals or (bool(paid_monthly) and all(m in paid_monthly for m in found)
+                                  and sum(paid_totals) == paid_sum)
+    check = 'BOTH' if not (monthly_ok or paid_ok) else 'MONTHLY' if not monthly_ok else 'PAID' if not paid_ok else 'NA'
+    if check in ('BOTH', 'MONTHLY'):
+        printed, summed, values, months_ok = sum(totals), charge_sum, monthly, all(m in monthly for m in found)
+        settle = settle_billed if has_billed else 0
+    elif check == 'PAID':
+        printed, summed, values = sum(paid_totals), paid_sum, paid_monthly
+        months_ok, settle = all(m in paid_monthly for m in found), settle_paid if has_paid else 0
+    diff = 'NA'
+    if check != 'NA':
+        gap = abs(printed - summed)
+        care_sum = sum(value for value, _ in care.values())
+        if not months_ok:
+            diff = 'MONTHS_MISSING'
+        elif settle and gap == abs(settle):
+            diff = 'DIFF_EQ_SETTLE'
+        elif care and gap == care_sum:
+            diff = 'DIFF_EQ_CARE'
+        elif any(gap == value for value, _ in values.values() if value):
+            diff = 'DIFF_EQ_ONE_MONTH'
+        else:
+            diff = 'SUM_GT_TOTAL' if summed > printed else 'SUM_LT_TOTAL'
+    count = len(totals) if check in ('BOTH', 'MONTHLY') else len(paid_totals)
+    return dict(arith_check=check, arith_diff=diff, arith_settle='O' if has_billed or has_paid else 'X',
+                arith_totals='T0' if count == 0 else 'T1' if count == 1 else 'T2P',
+                arith_outside='O' if set(all_months) - set(target) else 'X',
+                arith_zero='O' if any(value == 0 for value, _ in monthly.values()) else 'X',
+                arith_combined='O' if combined else 'X')
+
+
+@contextmanager
+def c2_patch():
+    """Shadow C2: the engine image-quality score alone never escalates to FAIL (all forms)."""
+    from demo.backend.rules import doc_check
+    original = doc_check.engine_image_quality_status
+
+    def image_quality_status(*args, **kwargs):
+        status = original(*args, **kwargs)
+        return doc_check.engine_models.Status.NEEDS_REVIEW if status == doc_check.engine_models.Status.FAIL else status
+    with patch.object(doc_check, 'engine_image_quality_status', image_quality_status):
+        yield
+
+
+def render_all(path):
+    """Every page rendered at 300 dpi (batch_assess rendering); no text layer, no embedded extraction."""
+    import pymupdf
+    from engine_v2.pipeline.preprocess import PageImage, PageSource
+    pages = []
+    with pymupdf.open(path) as document:
+        if document.needs_pass:
+            raise ValueError('ENCRYPTED')
+        for index, page in enumerate(document):
+            pix = page.get_pixmap(dpi=300, colorspace=pymupdf.csRGB, alpha=False)
+            pages.append(PageImage(index, PageSource.RENDER, (page.rect.width, page.rect.height),
+                                   png=pix.tobytes('png'), pixel_size=(pix.width, pix.height), dpi=300))
+    return pages
+
+
+@contextmanager
+def a2_patch():
+    """Shadow A2: the production reader sees 300 dpi renderings instead of embedded originals."""
+    from engine_v2 import engine as v2engine
+    from engine_v2.pipeline import preprocess as v2pre
+    with patch.object(v2pre, 'preprocess', render_all), patch.object(v2engine, 'preprocess', render_all):
+        yield
+
+
+def member_type_candidate(pages):
+    """Shadow A4: 가입구분 only from the personal-information area, never from notice text.
+
+    Lines from the monthly table header (or the confirmation sentence) downward and lines that
+    start with ※ are ignored. Evidence is an explicit 직장가입/지역가입 mark or a 사업장명칭 value
+    on the same line; both marks, or none, leave the value empty (no guessing).
+    """
+    from engine_v2.extractors import nhis_common as common, nhis_payment as legacy
+    from engine_v2.pipeline.layout import line_text, squash
+    kept = []
+    for page, result in pages:
+        lines = common.page_lines(page, result)
+        headers = legacy._month_header(lines)
+        stop = min(headers) if headers else len(lines)
+        for index, line in enumerate(lines[:stop]):
+            flat = squash(line_text(line))
+            if '확인합니다' in flat:
+                break
+            if flat.startswith('※'):
+                continue
+            kept.append(line_text(line))
+    flat = squash(' '.join(kept))
+    workplace = any(re.search(r'사업장\s*명칭\s*[:：]?\s*(?![^\s|]*(?:납부자|성명|생년월일|가입|번호))[^\s|:：]+', text)
+                    for text in kept)
+    work = '직장가입' in flat or workplace
+    local = '지역가입' in flat
+    return '직장' if work and not local else '지역' if local and not work else 'X'
 
 
 def _json_field(fields, name):
@@ -819,7 +978,7 @@ def payment_shadow(trace, path, row, ocr):
     pages, result = trace.payment if trace.payment is not None else (None, None)
     route, stage, detail = payment_table_stage(pages, result)
     row['payment'] = dict(route=route, stage=stage, detail=detail, **payment_evidence(ocr),
-                          **payment_reason_flags(row['reasons']))
+                          **payment_reason_flags(row['reasons']), **arith_causes(pages, route, stage))
     if route != 'GOV':
         # P1 only wraps the government-form GROUPS header call; other routes cannot diverge.
         row['p1'] = {key: dict(paging_uncertain=row['payment']['paging_uncertain'],
@@ -835,12 +994,33 @@ def payment_shadow(trace, path, row, ocr):
                               decision=decision)
 
 
+def quality_shadows(trace, path, row, ocr):
+    """C2 for documents whose LOW_IMAGE_QUALITY is FAIL; A2 for low-resolution unreadable fields."""
+    if _severity(row['reasons'], 'LOW_IMAGE_QUALITY') == 'FAIL':
+        with c2_patch():
+            row['c2'] = _assess(path, row['form'], deepcopy(ocr))[0]
+    if (row['form'] != 'X' and _severity(row['reasons'], A2_TRIGGER) != 'X'
+            and ocr.image_quality < .6 and str(path).lower().endswith('.pdf')):
+        shadow = _shadow_read(trace, path, lambda stack: stack.enter_context(a2_patch()))
+        decision, reasons = _assess(path, _kind(shadow.detected_doc_type), shadow)
+        row['a2'] = dict(form=_kind(shadow.detected_doc_type), decision=decision,
+                         required=_severity(reasons, A2_TRIGGER), quality=_severity(reasons, 'LOW_IMAGE_QUALITY'),
+                         quality_before=_severity(row['reasons'], 'LOW_IMAGE_QUALITY'))
+
+
+def member_type_shadow(trace, row, ocr):
+    pages = trace.payment[0] if trace.payment is not None else None
+    before = ocr.fields.get('가입구분')
+    row['a4'] = dict(before=before if before in ('직장', '지역') else 'X',
+                     after=member_type_candidate(pages) if pages is not None else 'X')
+
+
 def blank_row(key, code='NONE'):
     return dict(schema_version=VERSION, key=key, code=code, form='X', tier='none', decision='NOT_ASSESSED',
                 reasons=[], exit=None, reclass=None, exceptions={}, ocr_chars='NA', cause=None,
                 struct=None, scan=None, scan_code=None, text_all=None,
                 g1={name: None for name in CANDIDATES}, g1_decision={name: None for name in CANDIDATES},
-                consent=None, c1=None, payment=None, p1=None, shadow_errors=[])
+                consent=None, c1=None, payment=None, p1=None, c2=None, a2=None, a4=None, shadow_errors=[])
 
 
 def process(path, key, trace):
@@ -866,7 +1046,9 @@ def process(path, key, trace):
                                     ('CONSENT', row['form'] == 'ADMIN_INFO_CONSENT',
                                      lambda: consent_shadow(trace, path, row, ocr)),
                                     ('PAYMENT', row['form'] == 'NHIS_PAYMENT',
-                                     lambda: payment_shadow(trace, path, row, ocr))):
+                                     lambda: payment_shadow(trace, path, row, ocr)),
+                                    ('A4', row['form'] == 'NHIS_PAYMENT', lambda: member_type_shadow(trace, row, ocr)),
+                                    ('QUALITY', True, lambda: quality_shadows(trace, path, row, ocr))):
         if not applies:
             continue
         try:
@@ -888,7 +1070,7 @@ def validate_row(row):
     req = batch._require
     keys = {'schema_version', 'key', 'code', 'form', 'tier', 'decision', 'reasons', 'exit', 'reclass',
             'exceptions', 'ocr_chars', 'cause', 'struct', 'scan', 'scan_code', 'text_all', 'g1', 'g1_decision',
-            'consent', 'c1', 'payment', 'p1', 'shadow_errors'}
+            'consent', 'c1', 'payment', 'p1', 'c2', 'a2', 'a4', 'shadow_errors'}
     req(isinstance(row, dict) and set(row) == keys and row['schema_version'] == VERSION)
     req(isinstance(row['key'], str) and timing.KEY_RE.fullmatch(row['key']) is not None)
     req(row['code'] in ROW_CODES and row['form'] in KINDS and row['tier'] in TIERS and row['decision'] in DECISIONS)
@@ -911,7 +1093,15 @@ def validate_row(row):
     req(set(row['g1']) == set(CANDIDATES) and all(_code_in(v, KINDS, True) for v in row['g1'].values()))
     req(set(row['g1_decision']) == set(CANDIDATES)
         and all(_code_in(v, DECISIONS, True) for v in row['g1_decision'].values()))
-    req(isinstance(row['shadow_errors'], list) and set(row['shadow_errors']) <= {'G1', 'CONSENT', 'PAYMENT'})
+    req(isinstance(row['shadow_errors'], list)
+        and set(row['shadow_errors']) <= {'G1', 'CONSENT', 'PAYMENT', 'A4', 'QUALITY'})
+    req(_code_in(row['c2'], DECISIONS, True))
+    req(row['a2'] is None or (isinstance(row['a2'], dict)
+                              and set(row['a2']) == {'form', 'decision', 'required', 'quality', 'quality_before'}
+                              and row['a2']['form'] in KINDS and row['a2']['decision'] in DECISIONS
+                              and all(row['a2'][k] in SEVERITY_CODES for k in ('required', 'quality', 'quality_before'))))
+    req(row['a4'] is None or (isinstance(row['a4'], dict) and set(row['a4']) == {'before', 'after'}
+                              and row['a4']['before'] in MEMBER_TYPES and row['a4']['after'] in MEMBER_TYPES))
     if row['consent'] is not None:
         c = row['consent']
         allowed = dict(spec=('SPEC_OK', 'SPEC_UNAVAILABLE'), load=('LOAD_OK', 'LOAD_ERROR'), pages=('P1', 'P2P', 'NA'),
@@ -933,6 +1123,9 @@ def validate_row(row):
                        paging=PAGING_STATES, fallback=('O', 'X', 'NA'), period=('READABLE', 'OTHER', 'ABSENT'),
                        amounts_certain=('O', 'X', 'NA'), paging_uncertain=('O', 'X'),
                        missing_billing=('FAIL', 'NEEDS_REVIEW', 'X'), pages_incomplete=('O', 'X'),
+                       arith_check=ARITH_CHECKS, arith_diff=ARITH_DIFFS, arith_totals=ARITH_TOTALS,
+                       **{key: ('O', 'X', 'NA') for key in ('arith_settle', 'arith_outside', 'arith_zero',
+                                                             'arith_combined')},
                        **{key: ('O', 'X', 'NA') for key in COMPLETENESS_KEYS})
         req(isinstance(p, dict) and set(p) == set(allowed) and all(p[k] in v for k, v in allowed.items()))
     if row['p1'] is not None:
@@ -1065,6 +1258,11 @@ def _stage_summary(done):
     _counted(lines, 'PAYMENT_REASON paging_uncertain missing_billing stage detail n',
              ((r['payment']['paging_uncertain'], r['payment']['missing_billing'], r['payment']['stage'],
                r['payment']['detail']) for r in payment))
+    _counted(lines, 'PAYMENT_ARITH check diff settle totals outside zero combined n',
+             (tuple(r['payment'][key] for key in ARITH_KEYS) for r in payment if r['payment']['stage'] == 'ARITH'))
+    _counted(lines, 'PAYMENT_ARITH_REASON diff paging_uncertain missing_billing n',
+             ((r['payment']['arith_diff'], r['payment']['paging_uncertain'], r['payment']['missing_billing'])
+              for r in payment if r['payment']['stage'] == 'ARITH'))
     _counted(lines, 'PAYMENT_PAGING state fallback paging_uncertain n',
              ((r['payment']['paging'], r['payment']['fallback'], r['payment']['paging_uncertain']) for r in payment))
     _counted(lines, 'PAYMENT_COMPLETE key value paging_uncertain n',
@@ -1081,6 +1279,29 @@ def _stage_summary(done):
                            sum(r['payment']['missing_billing'] != 'X' and a['missing_billing'] == 'X' for r, a in after),
                            sum(r['payment']['missing_billing'] == 'X' and a['missing_billing'] != 'X' for r, a in after),
                            sum(r['decision'] != a['decision'] for r, a in after)))
+    _counted(lines, 'C2 form before after n',
+             ((r['form'], r['decision'], r['c2']) for r in done if r['c2'] is not None))
+    lines.append(_line('C2_FAIL_TO_REVIEW', sum(r['decision'] == 'FAIL' and r['c2'] == 'NEEDS_REVIEW'
+                                                for r in done if r['c2'] is not None)))
+    a2 = [r for r in done if r['a2'] is not None]
+    lines.append('A2 tried required_gone quality_gone quality_fail_to_review new_pass form_changed')
+    lines.append(_line('A2', len(a2), sum(r['a2']['required'] == 'X' for r in a2),
+                       sum(r['a2']['quality_before'] != 'X' and r['a2']['quality'] == 'X' for r in a2),
+                       sum(r['a2']['quality_before'] == 'FAIL' and r['a2']['quality'] == 'NEEDS_REVIEW' for r in a2),
+                       sum(r['decision'] != 'PASS' and r['a2']['decision'] == 'PASS' for r in a2),
+                       sum(r['a2']['form'] != r['form'] for r in a2)))
+    _counted(lines, 'A2_DECISION form before after n',
+             ((r['form'], r['decision'], r['a2']['decision']) for r in a2))
+    a4 = [r for r in done if r['a4'] is not None]
+    _counted(lines, 'A4 before after n',
+             ((MEMBER_CODES[r['a4']['before']], MEMBER_CODES[r['a4']['after']]) for r in a4))
+    lines.append('A4_CHANGE work_to_blank work_to_local local_to_work blank_to_value')
+    lines.append(_line('A4_CHANGE', *(sum(r['a4']['before'] == b and r['a4']['after'] == a for r in a4)
+                                      for b, a in (('직장', 'X'), ('직장', '지역'), ('지역', '직장'))),
+                       sum(r['a4']['before'] == 'X' and r['a4']['after'] != 'X' for r in a4)))
+    _counted(lines, 'A4_DECISION before after decision n',
+             ((MEMBER_CODES[r['a4']['before']], MEMBER_CODES[r['a4']['after']], r['decision']) for r in a4
+              if r['a4']['before'] != r['a4']['after']))
     _counted(lines, 'P1_DECISION margin before after n',
              ((key, r['decision'], r['p1'][key]['decision']) for r in payment for key in P1_KEYS
               if r['p1'] is not None and r['p1'][key]['decision'] != r['decision']))
@@ -1187,6 +1408,9 @@ def parser():
     cross = commands.add_parser('crosstab')
     cross.add_argument('--timing', required=True)
     cross.add_argument('--scan', required=True)
+    both = commands.add_parser('compare')
+    both.add_argument('--before', required=True)
+    both.add_argument('--after', required=True)
     rerun = commands.add_parser('run')
     rerun.add_argument('--root', required=True)
     rerun.add_argument('--out', required=True)
@@ -1201,6 +1425,9 @@ def main(argv=None):
         args = parser().parse_args(argv)
         if args.command == 'crosstab':
             _print(crosstab(args.timing, args.scan).rstrip('\n'))
+            return 0
+        if args.command == 'compare':
+            _print(compare(args.before, args.after).rstrip('\n'))
             return 0
         forms = set(args.forms) if args.forms else None
         if ((forms and (args.timing is None or not forms <= set(KINDS))) or

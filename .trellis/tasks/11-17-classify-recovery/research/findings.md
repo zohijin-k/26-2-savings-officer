@@ -212,3 +212,50 @@ own OCR의 묶음 머리글 상자 아래쪽이 글자층보다 조금 아래(�
 
 원인: 표시 없는 원본 서식을 300dpi 그림으로 만들기만 해도 체크 칸 테두리가 벡터 원본과 다르게 그려져 두 칸 모두 잉크 비율 0.17(기준 0.035)이 된다.
 기존 시나리오(run_p7_scenarios.py:450-470)는 벡터 원본 위에 벡터 표시를 그린 입력만 다룬다.
+
+## 11-18 운영 반영 전 확인 (합성과 코드만)
+
+### L1 재현 (가짜 OCR, 2쪽 초본 + 1쪽)
+
+| 덧붙인 쪽 | 수정 전 | 수정 후 (`bafa2f9`) |
+| --- | --- | --- |
+| 없음 | PASS | PASS |
+| 완전히 빈 쪽 | NEEDS_REVIEW (PAGES_UNREADABLE, LOW_OCR_CONFIDENCE) | 쪽 확인 통과, LOW_OCR_CONFIDENCE로 NEEDS_REVIEW 유지 (머리 상자 일치 검사가 모든 쪽을 셈) |
+| 머리 상자(제목·쪽표기 2/2·성명 줄)만 되풀이된 쪽 | **FAIL PAGES_DUPLICATED** (진의 L1과 같은 모양) | PASS |
+| 본문 있는 중복 쪽 | FAIL PAGES_DUPLICATED | FAIL PAGES_DUPLICATED |
+| 1/3·2/3 + 머리 상자만 있는 2/3 | - | FAIL PAGES_INCOMPLETE (내용 없는 쪽이 빠진 쪽을 채우지 않음) |
+
+### L2·A3: 고지월과 소득 판정
+
+- `고지월` 문자열은 어떤 판정 규칙도 읽지 않는다. 소득 판정은 `facts._monthly_premium`이 **월별고지금액**에서 판정 대상 석 달(2025-10~12)만 읽는다
+  (건강보험료 평균 필드는 쓰지 않는다). 통과 조건: 업로드 판정 PASS, 신뢰도 0.85 이상, 검토 검증 실패 없음, 양식판독상태 완전(있을 때) (`_payment_amounts_trusted`).
+- L2 오류에서 10~12월 줄은 2025년으로 맞게 들어가므로 보험료 평균은 바뀌지 않았다(잘못된 통과 위험 아님). `payment_period`는 같은 해 조회기간을 이미 맞게 다룬다.
+- A3 재현: 고지금액·납부금액 묶음 머리글 아래 건강/장기요양 두 칸 표에서 **건강보험료 칸을 못 읽으면** `_closest_amount`(거리 제한 없음)가 가장 가까운 장기요양 칸을 고르고,
+  합계 줄도 묶음 머리글 가운데에 가까운 장기요양 합계를 골라 산술 검증이 맞아떨어진다 → 월별고지금액 = 장기요양 금액, 검증 실패 없음 → **잘못된 통과 위험 확인**.
+  머리글이 온전하고 칸을 모두 읽으면 재현되지 않는다(건강 칸을 맞게 고르고, 합계 불일치로 확인 필요).
+- 수정(L2 커밋에 포함): 건강·장기요양 칸이 따로 있는 표에서, 한 줄에 장기요양 칸이 따로 없거나 장기요양 금액이 0 이상의 건강보험료보다 크면 그 줄의 건강보험료를 버리고
+  `monthly_amounts_numeric` 실패(검토 검증)로 둔다. 음수 줄(환급·정산)은 비교하지 않는다. 머리글 위치로 칸을 가르는 방식은 기존 합성 서식(라벨 오른쪽에 금액 열)에서 오판해 쓰지 않았다.
+
+### A4: 납부확인서 가입구분
+
+- 판독기(`nhis_payment.extract`, legacy)는 모든 쪽 글자를 이어 `직장가입자`·`직장가입`을 먼저 찾고, 사업장명칭 정규식 뒤에 아무 글자나 있어도 직장으로 정한다.
+  하단 안내문 "※ 직장가입자의 보수월액보험료 …"가 있으면 지역가입자 서류도 직장이 된다(합성 재현: 시험 `test_footer_notice_makes_production_member_type_work…`).
+  정부 서식 판독기(`nhis_payment_gov`)는 가입구분을 채우지 않는다.
+- 쓰임: 서류 판정(doc_check)은 가입구분을 읽지 않는다. `facts._insurance_facts`가 기록된 가입구분을 두 칸 근거(사업장관리번호·사업장명칭)보다 앞세우고,
+  `scoring.score_income`이 확정된 가입구분의 상한 행(`row[category]`)으로 140% 충족/초과를 정하고 점수 구간 행을 고른다.
+  직장 상한이 모든 가구원 수에서 지역보다 높다(1인 118,821 / 46,072). **지역을 직장으로 잘못 정하면 보험료가 두 상한 사이일 때 소득 요건 충족으로 잘못 판정된다.**
+- MEMBER_TYPE_VALUE(`nhis_payment_gov.member_type_value`, ddfeae4): 모든 쪽의 묶은 줄 어디든 `직장가입`·`지역가입`이 부분 문자열로 있으면 legacy로 보낸다(영역 제한 없음).
+  같은 안내문 줄이 이 조건을 만족하므로, 실서류 120쪽이 모두 이 표시로 legacy가 됐을 가능성이 있다(판별 결과는 실서류에서 맞았으므로 그대로 둠).
+
+### A1: 화질 FAIL 경로와 두 기준
+
+- LOW_IMAGE_QUALITY: `doc_check.finalize_image_quality`가 원본 화질 점수(`file_evidence.objective_image_quality`, PDF는 가장 큰 덮는 그림의 DPI 200↑ .9 / 150↑ .7 / 그 밖 .5,
+  사진은 짧은 변 1400↑ .9 / 1000↑ .75 / 700↑ .55 / 그 밖 .35)가 0.6 미만이면 붙인다. 서식 판별 실패이거나 "필수 항목 못 읽음" 코드가 있으면 FAIL, 아니면 NEEDS_REVIEW
+  (engine/stage1_document_check.py `image_quality_status`). 필수 항목 코드: REQUIRED_FIELD_UNREADABLE, RESIDENT_APPLICANT_UNREADABLE, RECEIPT_AMOUNT_UNREADABLE,
+  RECEIPT_OCR_UNAVAILABLE, NHIS_HISTORY_PERIOD_UNREADABLE, ADMIN_CONSENT_IDENTITY/MARK/SIGNATURE_UNREADABLE, 확인 필요 MISSING_BILLING_MONTHS, 이름 없는 NHIS_SUBSCRIBER_IDENTITY_REVIEW.
+  자격확인서는 양식판독상태가 있고 불완전이거나 성명·생년월일·발급일이 비면 REQUIRED_FIELD_UNREADABLE → 원본 150dpi 미만이면 FAIL.
+- IMAGE_RESOLUTION_TOO_LOW(항상 FAIL): 원본 그림 짧은 변 600px 미만 **그리고** 긴 변 800px 미만 **그리고** 미판독(서식 모름 또는 서식별 필수 항목 절반 미만)
+  (`file_evidence.resolution_defect`). 이 사유가 있으면 LOW_IMAGE_QUALITY는 붙지 않는다.
+- 두 기준이 다른 이유: 0.6은 DPI(또는 사진 짧은 변) 구간으로 만든 상대 점수이고 데모 가정값(engine/config.py)이다. 600/800은 절대 화소 크기의 좁은 하한으로,
+  미판독일 때만 쓰도록 11-13 실패 사례 작업에서 추정해 정했다(archive 11-13-fail-cases design.md). 그래서 900×1200 사진은 0.55로 화질 미달이지만 600/800 규칙에는 걸리지 않는다.
+  라벨 도구 화면 문구의 위치는 저장소 허용 범위에서 찾지 못했다(doc_check.py의 IMAGE_RESOLUTION_TOO_LOW 상세 문구에 같은 숫자가 있다).

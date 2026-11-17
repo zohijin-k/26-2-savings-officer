@@ -274,9 +274,9 @@ def test_crosstab_joins_existing_timing_and_scan_rows_by_key(tmp_path, fake_ocr,
                       '--scan', str(scan_out / 'results.jsonl')]) == 0
     printed = capsys.readouterr().out
     assert 'MATCH 2 2 2 0 0' in printed
-    assert 'CROSS NHIS_PAYMENT NHIS_PAYMENT 1' in printed
-    assert 'CROSS X NHIS_PAYMENT 1' in printed
-    assert 'XTIER none NONE 0 1 1' in printed
+    # 11-18 O1: production now re-reads the stencil PDF from a 300 dpi rendering and finds the form.
+    assert 'CROSS NHIS_PAYMENT NHIS_PAYMENT 2' in printed
+    assert 'XMATCH a_form_x matched 0 0' in printed
     assert 'FALLBACK NOT_RECORDED' in printed and 'ROOT_MISMATCH' not in printed
     assert SENTINEL not in printed and str(tmp_path) not in printed
 

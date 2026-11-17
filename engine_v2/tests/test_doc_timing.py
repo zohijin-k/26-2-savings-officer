@@ -280,13 +280,14 @@ def test_cli_end_to_end_records_value_free_outputs(corpus, tmp_path, fake_ocr, c
     assert 'ERROR PROCESSING_ERROR 0' in summary
     assert line(summary, 'OVERALL')[0].split()[2] == '3'
     assert 'FIRST_PAGE_IMAGE_LATER_TEXT own docs 1' in summary
-    # Production: the image-first document with a later text page gets no OCR (LocalOcr declines,
-    # PdfText finds no first-page text), so only the pure image document is recognized.
-    assert line(summary, 'PAGES') == ['PAGES own 1 1 4']
+    # Production (11-18 O1): an undecided image document and the image-first document with a later
+    # text page are re-read from 300 dpi renderings once. The fake engine returns no words, so both
+    # stay unclassified: image 1 embedded + 1 rendered page, image-first 2 rendered pages.
+    assert line(summary, 'PAGES') == ['PAGES own 1 4 4']
     warm = next(r for r in recorded if r['phase'] == 'warmup')
-    assert len(fake_ocr) == 2 + warm['ocr_pages']
+    assert len(fake_ocr) == 8 + warm['ocr_pages']
     later = [r for r in recorded if r['first_image_later_text'] == 1 and r['phase'] == 'measure']
-    assert {(r['ocr_pages'], r['tier'], r['decision']) for r in later} == {(0, 'none', 'NOT_ASSESSED')}
+    assert {(r['ocr_pages'], r['tier'], r['decision']) for r in later} == {(2, 'none', 'NOT_ASSESSED')}
     assert 'TARGET own MEAN_LE_2_5S' in summary and 'COLD_START own' in summary
     meta = json.loads((out / 'run.json').read_text())
     assert meta['counts'] == dict(inventory_pdf=5, selected=5, skipped=2)

@@ -108,3 +108,9 @@ candidate rules would change, without changing production behaviour.
   lines starting with ※; both or neither of 직장가입/지역가입 leaves it empty. The
   upload verdict does not read 가입구분 (it is an application-level income fact), so
   A4 reports value transitions with the unchanged upload decision.
+- Row format 3 also adds `recovery` (code, outcome) for the production LocalOcr 300 dpi
+  render retry (`localocr.RETRY_CODES`, reason `RENDER_RETRY:<code>` in `fallback_reason`).
+  The retry is wrapped so its own reading is excluded from the 1st-path trace
+  (`in_local` off); exit and cause codes still describe where the 1st path gave up, and
+  the "X" summary lines cover documents whose 1st path gave up (still X or recovered),
+  with `XFINAL` and `RECOVERY` lines for the outcome.

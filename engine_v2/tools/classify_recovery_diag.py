@@ -33,8 +33,8 @@ from unittest.mock import patch
 from . import batch_assess as batch
 from . import doc_timing as timing
 
-VERSION = 2
-#: Format 1 (commit 2) had no consent/payment/p1/c1 keys.
+VERSION = 3
+#: Format 1 (commit 2) had no consent/payment/p1/c1 keys. Format 2 had no ``recovery`` key.
 KINDS = batch.KINDS
 TIERS = timing.TIERS
 DECISIONS = timing.DECISIONS
@@ -54,6 +54,11 @@ LAYERS = ('L0', 'L1', 'L2P')
 DPI_BINS = ('D_LT150', 'D150_199', 'D200_299', 'D300P', 'NA')
 ROTATIONS = ('R0', 'R90', 'R180', 'R270', 'R_OTHER')
 CANDIDATES = ('N', 'W', 'E')
+#: LocalOcr 300 dpi render-retry reason codes (production ``localocr.RETRY_CODES``) and the
+#: outcome of the retry inside one document.
+RECOVERY_CODES = ('IMAGE_UNCLASSIFIED', 'IMAGE_OCR_EMPTY', 'IMAGE_PREPROCESS_ERROR', 'IMAGE_TEXT_PAGE',
+                  'TEXT_RECLASS_NONE', 'TEXT_RECLASS_DISCARD')
+RECOVERY_OUTCOMES = ('RECOVERED', 'NOT_RECOVERED', 'ERROR')
 CLASS_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,63}')
 PROGRESS_EVERY = 25
 
@@ -265,6 +270,7 @@ class Trace:
         self.exceptions = {}
         self.payment = None      # (pages, result) of the last production payment extraction, memory only
         self.page_texts = None   # squeezed per-page reading text, memory only
+        self.retries = []        # (code, outcome) of production render retries
         self.ocr_cache.clear()
 
     def event(self, name, value=None):
@@ -349,6 +355,25 @@ def _wrap_ocr(trace, original):
     return recognize
 
 
+def _wrap_render_retry(trace, original):
+    """Record the production render retry; its own reading is not part of the 1st-path trace."""
+    def render_retry(self, path, engine, code):
+        recording = trace.in_local
+        trace.in_local = False
+        try:
+            result = original(self, path, engine, code)
+        except Exception:
+            if trace.active and recording:
+                trace.retries.append((code, 'ERROR'))
+            raise
+        finally:
+            trace.in_local = recording
+        if trace.active and recording:
+            trace.retries.append((code, 'NOT_RECOVERED' if result is None else 'RECOVERED'))
+        return result
+    return render_retry
+
+
 def _wrap_classify(trace, original):
     def classify_with_evidence(text):
         detected, evidence = original(text)
@@ -388,6 +413,8 @@ def instrument(trace):
         def put(owner, name, value):
             stack.enter_context(patch.object(owner, name, value))
         put(localocr.LocalOcr, 'read', _wrap_local_read(trace, localocr.LocalOcr.read))
+        if hasattr(localocr.LocalOcr, '_render_retry'):
+            put(localocr.LocalOcr, '_render_retry', _wrap_render_retry(trace, localocr.LocalOcr._render_retry))
         put(pdftext.PdfTextOcr, 'read', _wrap_pdftext_read(trace, pdftext.PdfTextOcr.read))
         put(localocr, '_tier2_can_read', _wrap_value(trace, localocr._tier2_can_read, 'route',
                                                       lambda r: 'TEXT' if r else 'IMAGE'))
@@ -418,7 +445,7 @@ def exit_code(trace):
     routes = trace.find('route')
     route = routes[0] if routes else None
     pages = trace.find('classify_pages')
-    if results and results[-1] is not None:
+    if results and results[-1] is not None and not trace.retries:
         if route == 'IMAGE' and pages and pages[-1] == 'X' and 'FOUND' in trace.find('markers'):
             return 'I_UNCLASSIFIED_MARKERS', None
         return 'L_RESULT', None
@@ -1020,7 +1047,13 @@ def blank_row(key, code='NONE'):
                 reasons=[], exit=None, reclass=None, exceptions={}, ocr_chars='NA', cause=None,
                 struct=None, scan=None, scan_code=None, text_all=None,
                 g1={name: None for name in CANDIDATES}, g1_decision={name: None for name in CANDIDATES},
-                consent=None, c1=None, payment=None, p1=None, c2=None, a2=None, a4=None, shadow_errors=[])
+                consent=None, c1=None, payment=None, p1=None, c2=None, a2=None, a4=None, recovery=None,
+                shadow_errors=[])
+
+
+def gave_up(row):
+    """The production 1st path could not decide the form (still X, or recovered by the render retry)."""
+    return row['form'] == 'X' or (row['recovery'] is not None and row['recovery']['outcome'] == 'RECOVERED')
 
 
 def process(path, key, trace):
@@ -1036,7 +1069,10 @@ def process(path, key, trace):
     row['exit'], row['reclass'] = exit_code(trace)
     row['exceptions'] = dict(sorted(trace.exceptions.items()))
     row['ocr_chars'] = char_bin(trace.ocr_chars)
-    if row['form'] == 'X':
+    if trace.retries:
+        code, outcome = trace.retries[-1]
+        row['recovery'] = dict(code=code, outcome=outcome)
+    if gave_up(row):
         row['struct'] = structure(path)
         row['text_all'] = text_all_type(path)
         row['scan'], row['scan_code'] = scan_type(path)
@@ -1070,7 +1106,7 @@ def validate_row(row):
     req = batch._require
     keys = {'schema_version', 'key', 'code', 'form', 'tier', 'decision', 'reasons', 'exit', 'reclass',
             'exceptions', 'ocr_chars', 'cause', 'struct', 'scan', 'scan_code', 'text_all', 'g1', 'g1_decision',
-            'consent', 'c1', 'payment', 'p1', 'c2', 'a2', 'a4', 'shadow_errors'}
+            'consent', 'c1', 'payment', 'p1', 'c2', 'a2', 'a4', 'recovery', 'shadow_errors'}
     req(isinstance(row, dict) and set(row) == keys and row['schema_version'] == VERSION)
     req(isinstance(row['key'], str) and timing.KEY_RE.fullmatch(row['key']) is not None)
     req(row['code'] in ROW_CODES and row['form'] in KINDS and row['tier'] in TIERS and row['decision'] in DECISIONS)
@@ -1102,6 +1138,9 @@ def validate_row(row):
                               and all(row['a2'][k] in SEVERITY_CODES for k in ('required', 'quality', 'quality_before'))))
     req(row['a4'] is None or (isinstance(row['a4'], dict) and set(row['a4']) == {'before', 'after'}
                               and row['a4']['before'] in MEMBER_TYPES and row['a4']['after'] in MEMBER_TYPES))
+    req(row['recovery'] is None or (isinstance(row['recovery'], dict) and set(row['recovery']) == {'code', 'outcome'}
+                                    and row['recovery']['code'] in RECOVERY_CODES
+                                    and row['recovery']['outcome'] in RECOVERY_OUTCOMES))
     if row['consent'] is not None:
         c = row['consent']
         allowed = dict(spec=('SPEC_OK', 'SPEC_UNAVAILABLE'), load=('LOAD_OK', 'LOAD_ERROR'), pages=('P1', 'P2P', 'NA'),
@@ -1159,8 +1198,15 @@ def summarize(rows, meta):
         lines.append(_line(title, field, 'n'))
         for value, n in sorted(Counter(str(r[field]) for r in done).items()):
             lines.append(_line(title, value, n))
-    x = [r for r in done if r['form'] == 'X']
+    # "X" lines describe documents whose production 1st path could not decide the form,
+    # including those the render retry recovered (format 3); XFINAL counts the ones still X.
+    x = [r for r in done if gave_up(r)]
     lines.append(_line('XCOUNT', len(x)))
+    lines.append(_line('XFINAL', sum(r['form'] == 'X' for r in done)))
+    _counted(lines, 'RECOVERY code outcome form n',
+             ((r['recovery']['code'], r['recovery']['outcome'], r['form']) for r in done if r['recovery']))
+    _counted(lines, 'XCAUSE_RECOVERED cause recovered n',
+             ((r['cause'], 'O' if r['form'] != 'X' else 'X') for r in x))
     five = ('HIDDEN_TEXT_LAYER', 'FEW_CHARS_DISCARD', 'FIRST_IMAGE_LATER_TEXT', 'PREPROCESS_ERROR', 'BACKGROUND_ONLY')
     lines.append('XCAUSE5 ' + ' '.join(five) + ' OTHER_CAUSES')
     causes = Counter(r['cause'] for r in x)

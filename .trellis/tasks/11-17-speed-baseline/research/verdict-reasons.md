@@ -34,6 +34,8 @@
 
 ## 4. doc_timing 요약에 쓰는 규칙
 
+취소된 계획(doc_timing 요약 변경). 실행하지 않음. 사유는 작업 E에서 결과 행에만 저장.
+
 - VERDICT 분류: PASS, NEEDS_REVIEW, REUPLOAD(=FAIL), NOT_ASSESSED, OTHER(판정 오류 등).
 - REASON 집계: 문서 상태가 NEEDS_REVIEW이면 NEEDS_REVIEW 사유, REUPLOAD(FAIL)이면 FAIL 사유만 센다. 한 문서의 같은 코드는 한 번, 다른 코드는 각각 센다.
 - 코드는 등록된 고정 코드 목록(`verify_upload.SAFE_CODES`)에 있을 때만 그대로 쓰고, 그 밖은 UNKNOWN_CODE로 쓴다. message, how_to_fix, detail은 읽지도 저장하지도 않는다.

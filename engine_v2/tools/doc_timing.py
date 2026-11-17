@@ -10,7 +10,9 @@ the timed region. Stage times come from delegation-only wrappers; they never
 change arguments, results or exceptions.
 
 Screen output and summary_brief.txt contain numbers, O/X and fixed codes only.
-rows.jsonl carries a 16-hex document key, never a path, name or value.
+rows.jsonl carries a 16-hex document key, never a path, name or value. Row format 2
+adds ``reasons``: distinct registered verdict reason codes with their severity,
+recorded outside the timed region (unregistered codes become UNKNOWN_CODE).
 """
 from __future__ import annotations
 
@@ -36,7 +38,11 @@ from unittest.mock import patch
 
 from . import batch_assess as batch
 
-VERSION = 1
+VERSION = 2
+#: Row format 1 (fea711b) had no ``reasons``; both remain readable.
+READABLE_VERSIONS = (1, 2)
+SEVERITIES = ('FAIL', 'NEEDS_REVIEW', 'INFO', 'PASS', 'OTHER')
+UNKNOWN_CODE = 'UNKNOWN_CODE'
 ENGINES = ('own',)
 STAGES = ('open', 'text_layer', 'render', 'ocr', 'classify', 'extract', 'evidence', 'decision', 'other')
 TIMED_STAGES = STAGES[:-1]
@@ -295,12 +301,30 @@ def _tier(value):
     return value if value in TIERS else 'OTHER'
 
 
+def _safe_codes():
+    from demo.backend.tools.verify_upload import SAFE_CODES
+    return SAFE_CODES
+
+
+def reason_codes(findings):
+    """Distinct, sorted ``[code, severity]`` pairs. Message, guidance and detail are never read."""
+    safe = _safe_codes()
+    pairs = set()
+    for finding in findings or ():
+        code, severity = getattr(finding, 'code', None), getattr(finding, 'severity', None)
+        code = code if isinstance(code, str) and code in safe else UNKNOWN_CODE
+        severity = severity if isinstance(severity, str) and severity in SEVERITIES else 'OTHER'
+        pairs.add((code, severity))
+    return [list(pair) for pair in sorted(pairs)]
+
+
 def measure(path, timer, *, slot=requirement):
     """Time one document on the production upload path. Caller supplies guards."""
     from demo.backend import ocr as demo_ocr
     from demo.backend.upload_assessment import assess_upload
     timer.reset()
-    result = dict(code='NONE', form='X', tier='none', decision='ERROR')
+    result = dict(code='NONE', form='X', tier='none', decision='ERROR', reasons=[])
+    checked = None
     clock = timer.clock
     read_seconds = decision_seconds = 0.0
     timer.active = True
@@ -331,6 +355,11 @@ def measure(path, timer, *, slot=requirement):
         result['code'] = 'PROCESSING_ERROR'
     finally:
         timer.active = False
+    if checked is not None:
+        try:  # outside the timed region: only registered codes and severities are kept
+            result['reasons'] = reason_codes(checked.findings)
+        except Exception:
+            result.update(code='PROCESSING_ERROR', reasons=[])
     total = max(0.0, read_seconds + decision_seconds - timer.excluded)
     seconds = {name: timer.totals[name] for name in TIMED_STAGES}
     seconds['other'] = max(0.0, total - sum(seconds.values()))
@@ -349,7 +378,7 @@ def _blank_row(doc, engine, phase, repeat, code):
                 form='X', text_layer=doc.get('text_layer'), pages=doc.get('pages'),
                 page_bin=page_bin(doc['pages']) if doc.get('pages') else None,
                 first_image_later_text=doc.get('first_image_later_text', 0), tier='none',
-                decision='NOT_ASSESSED', ocr_pages=0, text_pages=0, cold_start=0.0, seconds=None)
+                decision='NOT_ASSESSED', ocr_pages=0, text_pages=0, cold_start=0.0, seconds=None, reasons=[])
 
 
 def _finite(value):
@@ -360,7 +389,10 @@ def validate_row(row):
     keys = {'schema_version', 'key', 'engine', 'phase', 'repeat', 'code', 'form', 'text_layer', 'pages',
             'page_bin', 'first_image_later_text', 'tier', 'decision', 'ocr_pages', 'text_pages',
             'cold_start', 'seconds'}
-    batch._require(isinstance(row, dict) and set(row) == keys and row['schema_version'] == VERSION)
+    batch._require(isinstance(row, dict) and row.get('schema_version') in READABLE_VERSIONS)
+    if row['schema_version'] >= 2:
+        keys = keys | {'reasons'}
+    batch._require(set(row) == keys)
     batch._require(isinstance(row['key'], str) and KEY_RE.fullmatch(row['key']) is not None)
     batch._require(row['engine'] in ENGINES and row['phase'] in PHASES and row['code'] in ROW_CODES)
     batch._require(type(row['repeat']) is int and row['repeat'] >= 0)
@@ -376,6 +408,14 @@ def validate_row(row):
     else:
         batch._require(isinstance(row['seconds'], dict) and set(row['seconds']) == set(STAGES) | {'total'})
         batch._require(all(_finite(v) for v in row['seconds'].values()))
+    if 'reasons' in row:
+        reasons = row['reasons']
+        safe = _safe_codes()
+        batch._require(isinstance(reasons, list) and all(
+            isinstance(pair, list) and len(pair) == 2 and (pair[0] in safe or pair[0] == UNKNOWN_CODE)
+            and pair[1] in SEVERITIES for pair in reasons))
+        batch._require([tuple(pair) for pair in reasons] == sorted({tuple(pair) for pair in reasons}))
+        batch._require(row['decision'] not in {'NOT_ASSESSED', 'ERROR'} or not reasons)
     return row
 
 
@@ -385,7 +425,7 @@ def load_strata(directory):
         out = batch._location(Path(directory).absolute())
         rows_path, run_path = batch._target(out / 'rows.jsonl'), batch._target(out / 'run.json')
         meta = json.loads(run_path.read_bytes())
-        batch._require(isinstance(meta, dict) and meta.get('schema_version') == VERSION)
+        batch._require(isinstance(meta, dict) and meta.get('schema_version') in READABLE_VERSIONS)
         forms = defaultdict(Counter)
         for line in rows_path.read_bytes().splitlines():
             row = validate_row(batch._load(line))

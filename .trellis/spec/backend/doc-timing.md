@@ -40,6 +40,11 @@ verdict, on the own engine. Never change operating code to make it measurable.
 - `--sample` stratifies by form from `--strata-from` (a previous run), else by
   text layer × page bin. Allocation is proportional, at least one per stratum,
   deterministic for a seed. Processing order is the document-key order.
+- Row format 2 adds `reasons`: distinct, sorted `[code, severity]` pairs from the
+  verdict findings, recorded after the timed region. Only `verify_upload.SAFE_CODES`
+  survive (others become UNKNOWN_CODE); message, guidance and detail are never read.
+  Format 1 rows stay readable (also for `--strata-from`). No summary lines use them;
+  A7/A8 are computed from rows per the task's measurement definitions.
 - rows.jsonl uses a 16-hex key of the root-relative path. Screen, run.json and
   summary_brief.txt contain numbers, O/X and fixed codes only, never paths, names,
   keys, values or exception text. run.json records machine, cores, power, load,

@@ -28,7 +28,7 @@ A는 두 지표로 나눈다. 둘 다 PDF 파일 하나하나가 단위이며 �
 | 대상 파일 | `.pdf`만 | PDF와 이미지(jpg·png·heic·gif·jfif). A-스캔도 PDF 행만 쓴다 |
 | 제외 | 처리 전 점검에서 ENCRYPTED, OPEN_ERROR, EMPTY_DOCUMENT로 건너뜀(`phase=skipped`) | error_code ENCRYPTED, OPEN_ERROR, EMPTY_DOCUMENT (document_status ERROR) |
 | 그 밖의 오류 | code PROCESSING_ERROR, GUARD_BLOCKED | error_code OCR_ERROR, EXTRACTION_ERROR, ASSESSMENT_ERROR, GUARD_BLOCKED, PROCESSING_ERROR, DECODE_ERROR 등 |
-| 사유 코드 | **지금 저장하지 않음** (아래 참고) | 결과 행 `reasons`에 코드·심각도 저장 |
+| 사유 코드 | 결과 행 `reasons`(형식 버전 2 이상)에 등록 코드·심각도 쌍 저장, 문서당 중복 없음 | 결과 행 `reasons`에 코드·심각도 저장 |
 
 **A0 오류 규칙 (A와 A-스캔 둘 다):** 실행 뒤 PDF 행의 오류 코드를 코드별로 센다. ENCRYPTED·OPEN_ERROR·EMPTY_DOCUMENT 밖의 오류 코드가
 **1건이라도 있으면 그 실행의 A 숫자를 쓰지 않고 원인부터 본다.** batch_assess는 오류가 한 건이라도 있으면 종료 코드 1로 끝나므로(암호 파일만 있어도 1),
@@ -43,15 +43,15 @@ A는 두 지표로 나눈다. 둘 다 PDF 파일 하나하나가 단위이며 �
 | A4 | 확인 필요 | NEEDS_REVIEW 수, A4% = A4 ÷ A2 |
 | A5 | 재업로드 | FAIL 수, A5% = A5 ÷ A2 |
 | A6 | 분모 밖 | NOT_ASSESSED 수와 A1 밖의 오류 수를 코드별로 |
-| A7 | 확인 필요 사유 1위 | NEEDS_REVIEW 문서에서 심각도 NEEDS_REVIEW 사유 코드를 문서당 한 번씩 셀 때 문서 수가 가장 많은 코드와 그 수, A7% = 그 수 ÷ A4. 동률이면 코드 이름순 |
-| A8 | 1위 사유만 있는 건수 | NEEDS_REVIEW 문서 중 심각도 NEEDS_REVIEW 사유 코드 집합이 정확히 {A7 코드}인 문서 수 |
+| A7 | 확인 필요 사유 1위 | 도구: A는 doc_timing 결과 행의 `reasons`(형식 버전 2 이상), A-스캔은 batch_assess 결과 행의 `reasons`. NEEDS_REVIEW 문서에서 심각도 NEEDS_REVIEW 사유 코드를 문서당 한 번씩 셀 때 문서 수가 가장 많은 코드와 그 수, A7% = 그 수 ÷ A4. 동률이면 코드 이름순 |
+| A8 | 1위 사유만 있는 건수 | 도구: A7과 같음. NEEDS_REVIEW 문서 중 심각도 NEEDS_REVIEW 사유 코드 집합이 정확히 {A7 코드}인 문서 수 |
 
 사유 코드는 등록 코드(`verify_upload.SAFE_CODES`)만 그대로 쓰고 그 밖은 UNKNOWN_CODE로 센다. 사유 문장은 쓰지 않는다.
 
 **현재 도구로 낼 수 있는 것:**
-- A: doc_timing 결과 행에 판정 상태(`decision`)는 저장되지만 **사유 코드는 저장되지 않는다.** 그래서 A0~A6은 지금 결과로 낼 수 있고, A7·A8은 최소 변경
-  (결과 행에 문서별 사유 `[코드, 심각도]` 목록 추가, research/d1-findings.md 참고) 승인 뒤 다시 재야 한다. 개선 전·후 모두 같은 도구 판으로 잰다.
-- A-스캔: 결과 행에 필요한 값이 모두 있다. 지금 `--summarize`는 A1 구분·A2 분모 비율·A7·A8을 내지 않으므로, 이 부분은 요약 변경 승인 뒤 같은 결과에서 낸다.
+- A: doc_timing 결과 행에 판정 상태(`decision`)와, 형식 버전 2부터 사유 코드(`reasons`)가 저장된다. A0~A8 모두 결과 행에서 낸다.
+  형식 버전 1 결과(사유 없음)로는 A7·A8을 내지 않는다. 개선 전·후 모두 형식 버전 2 이상으로 잰다.
+- A-스캔: 결과 행에 필요한 값이 모두 있다. 지금 `--summarize`는 A1 구분·A2 분모 비율·A7·A8을 내지 않으므로 결과 행에서 계산식대로 센다.
 
 ```
 cd <REPO> && caffeinate -i .venv/bin/python -B -m engine_v2.tools.doc_timing --root <HUB_ROOT> --out <RUN_DIR>/doc_timing/<이름> --engines own
@@ -118,4 +118,5 @@ cd <REPO> && caffeinate -i .venv/bin/python -B -m engine_v2.tools.batch_assess -
 
 ## 바뀐 기록
 
+- 2026-11-17 (숫자를 보기 전, 작업 E): A7·A8 도구를 doc_timing 결과 행의 `reasons`(형식 버전 2 이상)로 고정.
 - 2026-11-17 (숫자를 보기 전): A를 A(주 지표, 운영 판독 경로·doc_timing)와 A-스캔(보조 지표, batch_assess)으로 나눔. J를 이번 주 측정 제외로 바꿈. E3의 6과 단위를 진 확인 대기로 표시. 사유 표시 문구를 화면 그대로로 고정.

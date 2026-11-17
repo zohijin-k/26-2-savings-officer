@@ -378,7 +378,9 @@ def test_c1_shadow_turns_only_the_consent_quality_fail_into_review():
         ocr = OcrResult(detected_doc_type=DocType.ADMIN_INFO_CONSENT, confidence=.9, image_quality=.5)
         result = doc_check.CheckResult('NEEDS_REVIEW', [doc_check.CheckFinding(code, 'x', severity='NEEDS_REVIEW')])
         return doc_check.finalize_image_quality(req, ocr, result, 'pdf').status
-    assert finalize('ADMIN_CONSENT_MARK_UNREADABLE') == 'FAIL'
+    # 11-18 O4: C1 is production; the shadow patch is now a no-op for the consent codes.
+    assert finalize('ADMIN_CONSENT_MARK_UNREADABLE') == 'NEEDS_REVIEW'
+    assert finalize('REQUIRED_FIELD_UNREADABLE') == 'FAIL'
     with tool.c1_patch():
         assert finalize('ADMIN_CONSENT_MARK_UNREADABLE') == 'NEEDS_REVIEW'
         assert finalize('ADMIN_CONSENT_SIGNATURE_UNREADABLE') == 'NEEDS_REVIEW'
@@ -442,12 +444,12 @@ def test_run_adds_consent_and_payment_rows(tmp_path, fake_ocr):
     tool.run(consent_root, tmp_path / 'out_consent')
     (consent,) = rows(tmp_path / 'out_consent')
     assert consent['form'] == 'ADMIN_INFO_CONSENT' and consent['shadow_errors'] == []
-    # 100 dpi original: low quality; the mark cannot be read, so production FAILs and C1 reviews.
+    # 100 dpi original: low quality; the mark cannot be read. 11-18 O4 (C1 in production): review, not FAIL.
     assert consent['consent']['quality'] == 'Q05' and consent['consent']['mark'] == 'MARK_BOTH'
-    assert consent['decision'] == 'FAIL' and consent['c1'] == 'NEEDS_REVIEW'
+    assert consent['decision'] == 'NEEDS_REVIEW' and consent['c1'] == 'NEEDS_REVIEW'
     assert consent['payment'] is None and consent['p1'] is None
     summary = (tmp_path / 'out_consent' / 'summary.txt').read_text()
-    assert 'C1_FAIL_TO_REVIEW 1' in summary and 'CONSENT_COUNT 1' in summary
+    assert 'C1_FAIL_TO_REVIEW 0' in summary and 'CONSENT_COUNT 1' in summary
     assert any(line.startswith('CONSENT_VARIANT INNER_STRONG ') for line in summary.splitlines())
     fake_ocr['title'] = PAYMENT_TITLE
     tool.run(payment_root, tmp_path / 'out_payment')

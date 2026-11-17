@@ -234,8 +234,10 @@ def test_late_consent_observations_finalize_quality_before_submission(tmp_path, 
     _, result = upload_assessment.assess_upload(
         tmp_path / "FAKE-consent.png", req, paper_admin_consent=True, reader=lambda *_: read,
     )
-    expected = "NEEDS_REVIEW" if missing == "none" else "FAIL"
+    # 11-18 O4 (C1): unreadable consent mark or signature no longer makes low quality a FAIL.
+    expected = "NEEDS_REVIEW"
     assert result.status == expected
+    assert missing == "none" or any(f.code.startswith("ADMIN_CONSENT_") for f in result.findings)
     assert next(f.severity for f in result.findings if f.code == "LOW_IMAGE_QUALITY") == expected
     pipeline, _ = pipeline_for(req, read, result)
     assert pipeline.stage1.status.value == expected

@@ -90,12 +90,24 @@ t1
   BY_PAGES, STAGE, REPEAT, SLOW_FORM이다. 목표 줄은 `TARGET own MEAN_LE_2_5S O`, `TARGET own P95_LE_5S X` 꼴(2.5초·5초와 같으면 O)이다.
 - 화면: 시작 경고(`WARNING LOAD_HIGH`, `WARNING ON_BATTERY`), 진행(`progress engine pass done total elapsed_s`), 끝에 summary_brief 내용.
 
+### 1.7 2026-11-17 승인 때 정한 사항 (위 내용보다 우선)
+
+- 엔진은 own으로 고정한다. `--engines`는 `own`만 받는다(그 밖은 ARGUMENT_ERROR). engine_v2 쪽 경로(`engine_v2.engine.run`)는 쓰지 않는다.
+  측정에서 빼는 서버 부분: HTTP 요청 받기·파일 받기(documents.py:278-312), DB 조회·저장(`_load`, `_checklist`, `_replace_existing`, `_save_row`, `_list_documents`), 납부·자격 짝 재판정(documents.py:349-353), 응답 만들기.
+- 모델은 미리 불러오지 않는다. 운영처럼 프로세스의 첫 OCR 호출이 불러오게 두고, `own.sessions` 캐시 miss 시간을 COLD_START로 따로 기록한다.
+  그 시간은 그 서류 시간에서 뺀다. 요약 한 줄: `COLD_START own model_load_s <초> first_ocr_call_s <초> phase <warmup|measure|NONE>`.
+- 예열 실행은 따로 기록하고 모든 서류를 통계에 넣는다(1.5와 같음).
+- OTHER가 합성 실행 전체의 10%를 넘으면 무엇인지 나눠 보고한다.
+- 요약 추가 줄:
+  - `FIRST_PAGE_IMAGE_LATER_TEXT docs <n>`과 `FIRST_PAGE_IMAGE_LATER_TEXT status <상태> <n>`: 첫 쪽 글자 50자 미만이고 뒤쪽에 50자 이상인 쪽이 있는 문서 수와 그 문서들의 판정 상태 분포.
+  - `PAGES TEXT_PAGES <n> OCR_PAGES <n> TOTAL_PAGES <n>`: OCR_PAGES는 실제로 실행된 OCR 호출 수. TEXT_PAGES는 `_load_pages`가 글자층 단어로 넘긴 쪽 수에, PdfText 계층이 끝낸 문서마다 1쪽(첫 쪽만 읽음)을 더한 값. 측정 반복 기준(서류마다 첫 측정 반복 한 번)으로 센다.
+
 ## 2. ocr_baseline 값 유무 저장
 
 - `ocr_baseline_fields.compare_fields(..., presence=False)`: 키워드를 더한다. `presence=True`일 때만 필드마다 `actual_present`를 넣는다.
   값은 이미 계산하는 `actual_present`(90행)를 그대로 0/1로 바꾼 것이다. 참조가 없는 필드(missing_reference)는 계산 전에 끝나므로 0이다.
   기본값 False라서 기존 호출과 기존 시험 기대값은 그대로다.
-- `ocr_baseline.process_file`은 `presence=True`로 부른다.
+- `ocr_baseline.process_file`은 `presence=True`로 부른다. CLI 실행 결과에는 항상 저장된다.
 - `ocr_baseline.validate_row`: 필드 키가 기존 6개이거나, 6개 + `actual_present`일 때 받는다. `actual_present`가 있으면 0/1 정수이고,
   match=1이면 1, missing_reference=1이면 0이어야 한다. 예전 결과 행(6개)도 그대로 읽힌다.
 - `FIELD` 틀과 `build_summary`는 바꾸지 않는다. 그래서 summary.json·summary.txt 숫자는 그대로다.
@@ -115,6 +127,7 @@ t1
 - 분포 줄: `OUTCOME type field engine variant side MATCH BLANK WRONG OTHER NA` (side는 BEFORE/AFTER).
 - 교차표 줄: `TRANSITION type field engine variant before after count`. 0이 아닌 칸만 쓴다. 한쪽에만 있는 측정은 ABSENT로 쓴다.
 - 문서 ID는 맞추는 데만 쓰고 출력하지 않는다. 기존 줄(STATUS, COHORT, EXCLUSION, FIELD, RECOGNITION, TIME, GRID)은 그대로 두고 새 줄은 뒤에 붙인다.
+- 구현 때 바꾼 점: 새 줄은 `--outcomes` 옵션을 줄 때만 붙인다. 기존 시험(test_ocr_baseline_compare.py의 출력 낱말 허용 목록)이 기본 출력에 새 낱말이 생기면 실패하므로, 기존 기대값을 바꾸지 않으려고 기본 출력은 그대로 둔다.
 
 ## 4. 바꾸지 않는 것
 

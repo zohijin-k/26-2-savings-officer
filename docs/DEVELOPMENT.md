@@ -8,6 +8,7 @@ OCR은 서류 사진이나 PDF에서 글자를 읽는 기술입니다.
 - [협업 규칙](#협업-규칙)
 - [폴더 구조](#폴더-구조)
 - [개발 환경과 실행](#개발-환경과-실행)
+- [신청자 화면과 연결해서 실행](#신청자-화면과-연결해서-실행)
 - [OCR 판독 설정](#ocr-판독-설정)
 - [평가 도구](#평가-도구)
 - [확인 및 테스트](#확인-및-테스트)
@@ -17,7 +18,7 @@ OCR은 서류 사진이나 PDF에서 글자를 읽는 기술입니다.
 
 ## 저장소와 브랜치
 
-저장소는 [zohijin-k/26-2-savings-officer](https://github.com/zohijin-k/26-2-savings-officer)이며 두배적금 담당자 화면 전용입니다. 전체 프로젝트와 분리된 저장소 안내는 [26-2-capstone](https://github.com/zohijin-k/26-2-capstone)을 참고합니다. 기준 브랜치는 `main`입니다. 분리 전 통합 저장소의 브랜치 목록은 이 저장소의 현재 브랜치 안내로 사용하지 않습니다.
+저장소는 [zohijin-k/26-2-savings-officer](https://github.com/zohijin-k/26-2-savings-officer)이며 두배적금 담당자 화면 저장소입니다. 백엔드는 신청자 화면([26-2-savings-applicant](https://github.com/zohijin-k/26-2-savings-applicant))의 API도 함께 제공해서, 두 화면을 한 DB에 이어 실행할 수 있습니다([신청자 화면과 연결해서 실행](#신청자-화면과-연결해서-실행)). 전체 프로젝트와 분리된 저장소 안내는 [26-2-capstone](https://github.com/zohijin-k/26-2-capstone)을 참고합니다. 기준 브랜치는 `main`입니다. 분리 전 통합 저장소의 브랜치 목록은 이 저장소의 현재 브랜치 안내로 사용하지 않습니다.
 
 ## 협업 규칙
 
@@ -88,6 +89,41 @@ python -m demo.backend.tools.seed_officer_demo --clean
 ```
 
 정상·확인 필요 신청 각 한 건을 생성하며 재실행으로 중복 생성하지 않습니다. 다른 신청이나 판정은 수정하지 않습니다. 전체 DB 초기화는 필요하지 않습니다. 기존 `seed_application`은 인증된 초안의 2단계 보조 도구로 남아 있지만 이 저장소의 화면 시연 주입에는 사용하지 않습니다.
+
+## 신청자 화면과 연결해서 실행
+
+신청자 화면([26-2-savings-applicant](https://github.com/zohijin-k/26-2-savings-applicant))에서 낸 신청을 이 저장소의 담당자 화면에서 바로 보려면, 이 저장소의 백엔드 하나에 두 프런트를 붙입니다. 두 저장소를 같은 폴더에 나란히 받아 둔 상태를 기준으로 합니다.
+
+| 무엇 | 어디서 실행 | 주소 |
+|---|---|---|
+| 백엔드 | 이 저장소 루트 | <http://localhost:8000> |
+| 신청자 프런트 | `26-2-savings-applicant/demo/frontend` | <http://localhost:5173> |
+| 담당자 프런트 | 이 저장소의 `demo/frontend` | <http://localhost:5174> |
+
+```bash
+# 터미널 1 — 이 저장소 루트
+uvicorn demo.backend.main:app --reload --port 8000
+```
+
+```bash
+# 터미널 2 — 신청자 저장소
+cd ../26-2-savings-applicant/demo/frontend
+npm run dev
+```
+
+```bash
+# 터미널 3 — 이 저장소
+cd demo/frontend
+npm run dev -- --port 5174
+```
+
+- 두 프런트 모두 `/api` 요청을 `localhost:8000`으로 넘기므로 프런트 코드는 고치지 않습니다.
+- 신청은 이 저장소의 `demo/demo.db`와 `demo/storage/`에 쌓입니다. 신청자가 제출한 건은 담당자 목록에 바로 나타나고, 담당자가 내린 결정은 신청자 마이페이지에 보입니다.
+- 신청자 저장소의 백엔드는 띄우지 않습니다. 같은 8000번을 쓰므로 둘을 함께 띄울 수 없습니다. 신청자 저장소의 백엔드를 대신 띄우면 신청이 그쪽 DB에 쌓이고, 판정도 그 저장소의 코드로 됩니다.
+
+이 저장소의 백엔드에는 신청자 API(`/api/applications`, `/api/programs`)와 담당자 API(`/api/officer`, `/api/files`)가 함께 있습니다. 신청자 API의 응답은 신청자 저장소와 같은 규칙을 따릅니다. 서류 상태는 `UPLOADED`와 `REUPLOAD_REQUIRED`만 내보내고, 내부 판정·판독 신뢰도·점수·자격 사유는 내보내지 않습니다. 저장되는 판정과 담당자 API의 응답은 그대로입니다.
+
+신청자 API 코드(`demo/backend/api/applications.py`, `documents.py`, `review.py`와 `common.py`의 신청자 응답 부분)는 신청자 저장소에도 같은 내용으로 있습니다. 한쪽에서 고치면 다른 쪽에도 반영합니다. 시험에서 신청자 API의 `status`로 내부 판정을 확인하지 않습니다. 판정은 저장된 값(`Document.stage1_status`)이나 담당자 API로 확인합니다(`test_portal_uploads.assert_upload_status`).
 
 ## OCR 판독 설정
 

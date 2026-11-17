@@ -100,7 +100,7 @@ A form X 문서에만 더 기록한다(값 없는 코드):
 | TEXT_NO_KEYWORD | 글자층 길로 끝났고 위에 해당 없음 (글자층에 서식 단서 없음) |
 | OTHER | 그 밖 |
 
-출력 줄: `XCAUSE cause n`, `XCAUSE_SCAN cause scan_found n`(A-스캔 방식으로는 서식을 찾는지), `XEXC where class n`.
+출력 줄: `XCAUSE5`(다섯 원인과 그 밖 건수를 고정 순서로 한 줄), `XCAUSE cause n`, `XCAUSE_SCAN cause scan_found n`(A-스캔 방식으로는 서식을 찾는지), `XEXC where class n`.
 
 출력 줄: `COUNTS`, `BASELINE_VS_TIMING matched agree disagree`(`--timing`이 있을 때, 같은 운영 경로이므로 서식이 같아야 함), `FORM form n`, `TIER tier n`,
 `XEXIT exit n`, `XRECLASS type n`, `XOCR bin n`, `XSTRUCT main layers dpi rot n`, `XSCAN exit scan_found n`, `XTEXT text_all_type n`.
@@ -120,10 +120,12 @@ A form X 문서에만 더 기록한다(값 없는 코드):
 | 표시(운영 그대로) | MARK_NONE / MARK_AGREE / MARK_DISAGREE / MARK_BOTH, 칸별 비율 구간 R_LT1 / R1_3_5 / R_GE3_5 (%) |
 | 표시(위치 맞춤 그림자) | ALIGNED_NONE / ALIGNED_AGREE / ALIGNED_DISAGREE / ALIGNED_BOTH (같은 칸을 구한 이동만큼 옮겨 다시 셈) |
 | 서명 | SIGN_O / SIGN_X, ALIGNED_SIGN_O / ALIGNED_SIGN_X |
+| 칸 안쪽(그림자, 진 승인) | INNER_NONE / INNER_AGREE / INNER_DISAGREE / INNER_BOTH (위치 맞춤 뒤 칸 테두리를 각 변 2pt 빼고 셈) |
+| **운영 후보 INNER_STRONG** | STRONG_<표시> (상관 강함일 때만 칸 안쪽 결과 인정) / STRONG_HOLD (상관 약함 → 지금처럼 NEEDS_REVIEW) |
 | 운영과 같은가 | PROD_MATCH_O / PROD_MATCH_X (운영 결과 `동의여부`와 다시 센 표시가 같은지) |
 | 화질 | Q10 / Q09 / Q07 / Q05 / Q_OTHER (`objective_image_quality`), 판정과 LOW_IMAGE_QUALITY 심각도 |
 
-출력 줄: `CONSENT stage code n` 단계별, `CONSENT_MARK prod aligned n`, `CONSENT_DECISION mark quality decision n`.
+출력 줄: `CONSENT_<단계> code n`, `CONSENT_VARIANT variant READ_OK READ_AGREE READ_DISAGREE DIFF_FROM_PROD HELD_WEAK`(ALIGNED·INNER·INNER_STRONG), `CONSENT_MARK prod aligned inner peak n`, `CONSENT_DECISION mark quality low_quality decision n`, `C1 before after n`, `C1_FAIL_TO_REVIEW n`.
 
 ## 6. 납부확인서 월별 표 단계 (마, 커밋 3)
 

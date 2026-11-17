@@ -51,10 +51,11 @@ own 잘못된 통과 0/235, 참조 15/235, 납부 참조 5/50, 바뀐 행 수. �
 ## 4. 진이 실행할 명령 (채팅 보고에만 실경로, 여기에는 자리표시)
 
 ```sh
-cd <REPO> && caffeinate -i .venv/bin/python -B -m engine_v2.tools.classify_recovery_diag crosstab --timing <RUN_A>/rows.jsonl --scan <RUN_SCAN>/results.jsonl ; caffeinate -i .venv/bin/python -B -m engine_v2.tools.classify_recovery_diag run --root <HUB_ROOT> --out <OUT> --timing <RUN_A>/rows.jsonl
+cd <REPO> && T=<RUN_A> && S=<RUN_SCAN> && caffeinate -i .venv/bin/python -B -m engine_v2.tools.classify_recovery_diag crosstab --timing "$T/rows.jsonl" --scan "$S/results.jsonl" ; caffeinate -i .venv/bin/python -B -m engine_v2.tools.classify_recovery_diag run --root <HUB_ROOT> --out <OUT> --timing "$T/rows.jsonl"
 ```
 
-`run`은 모든 PDF를 운영 경로로 한 번 다시 판독한다(doc_timing 한 번과 비슷한 시간 + A form X 문서의 300dpi OCR). 회귀·다른 측정과 동시에 돌리지 않는다.
+`run` 한 번으로 서식 미분류 다섯 원인(XCAUSE5), G1 N/W/E, P1 0.1·0.2·0.3, C1, 동의서 변형(ALIGNED·INNER·INNER_STRONG) 그림자 결과가 모두 나온다.
+모든 PDF를 운영 경로로 한 번 다시 판독한다(doc_timing 한 번과 비슷한 시간 + A form X 문서의 300dpi OCR + 납부확인서마다 OCR 재사용 재판독 3회). 회귀·다른 측정과 동시에 돌리지 않는다.
 
 ## 5. 마무리 보고 후 멈춤
 

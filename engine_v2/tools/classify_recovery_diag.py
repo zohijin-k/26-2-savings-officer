@@ -33,7 +33,8 @@ from unittest.mock import patch
 from . import batch_assess as batch
 from . import doc_timing as timing
 
-VERSION = 1
+VERSION = 2
+#: Format 1 (commit 2) had no consent/payment/p1/c1 keys.
 KINDS = batch.KINDS
 TIERS = timing.TIERS
 DECISIONS = timing.DECISIONS
@@ -231,6 +232,8 @@ class Trace:
         self.classified = []     # (text, detected) for G1, memory only
         self.ocr_chars = None
         self.exceptions = {}
+        self.payment = None      # (pages, result) of the last production payment extraction, memory only
+        self.page_texts = None   # squeezed per-page reading text, memory only
         self.ocr_cache.clear()
 
     def event(self, name, value=None):
@@ -324,6 +327,25 @@ def _wrap_classify(trace, original):
     return classify_with_evidence
 
 
+def _wrap_classify_pages(trace, original):
+    def classify_pages_with_evidence(pages):
+        detected, evidence = original(pages)
+        trace.event('classify_pages', _kind(detected))
+        if trace.capture:
+            trace.page_texts = [re.sub(r'\s+', '', result.text) for _, result in pages]
+        return detected, evidence
+    return classify_pages_with_evidence
+
+
+def _wrap_payment_extract(trace, original):
+    def extract(pages, *args, **kwargs):
+        result = original(pages, *args, **kwargs)
+        if trace.capture:
+            trace.payment = (pages, result)
+        return result
+    return extract
+
+
 @contextmanager
 def instrument(trace):
     """Install delegation-only wrappers; arguments, results and exceptions pass through unchanged."""
@@ -346,7 +368,9 @@ def instrument(trace):
         stack.enter_context(patch.dict(v2ocr.ENGINES, {'own': _wrap_ocr(trace, v2ocr.ENGINES['own'])}))
         put(pdftext, 'classify_with_evidence', _wrap_classify(trace, pdftext.classify_with_evidence))
         put(pdftext, 'classify_pages_with_evidence',
-            _wrap_value(trace, pdftext.classify_pages_with_evidence, 'classify_pages', lambda r: _kind(r[0])))
+            _wrap_classify_pages(trace, pdftext.classify_pages_with_evidence))
+        from engine_v2.extractors import nhis_payment
+        put(nhis_payment, 'extract', _wrap_payment_extract(trace, nhis_payment.extract))
         put(file_evidence, 'independent_page_markers',
             _wrap_value(trace, file_evidence.independent_page_markers, 'markers',
                         lambda r: 'NONE' if r is None else 'FOUND'))
@@ -484,6 +508,246 @@ def cause_code(exit, trace, struct, text_all):
     return 'OTHER'
 
 
+# ---------------------------------------------------------------- consent mark and payment table stages
+
+
+#: P1: header-band slack in percent of page height (synthetic overlap was about 0.05).
+P1_MARGINS = (0.1, 0.2, 0.3)
+P1_KEYS = tuple(f'm{int(round(m * 10)):02d}' for m in P1_MARGINS)
+CONSENT_TITLE = '행정정보공동이용'
+MARKS = ('NONE', 'AGREE', 'DISAGREE', 'BOTH')
+PAYMENT_STAGES = ('HEADER', 'COLUMN', 'ROW', 'FORMAT', 'ARITH', 'TABLE_OK', 'NOT_EXTRACTED')
+PAYMENT_DETAILS = ('HEADER_GROUPS', 'HEADER_BAND_CUT', 'HEADER_LABEL', 'MONTH_HEADER_MISSING',
+                   'CHARGE_HEADER_MISSING', 'NONE')
+PAGING_STATES = ('COMPLETE', 'INCOMPLETE', 'NOT_REQUIRED', 'UNCERTAIN', 'ABSENT', 'INVALID')
+COMPLETENESS_KEYS = ('period_status', 'printed_total_observed', 'arithmetic_complete', 'issue_information_read')
+C1_EXCLUDED = frozenset({'ADMIN_CONSENT_MARK_UNREADABLE', 'ADMIN_CONSENT_SIGNATURE_UNREADABLE'})
+#: Phase-correlation peak (z-score of the correlation surface) treated as a confident alignment.
+PEAK_STRONG = 20.0
+#: Inner-box variant of the alignment shadow: the printed checkbox border is excluded (pt per side).
+INNER_PT = 2.0
+
+
+@contextmanager
+def p1_patch(margin):
+    """Shadow P1: the column-header band starts ``margin`` above the group-header bottom.
+
+    Only the GROUPS call of ``_header_columns`` is wrapped; it returns copies of the
+    group words with ``y1 - margin``. x and confidence are unchanged, so only
+    ``group_bottom`` (and therefore the header band) moves.
+    """
+    from dataclasses import replace
+    from engine_v2.extractors import nhis_payment_gov as gov
+    original = gov._header_columns
+
+    def header_columns(words, expected=gov.HEADERS):
+        clusters = original(words, expected=expected)
+        if clusters is None or expected != gov.GROUPS:
+            return clusters
+        return [[replace(word, y1=word.y1 - margin) for word in cluster] for cluster in clusters]
+    with patch.object(gov, '_header_columns', header_columns):
+        yield
+
+
+@contextmanager
+def c1_patch():
+    """Shadow C1: consent mark/signature unreadability alone no longer makes low quality a FAIL."""
+    from demo.backend.rules import doc_check
+    with patch.object(doc_check, 'ESSENTIAL_FIELD_UNREADABLE_CODES',
+                      set(doc_check.ESSENTIAL_FIELD_UNREADABLE_CODES) - C1_EXCLUDED):
+        yield
+
+
+def _validations(result):
+    return {check.name: bool(check.passed) for check in getattr(result, 'validations', ()) or ()}
+
+
+def payment_table_stage(pages, result):
+    """First failing table stage of the production payment reading; codes only."""
+    from engine_v2.extractors import nhis_payment as legacy, nhis_payment_gov as gov
+    if pages is None or result is None:
+        return 'NOT_EXTRACTED', 'NOT_EXTRACTED', 'NONE'
+    checks = _validations(result)
+    ok = lambda *names: all(checks.get(name, False) for name in names)  # noqa: E731
+    if gov.recognizes(pages):
+        route = 'GOV'
+        if not ok('payment_group_headers', 'payment_component_headers'):
+            detail = 'HEADER_GROUPS' if not ok('payment_group_headers') else 'HEADER_LABEL'
+            if detail == 'HEADER_LABEL':
+                with p1_patch(max(P1_MARGINS)):
+                    relaxed = _validations(gov.extract(pages))
+                if relaxed.get('payment_component_headers'):
+                    detail = 'HEADER_BAND_CUT'
+            return route, 'HEADER', detail
+        if not ok('payment_columns'):
+            return route, 'COLUMN', 'NONE'
+        if not ok('monthly_rows_found', 'months_continuous', 'payment_sum_row'):
+            return route, 'ROW', 'NONE'
+    else:
+        route = 'LEGACY'
+        if not legacy._header_x(pages, legacy.MONTH_LABELS):
+            return route, 'HEADER', 'MONTH_HEADER_MISSING'
+        if not legacy._header_x(pages, ('고지금액', '고지보험료')):
+            return route, 'HEADER', 'CHARGE_HEADER_MISSING'
+        if not ok('monthly_rows_found', 'months_continuous'):
+            return route, 'ROW', 'NONE'
+    if not ok('monthly_amounts_numeric'):
+        return route, 'FORMAT', 'NONE'
+    if not ok('monthly_total_matches', 'paid_total_matches'):
+        return route, 'ARITH', 'NONE'
+    return route, 'TABLE_OK', 'NONE'
+
+
+def _json_field(fields, name):
+    raw = fields.get(name)
+    if raw is None:
+        return 'ABSENT'
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return 'INVALID'
+
+
+def payment_evidence(ocr):
+    """Paging, completeness and period evidence states of the stored reading; codes only."""
+    from engine_v2.extractors import payment_completeness, payment_paging, payment_period
+    paging = _json_field(ocr.fields, payment_paging.FIELD)
+    if isinstance(paging, str):
+        state, fallback = paging, 'NA'
+    else:
+        try:
+            state = payment_paging.assess(paging)
+            state = state if state in PAGING_STATES else 'INVALID'
+            fallback = 'O' if payment_paging.fallback_allowed(paging, ocr.page_count) else 'X'
+        except Exception:
+            state, fallback = 'INVALID', 'NA'
+    table = _json_field(ocr.fields, payment_completeness.FIELD)
+    complete = {}
+    for key in COMPLETENESS_KEYS:
+        if not isinstance(table, dict):
+            complete[key] = 'NA'
+        elif key == 'period_status':
+            complete[key] = 'O' if table.get(key) == 'READABLE' else 'X'
+        else:
+            complete[key] = 'O' if table.get(key) is True else 'X'
+    period = _json_field(ocr.fields, payment_period.FIELD)
+    if isinstance(period, dict):
+        period_state = 'READABLE' if period.get('status') == 'READABLE' else 'OTHER'
+        certain = 'O' if period.get('amounts_certain') is True else 'X'
+    else:
+        period_state, certain = 'ABSENT' if period == 'ABSENT' else 'OTHER', 'NA'
+    return dict(paging=state, fallback=fallback, period=period_state, amounts_certain=certain, **complete)
+
+
+def payment_reason_flags(reasons):
+    codes = {code: severity for code, severity in reasons}
+    billing = codes.get('MISSING_BILLING_MONTHS')
+    return dict(paging_uncertain='O' if 'NHIS_PAYMENT_PAGING_UNCERTAIN' in codes else 'X',
+                missing_billing=billing if billing in ('FAIL', 'NEEDS_REVIEW') else 'X',
+                pages_incomplete='O' if 'PAGES_INCOMPLETE' in codes else 'X')
+
+
+def _phase_shift(scan, template):
+    """Translation (dx, dy) in template pixels that maps the template onto the scan, and peak strength."""
+    import numpy as np
+    from PIL import Image
+    size = (template.width // 2, template.height // 2)
+    a = 255.0 - np.asarray(scan.resize(size, Image.Resampling.BILINEAR), dtype=np.float64)
+    b = 255.0 - np.asarray(template.resize(size, Image.Resampling.BILINEAR), dtype=np.float64)
+    a -= a.mean()
+    b -= b.mean()
+    cross = np.fft.fft2(a) * np.conj(np.fft.fft2(b))
+    cross /= np.abs(cross) + 1e-9
+    surface = np.real(np.fft.ifft2(cross))
+    y, x = np.unravel_index(int(np.argmax(surface)), surface.shape)
+    if y > surface.shape[0] // 2:
+        y -= surface.shape[0]
+    if x > surface.shape[1] // 2:
+        x -= surface.shape[1]
+    strength = (surface.max() - surface.mean()) / (surface.std() or 1.0)
+    return 2 * x, 2 * y, strength
+
+
+def _translate(image, dx, dy):
+    from PIL import Image
+    return image.transform(image.size, Image.Transform.AFFINE, (1, 0, dx, 0, 1, dy), fillcolor=255)
+
+
+def _mark(spec, scan, template, page_width, page_height, inset=0.0):
+    from demo.backend.ocr import admin_consent_scan as consent
+    ratios = []
+    for key in ('agree.동의함', 'agree.동의하지 않음'):
+        field = spec.fields.get(key)
+        box = [field['box'][0] + inset, field['box'][1] + inset, field['box'][2] - inset,
+               field['box'][3] - inset] if field else None
+        ratios.append(consent._extra_ink_ratio(scan, template, box, page_width, page_height) if field else 0.0)
+    selected = [ratio > .035 for ratio in ratios]
+    mark = 'BOTH' if all(selected) else 'AGREE' if selected[0] else 'DISAGREE' if selected[1] else 'NONE'
+    signature = spec.fields.get('signature')
+    signed = bool(signature and consent._extra_ink_ratio(scan, template, signature['box'], page_width,
+                                                          page_height) > .012)
+    return mark, ratios, signed
+
+
+def ratio_bin(value):
+    return 'R_LT1' if value < .01 else 'R1_3_5' if value <= .035 else 'R_GE3_5'
+
+
+def consent_stage(path, page_texts=None):
+    """Production mark reading reproduced step by step, plus an alignment shadow; codes only."""
+    import pymupdf
+    from demo.backend.forms import coords as form_coords
+    from demo.backend.ocr import admin_consent_scan as consent
+    from engine_v2.pipeline.privacy import mask_rrn
+    result = dict(spec='SPEC_OK', load='LOAD_OK', pages='NA', title='TITLE_NONE', aspect='NA', shift='NA',
+                  peak='NA', mark='NA', aligned='NA', aligned_inner='NA', inner_strong='NA', agree_ratio='NA', disagree_ratio='NA', sign='NA',
+                  aligned_sign='NA')
+    spec = form_coords.load('서식5')
+    if spec is None or not spec.available:
+        result['spec'] = 'SPEC_UNAVAILABLE'
+        return result
+    with pymupdf.open(spec.template) as template_pdf:
+        page = template_pdf[0]
+        page_width, page_height = page.rect.width, page.rect.height
+        from io import BytesIO
+        from PIL import Image
+        pix = page.get_pixmap(matrix=pymupdf.Matrix(1200 / page_width, 1200 / page_width), alpha=False)
+        template = Image.open(BytesIO(pix.tobytes('png'))).convert('L')
+    try:
+        with pymupdf.open(path) as document:
+            count = document.page_count
+            if page_texts is None:
+                page_texts = [re.sub(r'\s+', '', mask_rrn(p.get_text())) for p in document]
+        raw = consent._page_image(Path(path), 1200)
+    except Exception:
+        result['load'] = 'LOAD_ERROR'
+        return result
+    result['pages'] = 'P1' if count == 1 else 'P2P'
+    hits = [index for index, text in enumerate(page_texts or []) if CONSENT_TITLE in text]
+    result['title'] = 'TITLE_NONE' if not hits else 'TITLE_FIRST' if hits[0] == 0 else 'TITLE_LATER'
+    difference = abs((raw.height / raw.width) / (template.height / template.width) - 1) * 100
+    result['aspect'] = 'A_LE_2' if difference <= 2 else 'A_2_5' if difference <= 5 else 'A_GT_5'
+    scan = raw.resize(template.size)
+    mark, ratios, signed = _mark(spec, scan, template, page_width, page_height)
+    result.update(mark='MARK_' + mark, agree_ratio=ratio_bin(ratios[0]), disagree_ratio=ratio_bin(ratios[1]),
+                  sign='SIGN_O' if signed else 'SIGN_X')
+    dx, dy, strength = _phase_shift(scan, template)
+    shift_pt = (dx * dx + dy * dy) ** .5 * page_width / 1200
+    result['shift'] = 'S_LE_3' if shift_pt <= 3 else 'S_3_10' if shift_pt <= 10 else 'S_GT_10'
+    result['peak'] = 'PEAK_STRONG' if strength >= PEAK_STRONG else 'PEAK_WEAK'
+    moved = _translate(scan, dx, dy)
+    aligned_mark, _, aligned_signed = _mark(spec, moved, template, page_width, page_height)
+    inner_mark, _, _ = _mark(spec, moved, template, page_width, page_height, inset=INNER_PT)
+    # Production candidate: the inner reading counts only with a strong alignment; otherwise it is held
+    # and the document stays NEEDS_REVIEW exactly as today.
+    strong = result['peak'] == 'PEAK_STRONG'
+    result.update(aligned='ALIGNED_' + aligned_mark, aligned_inner='INNER_' + inner_mark,
+                  inner_strong='STRONG_' + inner_mark if strong else 'STRONG_HOLD',
+                  aligned_sign='ALIGNED_SIGN_O' if aligned_signed else 'ALIGNED_SIGN_X')
+    return result
+
+
+
 # ---------------------------------------------------------------- run: per document
 
 
@@ -524,11 +788,59 @@ def g1_shadow(trace, path, row):
             row['g1_decision'][name] = _assess(path, kind, ocr)[0]
 
 
+def _quality(path):
+    from demo.backend.ocr.file_evidence import objective_image_quality
+    value = round(objective_image_quality(str(path)), 2)
+    return {1.0: 'Q10', .9: 'Q09', .7: 'Q07', .5: 'Q05'}.get(value, 'Q_OTHER')
+
+
+def _severity(reasons, code):
+    found = [severity for name, severity in reasons if name == code]
+    return found[0] if found and found[0] in ('FAIL', 'NEEDS_REVIEW') else 'X'
+
+
+def consent_shadow(trace, path, row, ocr):
+    stage = consent_stage(path, trace.page_texts)
+    field = ocr.fields.get('동의여부')
+    expected = 'MARK_AGREE' if field == '동의함' else 'MARK_DISAGREE' if field == '동의하지 않음' else None
+    if stage['mark'] == 'NA':
+        stage['prod_match'] = 'NA'
+    else:
+        stage['prod_match'] = 'O' if (stage['mark'] == expected if expected else
+                                      stage['mark'] in ('MARK_NONE', 'MARK_BOTH')) else 'X'
+    stage['quality'] = _quality(path)
+    stage['low_quality'] = _severity(row['reasons'], 'LOW_IMAGE_QUALITY')
+    row['consent'] = stage
+    with c1_patch():
+        row['c1'] = _assess(path, row['form'], deepcopy(ocr))[0]
+
+
+def payment_shadow(trace, path, row, ocr):
+    pages, result = trace.payment if trace.payment is not None else (None, None)
+    route, stage, detail = payment_table_stage(pages, result)
+    row['payment'] = dict(route=route, stage=stage, detail=detail, **payment_evidence(ocr),
+                          **payment_reason_flags(row['reasons']))
+    if route != 'GOV':
+        # P1 only wraps the government-form GROUPS header call; other routes cannot diverge.
+        row['p1'] = {key: dict(paging_uncertain=row['payment']['paging_uncertain'],
+                               missing_billing=row['payment']['missing_billing'], decision=row['decision'])
+                     for key in P1_KEYS}
+        return
+    row['p1'] = {}
+    for key, margin in zip(P1_KEYS, P1_MARGINS):
+        shadow = _shadow_read(trace, path, lambda stack, m=margin: stack.enter_context(p1_patch(m)))
+        decision, reasons = _assess(path, _kind(shadow.detected_doc_type), shadow)
+        flags = payment_reason_flags(reasons)
+        row['p1'][key] = dict(paging_uncertain=flags['paging_uncertain'], missing_billing=flags['missing_billing'],
+                              decision=decision)
+
+
 def blank_row(key, code='NONE'):
     return dict(schema_version=VERSION, key=key, code=code, form='X', tier='none', decision='NOT_ASSESSED',
                 reasons=[], exit=None, reclass=None, exceptions={}, ocr_chars='NA', cause=None,
                 struct=None, scan=None, scan_code=None, text_all=None,
-                g1={name: None for name in CANDIDATES}, g1_decision={name: None for name in CANDIDATES})
+                g1={name: None for name in CANDIDATES}, g1_decision={name: None for name in CANDIDATES},
+                consent=None, c1=None, payment=None, p1=None, shadow_errors=[])
 
 
 def process(path, key, trace):
@@ -549,7 +861,20 @@ def process(path, key, trace):
         row['text_all'] = text_all_type(path)
         row['scan'], row['scan_code'] = scan_type(path)
         row['cause'] = cause_code(row['exit'], trace, row['struct'], row['text_all'])
-    g1_shadow(trace, path, row)
+    # A failing shadow keeps the baseline row; only the stage name is recorded.
+    for name, applies, function in (('G1', True, lambda: g1_shadow(trace, path, row)),
+                                    ('CONSENT', row['form'] == 'ADMIN_INFO_CONSENT',
+                                     lambda: consent_shadow(trace, path, row, ocr)),
+                                    ('PAYMENT', row['form'] == 'NHIS_PAYMENT',
+                                     lambda: payment_shadow(trace, path, row, ocr))):
+        if not applies:
+            continue
+        try:
+            function()
+        except batch.BatchError:
+            raise
+        except Exception:
+            row['shadow_errors'].append(name)
     trace.classified.clear()
     trace.ocr_cache.clear()
     return row
@@ -562,7 +887,8 @@ def _code_in(value, allowed, optional=False):
 def validate_row(row):
     req = batch._require
     keys = {'schema_version', 'key', 'code', 'form', 'tier', 'decision', 'reasons', 'exit', 'reclass',
-            'exceptions', 'ocr_chars', 'cause', 'struct', 'scan', 'scan_code', 'text_all', 'g1', 'g1_decision'}
+            'exceptions', 'ocr_chars', 'cause', 'struct', 'scan', 'scan_code', 'text_all', 'g1', 'g1_decision',
+            'consent', 'c1', 'payment', 'p1', 'shadow_errors'}
     req(isinstance(row, dict) and set(row) == keys and row['schema_version'] == VERSION)
     req(isinstance(row['key'], str) and timing.KEY_RE.fullmatch(row['key']) is not None)
     req(row['code'] in ROW_CODES and row['form'] in KINDS and row['tier'] in TIERS and row['decision'] in DECISIONS)
@@ -585,6 +911,35 @@ def validate_row(row):
     req(set(row['g1']) == set(CANDIDATES) and all(_code_in(v, KINDS, True) for v in row['g1'].values()))
     req(set(row['g1_decision']) == set(CANDIDATES)
         and all(_code_in(v, DECISIONS, True) for v in row['g1_decision'].values()))
+    req(isinstance(row['shadow_errors'], list) and set(row['shadow_errors']) <= {'G1', 'CONSENT', 'PAYMENT'})
+    if row['consent'] is not None:
+        c = row['consent']
+        allowed = dict(spec=('SPEC_OK', 'SPEC_UNAVAILABLE'), load=('LOAD_OK', 'LOAD_ERROR'), pages=('P1', 'P2P', 'NA'),
+                       title=('TITLE_FIRST', 'TITLE_LATER', 'TITLE_NONE'), aspect=('A_LE_2', 'A_2_5', 'A_GT_5', 'NA'),
+                       shift=('S_LE_3', 'S_3_10', 'S_GT_10', 'NA'), peak=('PEAK_STRONG', 'PEAK_WEAK', 'NA'),
+                       mark=tuple('MARK_' + m for m in MARKS) + ('NA',),
+                       aligned=tuple('ALIGNED_' + m for m in MARKS) + ('NA',),
+                       aligned_inner=tuple('INNER_' + m for m in MARKS) + ('NA',),
+                       inner_strong=tuple('STRONG_' + m for m in MARKS) + ('STRONG_HOLD', 'NA'),
+                       agree_ratio=('R_LT1', 'R1_3_5', 'R_GE3_5', 'NA'),
+                       disagree_ratio=('R_LT1', 'R1_3_5', 'R_GE3_5', 'NA'), sign=('SIGN_O', 'SIGN_X', 'NA'),
+                       aligned_sign=('ALIGNED_SIGN_O', 'ALIGNED_SIGN_X', 'NA'), prod_match=('O', 'X', 'NA'),
+                       quality=('Q10', 'Q09', 'Q07', 'Q05', 'Q_OTHER'), low_quality=('FAIL', 'NEEDS_REVIEW', 'X'))
+        req(isinstance(c, dict) and set(c) == set(allowed) and all(c[k] in v for k, v in allowed.items()))
+    req(_code_in(row['c1'], DECISIONS, True))
+    if row['payment'] is not None:
+        p = row['payment']
+        allowed = dict(route=('GOV', 'LEGACY', 'NOT_EXTRACTED'), stage=PAYMENT_STAGES, detail=PAYMENT_DETAILS,
+                       paging=PAGING_STATES, fallback=('O', 'X', 'NA'), period=('READABLE', 'OTHER', 'ABSENT'),
+                       amounts_certain=('O', 'X', 'NA'), paging_uncertain=('O', 'X'),
+                       missing_billing=('FAIL', 'NEEDS_REVIEW', 'X'), pages_incomplete=('O', 'X'),
+                       **{key: ('O', 'X', 'NA') for key in COMPLETENESS_KEYS})
+        req(isinstance(p, dict) and set(p) == set(allowed) and all(p[k] in v for k, v in allowed.items()))
+    if row['p1'] is not None:
+        req(isinstance(row['p1'], dict) and set(row['p1']) == set(P1_KEYS) and all(
+            isinstance(v, dict) and set(v) == {'paging_uncertain', 'missing_billing', 'decision'}
+            and v['paging_uncertain'] in ('O', 'X') and v['missing_billing'] in ('FAIL', 'NEEDS_REVIEW', 'X')
+            and v['decision'] in DECISIONS for v in row['p1'].values()))
     return row
 
 
@@ -613,6 +968,10 @@ def summarize(rows, meta):
             lines.append(_line(title, value, n))
     x = [r for r in done if r['form'] == 'X']
     lines.append(_line('XCOUNT', len(x)))
+    five = ('HIDDEN_TEXT_LAYER', 'FEW_CHARS_DISCARD', 'FIRST_IMAGE_LATER_TEXT', 'PREPROCESS_ERROR', 'BACKGROUND_ONLY')
+    lines.append('XCAUSE5 ' + ' '.join(five) + ' OTHER_CAUSES')
+    causes = Counter(r['cause'] for r in x)
+    lines.append(_line('XCAUSE5', *(causes[c] for c in five), len(x) - sum(causes[c] for c in five)))
     tables = (
         ('XEXIT exit n', lambda r: (r['exit'],)),
         ('XCAUSE cause n', lambda r: (r['cause'],)),
@@ -658,7 +1017,74 @@ def summarize(rows, meta):
         pairs = Counter((r['decision'], r['g1_decision'][name]) for r in done if r['g1'][name] != r['form'])
         for (a, b), n in sorted(pairs.items(), key=lambda item: tuple(map(str, item[0]))):
             lines.append(_line('G1_DECISION', name, a, b, n))
+    lines.extend(_stage_summary(done))
     return '\n'.join(lines) + '\n'
+
+
+def _counted(lines, header, items):
+    title = header.split()[0]
+    lines.append(header)
+    for values, n in sorted(Counter(items).items(), key=lambda item: tuple(map(str, item[0]))):
+        lines.append(_line(title, *values, n))
+
+
+def _stage_summary(done):
+    lines = []
+    for name, n in sorted(Counter(e for r in done for e in r['shadow_errors']).items()):
+        lines.append(_line('SHADOW_ERROR', name, n))
+    consent = [r for r in done if r['consent'] is not None]
+    lines.append(_line('CONSENT_COUNT', len(consent)))
+    for field in ('spec', 'load', 'pages', 'title', 'aspect', 'shift', 'peak', 'mark', 'aligned', 'aligned_inner',
+                  'inner_strong', 'agree_ratio',
+                  'disagree_ratio', 'sign', 'aligned_sign', 'prod_match', 'quality', 'low_quality'):
+        _counted(lines, f'CONSENT_{field.upper()} code n', ((r['consent'][field],) for r in consent))
+    lines.append('CONSENT_VARIANT variant READ_OK READ_AGREE READ_DISAGREE DIFF_FROM_PROD HELD_WEAK')
+    for variant, field in (('ALIGNED', 'aligned'), ('INNER', 'aligned_inner'), ('INNER_STRONG', 'inner_strong')):
+        values = [(r['consent']['mark'].split('_', 1)[-1], r['consent'][field].split('_', 1)[-1])
+                  for r in consent if r['consent'][field] != 'NA']
+        lines.append(_line('CONSENT_VARIANT', variant,
+                           sum(v in ('AGREE', 'DISAGREE') for _, v in values),
+                           sum(v == 'AGREE' for _, v in values), sum(v == 'DISAGREE' for _, v in values),
+                           sum(v != 'HOLD' and v != p for p, v in values), sum(v == 'HOLD' for _, v in values)))
+    _counted(lines, 'CONSENT_MARK prod aligned inner peak n',
+             ((r['consent']['mark'], r['consent']['aligned'], r['consent']['aligned_inner'], r['consent']['peak'])
+              for r in consent))
+    _counted(lines, 'CONSENT_FAILSTAGE title aspect shift mark n',
+             ((r['consent']['title'], r['consent']['aspect'], r['consent']['shift'], r['consent']['mark'])
+              for r in consent if r['consent']['mark'] not in ('MARK_AGREE', 'MARK_DISAGREE')))
+    _counted(lines, 'CONSENT_DECISION mark quality low_quality decision n',
+             ((r['consent']['mark'], r['consent']['quality'], r['consent']['low_quality'], r['decision'])
+              for r in consent))
+    _counted(lines, 'C1 before after n', ((r['decision'], r['c1']) for r in consent))
+    lines.append(_line('C1_FAIL_TO_REVIEW', sum(r['decision'] == 'FAIL' and r['c1'] == 'NEEDS_REVIEW'
+                                                for r in consent)))
+    payment = [r for r in done if r['payment'] is not None]
+    lines.append(_line('PAYMENT_COUNT', len(payment)))
+    _counted(lines, 'PAYMENT route stage detail n',
+             ((r['payment']['route'], r['payment']['stage'], r['payment']['detail']) for r in payment))
+    _counted(lines, 'PAYMENT_REASON paging_uncertain missing_billing stage detail n',
+             ((r['payment']['paging_uncertain'], r['payment']['missing_billing'], r['payment']['stage'],
+               r['payment']['detail']) for r in payment))
+    _counted(lines, 'PAYMENT_PAGING state fallback paging_uncertain n',
+             ((r['payment']['paging'], r['payment']['fallback'], r['payment']['paging_uncertain']) for r in payment))
+    _counted(lines, 'PAYMENT_COMPLETE key value paging_uncertain n',
+             ((key, r['payment'][key], r['payment']['paging_uncertain']) for r in payment for key in COMPLETENESS_KEYS))
+    _counted(lines, 'PAYMENT_PERIOD state amounts_certain missing_billing n',
+             ((r['payment']['period'], r['payment']['amounts_certain'], r['payment']['missing_billing'])
+              for r in payment))
+    lines.append('P1 margin PAGING_GONE PAGING_NEW BILLING_GONE BILLING_NEW DECISION_CHANGED')
+    for key in P1_KEYS:
+        after = [(r, r['p1'][key]) for r in payment if r['p1'] is not None]
+        lines.append(_line('P1', key,
+                           sum(r['payment']['paging_uncertain'] == 'O' and a['paging_uncertain'] == 'X' for r, a in after),
+                           sum(r['payment']['paging_uncertain'] == 'X' and a['paging_uncertain'] == 'O' for r, a in after),
+                           sum(r['payment']['missing_billing'] != 'X' and a['missing_billing'] == 'X' for r, a in after),
+                           sum(r['payment']['missing_billing'] == 'X' and a['missing_billing'] != 'X' for r, a in after),
+                           sum(r['decision'] != a['decision'] for r, a in after)))
+    _counted(lines, 'P1_DECISION margin before after n',
+             ((key, r['decision'], r['p1'][key]['decision']) for r in payment for key in P1_KEYS
+              if r['p1'] is not None and r['p1'][key]['decision'] != r['decision']))
+    return lines
 
 
 # ---------------------------------------------------------------- run

@@ -57,3 +57,27 @@ candidate rules would change, without changing production behaviour.
 - Tests use synthetic PDFs and a content-aware fake OCR (uniform bitmaps produce no
   words) so each reproduced condition runs in milliseconds; real-engine checks of
   the same conditions belong to the task report, not the unit tests.
+
+## Consent mark and payment table stages (row format 2)
+
+- Format 2 adds `consent`, `c1`, `payment`, `p1` and `shadow_errors`. A failing
+  shadow keeps the baseline row and records only the stage name (G1, CONSENT,
+  PAYMENT); guard violations still abort the document.
+- Consent stages reproduce `admin_consent_scan` step by step (template at 1200 px,
+  first page resized to the template, ink ratio > 0.035). Never assume the
+  production reading works on rasters: a blank 300 dpi raster of the vector form
+  already exceeds the ratio in both checkboxes (printed borders render differently),
+  so production returns BOTH and the existing scenario only covers vector-identical
+  input. The alignment shadow uses phase correlation (translation only) and an
+  inner-box variant that excludes `INNER_PT` per side; always report wrong-pass
+  counts (blank forms read as a single mark) next to recall.
+- Payment stages use the pages and result passed to `nhis_payment.extract` during
+  the baseline read (memory only). The first failing validation group gives
+  HEADER/COLUMN/ROW/FORMAT/ARITH/TABLE_OK. HEADER_BAND_CUT means the government
+  form fails component headers but passes with the largest P1 margin.
+- P1 wraps only the GROUPS call of `nhis_payment_gov._header_columns` and returns
+  copies of the group words with `y1 - margin`, moving only `group_bottom`. Other
+  routes never call it, so their P1 result is the baseline. C1 patches
+  `doc_check.ESSENTIAL_FIELD_UNREADABLE_CODES` without the two consent codes for a
+  re-assessment of a deep copy of the baseline reading. Tests assert both
+  production objects are restored.

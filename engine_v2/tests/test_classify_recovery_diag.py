@@ -172,6 +172,7 @@ def test_run_records_exit_and_cause_for_each_reproduced_condition(tmp_path, fake
     # The 300 dpi batch_assess reading recovers every unclassified condition.
     assert all(r['scan'] == 'NHIS_PAYMENT' for r in rows(out) if r['form'] == 'X')
     assert 'XCAUSE PREPROCESS_ERROR 1' in printed and 'XEXC preprocess ValueError 1' in printed
+    assert 'XCAUSE5 1 1 1 1 2 0' in printed
     summary = (out / 'summary.txt').read_text()
     for text in (printed, summary, (out / 'run.json').read_text()):
         assert SENTINEL not in text and 'FAKE-input' not in text and str(tmp_path) not in text
@@ -297,3 +298,162 @@ def test_crosstab_warns_when_roots_differ_and_rejects_bad_rows(tmp_path, fake_oc
     bad.write_text('{"key": "nope"}\n')
     assert tool.main(['crosstab', '--timing', str(bad), '--scan', str(tmp_path / 'scan' / 'results.jsonl')]) == 2
     assert capsys.readouterr().out.strip() == 'ERROR INPUT_INVALID'
+
+
+# ---------------------------------------------------------------- consent mark and payment table stages
+
+
+@pytest.fixture(scope='module')
+def payment_pages():
+    """Synthetic government payment form with exact text-layer words as OCR output."""
+    from copy import deepcopy
+    from engine_v2.pipeline.ocr import OcrResult
+    from engine_v2.pipeline.preprocess import PageImage, PageSource
+    from engine_v2.tools import documentai_corpus_v2 as v2
+    source = next(s for s in v2.sources(0) if s.doc == 'nhis_payment')
+    image, words, _ = v2.rendered(source)
+    page = PageImage(0, PageSource.UPLOAD, (595.0, 842.0), png=b'', pixel_size=image.size)
+    return page, deepcopy(words)
+
+
+def _payment(payment_pages, cut):
+    """Optionally lower the group-header boxes as the own engine did (band-cut reproduction)."""
+    from copy import deepcopy
+    from engine_v2.pipeline.ocr import OcrResult, OcrWord
+    page, words = payment_pages
+    height = page.pixel_size[1]
+    changed = []
+    for word in deepcopy(words):
+        if cut and word.text.replace(' ', '') in ('고지금액', '납부금액'):
+            x0, y0, x1, y1 = word.bbox_px
+            word = OcrWord(word.text, word.confidence, (x0, y0, x1, y1 + .002 * height))
+        changed.append(word)
+    return [(page, OcrResult('own', changed))]
+
+
+def test_payment_stage_names_the_header_band_cut_and_p1_recovers_it(payment_pages):
+    from engine_v2.extractors import nhis_payment, nhis_payment_gov as gov
+    original = gov._header_columns
+    clean = _payment(payment_pages, cut=False)
+    assert tool.payment_table_stage(clean, nhis_payment.extract(clean)) == ('GOV', 'TABLE_OK', 'NONE')
+    cut = _payment(payment_pages, cut=True)
+    result = nhis_payment.extract(cut)
+    assert not {c.name: c.passed for c in result.validations}['payment_component_headers']
+    assert tool.payment_table_stage(cut, result) == ('GOV', 'HEADER', 'HEADER_BAND_CUT')
+    with tool.p1_patch(.3):
+        relaxed = {c.name: c.passed for c in nhis_payment.extract(cut).validations}
+    assert relaxed['payment_component_headers'] and relaxed['payment_columns']
+    with tool.p1_patch(.3):
+        # The margin never breaks a reading that already passes.
+        assert tool.payment_table_stage(clean, nhis_payment.extract(clean))[1] == 'TABLE_OK'
+    assert gov._header_columns is original
+    assert tool.payment_table_stage(None, None) == ('NOT_EXTRACTED', 'NOT_EXTRACTED', 'NONE')
+
+
+def test_payment_evidence_and_reason_flags_are_codes_only():
+    from demo.backend.ocr.base import OcrResult
+    from engine_v2.extractors import payment_completeness, payment_period
+    ocr = OcrResult(fields={payment_completeness.FIELD: json.dumps({'period_status': 'READABLE',
+                                                                    'printed_total_observed': True}),
+                            payment_period.FIELD: '{not json'})
+    evidence = tool.payment_evidence(ocr)
+    assert evidence['paging'] == 'ABSENT' and evidence['fallback'] == 'NA'
+    assert evidence['period_status'] == 'O' and evidence['printed_total_observed'] == 'O'
+    assert evidence['arithmetic_complete'] == 'X' and evidence['period'] == 'OTHER'
+    flags = tool.payment_reason_flags([['MISSING_BILLING_MONTHS', 'NEEDS_REVIEW'],
+                                       ['NHIS_PAYMENT_PAGING_UNCERTAIN', 'NEEDS_REVIEW']])
+    assert flags == dict(paging_uncertain='O', missing_billing='NEEDS_REVIEW', pages_incomplete='X')
+
+
+def test_c1_shadow_turns_only_the_consent_quality_fail_into_review():
+    from demo.backend.ocr.base import OcrResult
+    from demo.backend.rules import doc_check
+    from demo.backend.rules.doc_types import DocType
+    original = doc_check.ESSENTIAL_FIELD_UNREADABLE_CODES
+    req = tool.timing.requirement('ADMIN_INFO_CONSENT')
+
+    def finalize(code):
+        ocr = OcrResult(detected_doc_type=DocType.ADMIN_INFO_CONSENT, confidence=.9, image_quality=.5)
+        result = doc_check.CheckResult('NEEDS_REVIEW', [doc_check.CheckFinding(code, 'x', severity='NEEDS_REVIEW')])
+        return doc_check.finalize_image_quality(req, ocr, result, 'pdf').status
+    assert finalize('ADMIN_CONSENT_MARK_UNREADABLE') == 'FAIL'
+    with tool.c1_patch():
+        assert finalize('ADMIN_CONSENT_MARK_UNREADABLE') == 'NEEDS_REVIEW'
+        assert finalize('ADMIN_CONSENT_SIGNATURE_UNREADABLE') == 'NEEDS_REVIEW'
+        assert finalize('REQUIRED_FIELD_UNREADABLE') == 'FAIL'
+    assert doc_check.ESSENTIAL_FIELD_UNREADABLE_CODES is original
+
+
+def _consent_pdf(path, *, mark=None, raster_dpi=None, shift_pt=0):
+    import pymupdf
+    from demo.backend.forms import coords
+    spec = coords.load('서식5')
+    with pymupdf.open(spec.template) as document:
+        page = document[0]
+        if mark:
+            box = pymupdf.Rect(*spec.fields[mark]['box'])
+            page.draw_line((box.x0 + 1, box.y0 + 1), (box.x1 - 1, box.y1 - 1), color=(0, 0, 0), width=1.3)
+            page.draw_line((box.x0 + 1, box.y1 - 1), (box.x1 - 1, box.y0 + 1), color=(0, 0, 0), width=1.3)
+        if raster_dpi is None:
+            document.save(path)
+            return path
+        pix = page.get_pixmap(dpi=raster_dpi, alpha=False)
+        width, height = page.rect.width, page.rect.height
+    from PIL import Image
+    image = Image.open(io.BytesIO(pix.tobytes('png'))).convert('RGB')
+    canvas = Image.new('RGB', image.size, 'white')
+    canvas.paste(image, (int(shift_pt * image.width / width), int(shift_pt * image.width / width)))
+    with pymupdf.open() as out:
+        out.new_page(width=width, height=height).insert_image(pymupdf.Rect(0, 0, width, height), stream=_png(canvas))
+        out.save(path)
+    return path
+
+
+def test_consent_stage_reproduces_production_and_flags_print_differences(tmp_path):
+    from demo.backend.ocr.admin_consent_scan import inspect_admin_consent_scan
+    vector = _consent_pdf(tmp_path / 'vector.pdf', mark='agree.동의함')
+    stage = tool.consent_stage(vector)
+    assert inspect_admin_consent_scan(str(vector))['동의여부'] == '동의함'
+    assert (stage['mark'], stage['aligned'], stage['shift'], stage['peak']) == (
+        'MARK_AGREE', 'ALIGNED_AGREE', 'S_LE_3', 'PEAK_STRONG')
+    blank = _consent_pdf(tmp_path / 'blank.pdf', raster_dpi=300)
+    stage = tool.consent_stage(blank)
+    # A blank raster of the printed form already exceeds the production ink ratio in both boxes.
+    assert inspect_admin_consent_scan(str(blank))['동의여부'] == '확인필요'
+    assert stage['mark'] == 'MARK_BOTH' and stage['agree_ratio'] == 'R_GE3_5'
+    assert stage['aligned_inner'] == 'INNER_NONE' and stage['inner_strong'] in ('STRONG_NONE', 'STRONG_HOLD')
+    moved = tool.consent_stage(_consent_pdf(tmp_path / 'moved.pdf', raster_dpi=300, shift_pt=8))
+    assert moved['shift'] in ('S_3_10', 'S_GT_10')
+    # Wrong-pass direction: a blank form must never read as a single mark.
+    assert moved['aligned_inner'] not in ('INNER_AGREE', 'INNER_DISAGREE')
+    assert moved['inner_strong'] not in ('STRONG_AGREE', 'STRONG_DISAGREE')
+    assert tool.consent_stage(tmp_path / 'missing.pdf')['load'] == 'LOAD_ERROR'
+
+
+def test_run_adds_consent_and_payment_rows(tmp_path, fake_ocr):
+    consent_root, payment_root = tmp_path / 'consent', tmp_path / 'payment'
+    consent_root.mkdir()
+    payment_root.mkdir()
+    _consent_pdf(consent_root / 'consent.pdf', raster_dpi=100)
+    build(payment_root / 'payment.pdf', 'plain')
+    fake_ocr['title'] = ('행정정보', '공동이용', '사전동의서')
+    tool.run(consent_root, tmp_path / 'out_consent')
+    (consent,) = rows(tmp_path / 'out_consent')
+    assert consent['form'] == 'ADMIN_INFO_CONSENT' and consent['shadow_errors'] == []
+    # 100 dpi original: low quality; the mark cannot be read, so production FAILs and C1 reviews.
+    assert consent['consent']['quality'] == 'Q05' and consent['consent']['mark'] == 'MARK_BOTH'
+    assert consent['decision'] == 'FAIL' and consent['c1'] == 'NEEDS_REVIEW'
+    assert consent['payment'] is None and consent['p1'] is None
+    summary = (tmp_path / 'out_consent' / 'summary.txt').read_text()
+    assert 'C1_FAIL_TO_REVIEW 1' in summary and 'CONSENT_COUNT 1' in summary
+    assert any(line.startswith('CONSENT_VARIANT INNER_STRONG ') for line in summary.splitlines())
+    fake_ocr['title'] = PAYMENT_TITLE
+    tool.run(payment_root, tmp_path / 'out_payment')
+    (payment,) = rows(tmp_path / 'out_payment')
+    assert payment['form'] == 'NHIS_PAYMENT' and payment['shadow_errors'] == []
+    assert payment['payment']['route'] == 'LEGACY' and payment['payment']['stage'] == 'HEADER'
+    # P1 wraps only the government-form header call, so a legacy reading is copied unchanged.
+    assert all(value['decision'] == payment['decision'] for value in payment['p1'].values())
+    assert payment['consent'] is None and payment['c1'] is None
+    summary = (tmp_path / 'out_payment' / 'summary.txt').read_text()
+    assert 'PAYMENT_COUNT 1' in summary and 'P1 m01 0 0 0 0 0' in summary

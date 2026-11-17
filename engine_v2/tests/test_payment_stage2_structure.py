@@ -86,7 +86,7 @@ def test_uncertain_adjustment_cannot_make_form_complete(defect):
 
 
 @pytest.mark.parametrize("scale", [.7, 1, 1.7])
-@pytest.mark.xfail(strict=True, reason="C2 header-edge recovery held")
+# 11-18 O3: the 0.1 %p header-band slack recovers clipped upper fragments (was strict xfail).
 def test_clipped_upper_fragments_require_complete_unique_heading_evidence(scale):
     cells, size = shapes.clipped_headers()
     result = extract(cells, size, scale=scale)

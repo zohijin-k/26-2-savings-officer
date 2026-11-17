@@ -102,8 +102,8 @@ def test_short_month_boxes_can_select_legacy_but_no_billing_finding_is_not_pass(
     assert check_document(requirement(), result).status == "NEEDS_REVIEW"
 
 
-@pytest.mark.parametrize("shape", ["adjustment", pytest.param("clipped", marks=pytest.mark.xfail(
-    strict=True, reason="C2 header-edge recovery held")), "fused"])
+# 11-18 O3: "clipped" passes with the 0.1 %p header-band slack (was strict xfail).
+@pytest.mark.parametrize("shape", ["adjustment", "clipped", "fused"])
 def test_repaired_shapes_traverse_actual_image_upload_without_changing_average(client, tmp_path, monkeypatch, shape):
     if shape == "adjustment":
         cells, size, _ = shapes.adjustment()
@@ -128,8 +128,8 @@ def test_unrecognized_adjustment_stays_review_through_actual_upload(client, tmp_
     assert stored["fields"]["양식판독상태"] == "불완전"
 
 
-@pytest.mark.parametrize("shape", ["adjustment", pytest.param("clipped", marks=pytest.mark.xfail(
-    strict=True, reason="C2 header-edge recovery held")), "fused"])
+# 11-18 O3: "clipped" passes with the 0.1 %p header-band slack (was strict xfail).
+@pytest.mark.parametrize("shape", ["adjustment", "clipped", "fused"])
 def test_repaired_complete_table_cannot_override_independent_period_conflict(shape):
     from demo.backend.rules.doc_check import check_document
     if shape == "adjustment":

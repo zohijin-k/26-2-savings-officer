@@ -158,6 +158,9 @@ def _headers_match(clusters, expected):
     return True
 
 
+#: Column-header band slack in page-height percent points (smallest measured margin, 11-18 P1).
+HEADER_BAND_SLACK = 0.1
+
 def _header_columns(words, expected=HEADERS):
     clusters = _header_clusters(words)
     return clusters if _headers_match(clusters, expected) else None
@@ -248,7 +251,10 @@ def _monthly_table(lines, *, allow_correction, metadata_bottom):
     groups = _header_columns(group_words, expected=GROUPS)
     group_ok = groups is not None
     checks.append(common.Validation("payment_group_headers", group_ok))
-    group_bottom = max((word.y1 for group in (groups or []) for word in group), default=float('inf'))
+    # OCR boxes of the group labels can sit slightly lower than the glyphs; the column-header
+    # band therefore starts HEADER_BAND_SLACK (page-height %p) above the group-label bottom.
+    group_bottom = max((word.y1 for group in (groups or []) for word in group),
+                       default=float('inf')) - HEADER_BAND_SLACK
     sequence = [int(MONTH.fullmatch(squash(word.text))[1]) for word in months]
     months_ok = sequence == list(range(1, 13))
     checks.append(common.Validation("monthly_rows_found", months_ok))

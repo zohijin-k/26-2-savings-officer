@@ -1001,7 +1001,37 @@ def check_document(
     for finding in _check_payment_paging(ocr, req):
         if not any(f.code == finding.code and f.severity == finding.severity for f in result.findings):
             result.findings.append(finding)
+    _review_uncertain_absence(result)
     return finalize_image_quality(req, ocr, result, file_format)
+
+
+#: Absence FAIL codes without their own region-level proof (11-18 S4). MISSING_ADDRESS_DATES,
+#: the certain MISSING_BILLING_MONTHS and NHIS_HISTORY_PERIOD_MISSING already require the region
+#: itself to be read with confidence >= 0.85, so an unrelated reading cap does not weaken them.
+ABSENCE_FAIL_CODES = frozenset({CODE_MISSING_ADDRESS_HISTORY, "MISSING_REQUIRED_FIELD"})
+#: Evidence that the region behind an absence was not read reliably.
+UNCERTAIN_READING_CODES = frozenset({CODE_REQUIRED_FIELD_UNREADABLE, "LOW_OCR_CONFIDENCE"})
+UNCERTAIN_ABSENCE_PREFIX = "판독 불확실: "
+
+
+def _review_uncertain_absence(result: CheckResult) -> None:
+    """11-18 S4: 'absent' rejects only when the region was read reliably.
+
+    An absence FAIL that comes with an unreadable required field or low reading confidence
+    may be a reading failure, so it becomes NEEDS_REVIEW and says so. FAIL to NEEDS_REVIEW only.
+    """
+    if not any(f.code in UNCERTAIN_READING_CODES for f in result.findings):
+        return
+    changed = False
+    for finding in result.findings:
+        if finding.code in ABSENCE_FAIL_CODES and finding.severity == "FAIL":
+            finding.severity = "NEEDS_REVIEW"
+            if not finding.message.startswith(UNCERTAIN_ABSENCE_PREFIX):
+                finding.message = UNCERTAIN_ABSENCE_PREFIX + finding.message
+            changed = True
+    if changed:
+        result.status = ("FAIL" if any(f.severity == "FAIL" for f in result.findings) else
+                         "NEEDS_REVIEW" if any(f.severity == "NEEDS_REVIEW" for f in result.findings) else "PASS")
 
 
 def finalize_image_quality(

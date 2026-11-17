@@ -56,6 +56,7 @@ CODE_NHIS_SUBSCRIBER_IDENTITY_REVIEW = "NHIS_SUBSCRIBER_IDENTITY_REVIEW"
 CODE_PAGES_INCOMPLETE = "PAGES_INCOMPLETE"
 CODE_PAGES_UNREADABLE = "PAGES_UNREADABLE"
 CODE_PAGES_DUPLICATED = "PAGES_DUPLICATED"
+CODE_ISSUE_DATE_MISSING = "ISSUE_DATE_MISSING"
 CODE_PAYMENT_PAGING_UNCERTAIN = "NHIS_PAYMENT_PAGING_UNCERTAIN"
 CODE_IMAGE_RESOLUTION_TOO_LOW = "IMAGE_RESOLUTION_TOO_LOW"
 CODE_MISSING_ADDRESS_DATES = "MISSING_ADDRESS_DATES"
@@ -104,6 +105,7 @@ HOW_TO_FIX: dict[str, str] = {
     CODE_PAGES_UNREADABLE: "서류 전체가 선명하게 보이게 다시 촬영해 주세요. " + RETAKE_GUIDANCE,
     CODE_PAGES_INCOMPLETE: "빠진 쪽까지 모두 올려 주세요.",
     CODE_PAGES_DUPLICATED: "중복된 쪽을 확인하고 서로 다른 모든 쪽을 올려 주세요.",
+    CODE_ISSUE_DATE_MISSING: "발급일이 인쇄된 원본을 올려 주세요. 열람용·출력용 문서에는 발급일이 없을 수 있습니다.",
     "NHIS_HISTORY_PERIOD_UNREADABLE": "최근 변동내역의 범위는 담당자가 원본에서 확인합니다. " + RETAKE_GUIDANCE,
     "NHIS_HISTORY_PERIOD_MISSING": "조회기간에 최근 {years}년 전체가 포함되도록 다시 발급받아 올려 주세요.",
 }
@@ -160,7 +162,14 @@ REVIEW_ONLY_CODES = {
     CODE_UNKNOWN_DOCUMENT_TYPE,
     CODE_RECEIPT_AMOUNT_UNREADABLE,
     CODE_REQUIRED_FIELD_UNREADABLE,
+    CODE_ISSUE_DATE_MISSING,
 }
+
+#: Forms that print a 발급일 (11-18 S3). Job-package documents carry 결제일·면접일·응시일 instead.
+ISSUE_DATED_TYPES = frozenset({
+    DocType.RESIDENT_ABSTRACT, DocType.RESIDENT_CERTIFICATE, DocType.NHIS_PAYMENT, DocType.NHIS_QUALIFICATION,
+    DocType.NHIS_ACQUISITION_LOSS, DocType.INSURANCE_4, DocType.ADMIN_INFO_CONSENT,
+})
 
 ESSENTIAL_FIELD_UNREADABLE_CODES = {
     CODE_REQUIRED_FIELD_UNREADABLE,
@@ -633,6 +642,18 @@ def _check_document(
         findings.append(_finding(
             CODE_REQUIRED_FIELD_UNREADABLE,
             "서류의 발급일 라벨과 날짜를 확인하지 못했습니다. 담당자가 원본을 확인합니다.",
+            req, field="발급일",
+        ))
+    # PdfText's missing label date is already REQUIRED_FIELD_UNREADABLE above.
+    if (not ocr.is_encrypted and ocr.tier not in ("fixture", "pdftext")
+            and ocr.detected_doc_type in ISSUE_DATED_TYPES
+            and req.date_basis == "issue_date" and engine_doc.issue_date is None
+            and (req.min_issue_date is not None or req.max_issue_date is not None)):
+        # 11-18 S3: without a labeled or fixed-position issue date the period rule cannot run;
+        # never let the document pass on that rule, and never guess a date from elsewhere.
+        findings.append(_finding(
+            CODE_ISSUE_DATE_MISSING,
+            "서류에서 발급일을 확인하지 못해 발급 기간을 판정하지 못했습니다. 담당자가 원본을 확인합니다.",
             req, field="발급일",
         ))
     for f in engine_check_single_document(engine_doc, to_engine_spec(req)):

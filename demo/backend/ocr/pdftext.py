@@ -331,7 +331,19 @@ def read_page_text(text: str, page, page_index: int) -> OcrResult:
         tier=NAME,
         classification_evidence=type_evidence,
         classification_confidence=0.95 if doc_type is not None else 0.0,
+        quality_note=viewing_copy_note(text),
     )
+
+
+#: Officer-only memo for viewing copies (11-18 S3). The verdict never reads it.
+VIEWING_COPY_NOTE = "열람용 문서입니다(VIEWING_COPY). 발급일과 원본 여부를 담당자가 확인합니다."
+
+
+def viewing_copy_note(text: str, current: str = "") -> str:
+    """Append the viewing-copy memo when the printed '열람용' mark is present."""
+    if "열람용" not in _squeeze(text or "") or VIEWING_COPY_NOTE in current:
+        return current
+    return f"{current} / {VIEWING_COPY_NOTE}" if current else VIEWING_COPY_NOTE
 
 
 def _read_pdf(path: Path) -> OcrResult | None:

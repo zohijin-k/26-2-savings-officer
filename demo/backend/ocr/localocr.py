@@ -569,6 +569,8 @@ def _from_supported_form(extractor, pages, v2types, evidence, detected):
                   else _from_nhis(ex, scoped, v2types, evidence, detected))
     result.page_count = len(pages)
     result.engine = _pages_engine(scoped)
+    from .pdftext import viewing_copy_note
+    result.quality_note = viewing_copy_note("\n".join(r.text for _, r in pages), result.quality_note)
     return result
 
 

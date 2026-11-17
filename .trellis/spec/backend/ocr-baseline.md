@@ -38,6 +38,19 @@ operating engines, classifiers, extractors, verdicts or old tests.
   Report measured/unmeasured/unavailable table counts. Box overlap is observed
   coverage, not hidden detector recall. Confidence bins are not calibrated.
 
+## Field value presence
+
+- `compare_fields(..., presence=True)` adds `actual_present` (0/1), the observed
+  value presence already computed for agreement; 0 for missing references. The
+  CLI always records it. The six counts, FIELD template and summaries are unchanged,
+  and the default `presence=False` keeps old callers and tests identical.
+- `validate_row` accepts the old six keys or six plus `actual_present`, requiring
+  `match <= actual_present <= 1 - missing_reference`.
+- `ocr_baseline_compare --outcomes` classifies eligible fields as MATCH, BLANK
+  (same kind, no value), WRONG (same kind, value differs), OTHER (different kind) or
+  NA (presence not recorded) and prints per-side counts plus before→after
+  transitions (ABSENT for one-sided measurements). Default output is unchanged.
+
 ## Privacy, continuation and reporting
 
 - Reuse batch selection/location/alias/quiet/read-only/no-network primitives.

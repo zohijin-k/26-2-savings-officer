@@ -30,6 +30,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [DocumentAI measurement](./documentai-measurement.md) | Own-only observation, exact/CER denominators, synthetic matrix and private silver-reference safety | Active |
 | [OCR baseline measurement](./ocr-baseline.md) | Page OCR/field agreement, symmetric masking, payment tables and private resumable metrics | Active |
 | [Own adapter diagnostics](./own-adapter-diagnostics.md) | Original extraction/replay, conservative cause evidence, closed outputs and explicit denominators | Active |
+| [Per-document timing](./doc-timing.md) | Production upload path, delegation-only stage wrappers, cold start, warm-up/repeat statistics and value-free outputs | Active |
 
 ---
 

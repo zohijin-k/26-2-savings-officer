@@ -39,6 +39,8 @@ TIMING = dict(ocr=0.0, detection=None, recognition=None, initialization=None,
               inter_threads=None, workers=1, extraction=0.0, total=0.0)
 FIELD = dict(eligible=0, match=0, missing_reference=0, ocr_cause=0,
              structure_cause=0, unattributable=0)
+#: Optional seventh field key: observed value present (0/1). Absent in older results.
+PRESENCE = 'actual_present'
 
 
 def _require(condition):
@@ -119,8 +121,13 @@ def validate_row(row, meta):
             if item['state'] == 'OK':
                 _require(set(fields) == set(batch.FIELDS.get(page['type'], ())))
             for field in fields.values():
-                _shape(field, FIELD)
+                # Rows written before value presence was recorded keep exactly FIELD.
+                _require(isinstance(field, dict))
+                present = field.get(PRESENCE)
+                _shape({k: v for k, v in field.items() if k != PRESENCE}, FIELD)
                 _require(all(type(v) is int and v in {0, 1} for v in field.values()))
+                if PRESENCE in field:
+                    _require(present <= 1 - field['missing_reference'] and present >= field['match'])
                 _require(field['eligible'] + field['missing_reference'] == 1)
                 _require(field['match'] <= field['eligible'])
                 _require(field['ocr_cause'] + field['structure_cause'] + field['unattributable'] ==
@@ -268,7 +275,7 @@ def process_file(path, identifier, engines, variants):
                         actual_kind = observed.detected_doc_type.name if observed.detected_doc_type else 'X'
                         observed_text = prepare_pairs(image, recognized.words, engine)[0][1].text
                         item['fields'] = compare_fields(kind, ref_fields, actual_fields, actual_kind,
-                                                       reference_text, observed_text)
+                                                       reference_text, observed_text, presence=True)
                         item.update(state='OK', code='NONE', type_match=int(actual_kind == kind))
             except Exception:
                 # A dependency failure has no message/class/partial values in output.

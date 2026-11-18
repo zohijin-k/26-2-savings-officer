@@ -12,7 +12,9 @@ change arguments, results or exceptions.
 Screen output and summary_brief.txt contain numbers, O/X and fixed codes only.
 rows.jsonl carries a 16-hex document key, never a path, name or value. Row format 2
 adds ``reasons``: distinct registered verdict reason codes with their severity,
-recorded outside the timed region (unregistered codes become UNKNOWN_CODE).
+recorded outside the timed region (unregistered codes become UNKNOWN_CODE). Row
+format 3 adds ``intra_threads`` and ``page_workers``: the own OCR settings in force
+(``OWN_OCR_INTRA_THREADS`` / ``OWN_OCR_PAGE_WORKERS`` after validation, defaults 2 / 4).
 """
 from __future__ import annotations
 
@@ -33,14 +35,16 @@ import random
 import re
 import statistics
 import subprocess
+import threading
 import time
 from unittest.mock import patch
 
 from . import batch_assess as batch
 
-VERSION = 2
-#: Row format 1 (fea711b) had no ``reasons``; both remain readable.
-READABLE_VERSIONS = (1, 2)
+VERSION = 3
+#: Row format 1 (fea711b) had no ``reasons``; format 2 had no OCR thread settings.
+#: All remain readable.
+READABLE_VERSIONS = (1, 2, 3)
 SEVERITIES = ('FAIL', 'NEEDS_REVIEW', 'INFO', 'PASS', 'OTHER')
 UNKNOWN_CODE = 'UNKNOWN_CODE'
 ENGINES = ('own',)
@@ -124,10 +128,17 @@ def document_key(relative):
 
 
 class StageTimer:
-    """Exclusive stage times: a nested stage's time is removed from its parent."""
+    """Exclusive stage times: a nested stage's time is removed from its parent.
+
+    Stages are kept for the thread that created the timer. Concurrent page readers
+    (own page workers) only count calls; the creating thread times its wait for each
+    page result as the ``ocr`` stage (see ``_wrap_run_ocr_pages``).
+    """
 
     def __init__(self, clock=time.perf_counter):
         self.clock = clock
+        self.owner = threading.get_ident()
+        self.lock = threading.Lock()
         self.active = False
         self.phase = 'NONE'
         self.cold_model_load = None
@@ -142,9 +153,12 @@ class StageTimer:
         self.ocr_calls = 0
         self.text_pages = 0
 
+    def owned(self):
+        return threading.get_ident() == self.owner
+
     @contextmanager
     def stage(self, name):
-        if not self.active:
+        if not self.active or not self.owned():
             yield
             return
         frame = [name, 0.0]
@@ -163,6 +177,10 @@ class StageTimer:
     def exclude(self, elapsed):
         """Remove time (model load) from the enclosing stage and the document total."""
         if not self.active:
+            return
+        if not self.owned():
+            with self.lock:
+                self.excluded += elapsed
             return
         if self.stack:
             self.stack[-1][1] += elapsed
@@ -207,11 +225,41 @@ def _wrap_ocr(timer, original):
                 return original(png, size)
         finally:
             if timer.active:
-                timer.ocr_calls += 1
+                with timer.lock:
+                    timer.ocr_calls += 1
             if first:
                 timer.first_ocr_call = timer.clock() - start
     recognize.__wrapped__ = original
     return recognize
+
+
+def _wrap_run_ocr_pages(timer, original):
+    """Time the caller's wait for each page reader as ``ocr`` (concurrent pages included)."""
+    def run_ocr_pages(*args, **kwargs):
+        for read in original(*args, **kwargs):
+            def timed(read=read):
+                with timer.stage('ocr'):
+                    return read()
+            yield timed
+    run_ocr_pages.__wrapped__ = original
+    return run_ocr_pages
+
+
+def _wrap_page_sessions(timer, original):
+    """Extra page-worker sessions load like the first model: excluded as cold start."""
+    def page_sessions(slot):
+        before = original.cache_info().misses
+        start = timer.clock()
+        try:
+            return original(slot)
+        finally:
+            # Slot 0 is sessions(), already excluded by its own wrapper.
+            if slot != 0 and original.cache_info().misses > before:
+                timer.exclude(timer.clock() - start)
+    page_sessions.cache_info = original.cache_info
+    page_sessions.cache_clear = original.cache_clear
+    page_sessions.__wrapped__ = original
+    return page_sessions
 
 
 def _wrap_load_pages(timer, original):
@@ -255,6 +303,10 @@ def instrument(timer):
         wrap(file_evidence, 'normalize_image_quality', 'evidence')
         wrap(admin_consent_scan, 'inspect_admin_consent_scan', 'evidence')
         stack.enter_context(patch.object(own, 'sessions', _wrap_sessions(timer, own.sessions)))
+        stack.enter_context(patch.object(own, 'page_sessions', _wrap_page_sessions(timer, own.page_sessions)))
+        pages_wrapper = _wrap_run_ocr_pages(timer, v2ocr.run_ocr_pages)
+        stack.enter_context(patch.object(v2ocr, 'run_ocr_pages', pages_wrapper))
+        stack.enter_context(patch.object(v2engine, 'run_ocr_pages', pages_wrapper))
         stack.enter_context(patch.dict(v2ocr.ENGINES, {'own': _wrap_ocr(timer, v2ocr.ENGINES['own'])}))
         stack.enter_context(patch.object(v2engine, '_load_pages', _wrap_load_pages(timer, v2engine._load_pages)))
         yield timer
@@ -373,12 +425,13 @@ def measure(path, timer, *, slot=requirement):
 # ---------------------------------------------------------------- rows
 
 
-def _blank_row(doc, engine, phase, repeat, code):
+def _blank_row(doc, engine, phase, repeat, code, settings):
     return dict(schema_version=VERSION, key=doc['key'], engine=engine, phase=phase, repeat=repeat, code=code,
                 form='X', text_layer=doc.get('text_layer'), pages=doc.get('pages'),
                 page_bin=page_bin(doc['pages']) if doc.get('pages') else None,
                 first_image_later_text=doc.get('first_image_later_text', 0), tier='none',
-                decision='NOT_ASSESSED', ocr_pages=0, text_pages=0, cold_start=0.0, seconds=None, reasons=[])
+                decision='NOT_ASSESSED', ocr_pages=0, text_pages=0, cold_start=0.0, seconds=None, reasons=[],
+                intra_threads=settings['intra_threads'], page_workers=settings['page_workers'])
 
 
 def _finite(value):
@@ -392,7 +445,11 @@ def validate_row(row):
     batch._require(isinstance(row, dict) and row.get('schema_version') in READABLE_VERSIONS)
     if row['schema_version'] >= 2:
         keys = keys | {'reasons'}
+    if row['schema_version'] >= 3:
+        keys = keys | {'intra_threads', 'page_workers'}
     batch._require(set(row) == keys)
+    if row['schema_version'] >= 3:
+        batch._require(all(type(row[k]) is int and row[k] >= 1 for k in ('intra_threads', 'page_workers')))
     batch._require(isinstance(row['key'], str) and KEY_RE.fullmatch(row['key']) is not None)
     batch._require(row['engine'] in ENGINES and row['phase'] in PHASES and row['code'] in ROW_CODES)
     batch._require(type(row['repeat']) is int and row['repeat'] >= 0)
@@ -492,6 +549,10 @@ def summarize(rows, meta):
     lines.append('RUN engine repeat warmup sample limit strata_basis documents_selected')
     lines.append(_line('RUN', 'own', options['repeat'], options['warmup'], options['sample'], options['limit'],
                        options['strata_basis'], meta['counts']['selected']))
+    threads = options.get('ocr_threads') or {}
+    lines.append('OCR_THREADS engine intra_threads page_workers page_workers_cap')
+    lines.append(_line('OCR_THREADS', 'own', threads.get('intra_threads'), threads.get('page_workers'),
+                       threads.get('page_workers_cap')))
     skipped = Counter(r['code'] for r in rows if r['phase'] == 'skipped')
     errors = Counter(r['code'] for r in rows if r['phase'] == 'measure' and r['code'] != 'NONE')
     lines.append('SKIP code documents')
@@ -662,6 +723,13 @@ def own_threads():
         return dict(intra=None, inter=None, loaded='X')
 
 
+def ocr_settings():
+    """Own OCR settings in force: validated env values and the CPU-bounded worker cap."""
+    from engine_v2.pipeline.ocr import own
+    return dict(intra_threads=own.INTRA_OP_THREADS, page_workers=own.MAX_PAGE_WORKERS,
+                page_workers_cap=own.page_workers(own.MAX_PAGE_WORKERS))
+
+
 def own_available():
     from engine_v2.pipeline.ocr import own
     from engine_v2.tools.fetch_own_models import ASSETS
@@ -698,12 +766,13 @@ def run(root, out, *, engines=('own',), repeat=1, warmup=3, sample=None, seed=20
     if not own_available():
         _fail('ENGINE_UNAVAILABLE')
     strata_forms = load_strata(strata_from) if strata_from is not None else None
+    settings = ocr_settings()
 
     meta = dict(schema_version=VERSION, environment=environment(),
                 options=dict(engines=list(engines), repeat=repeat, warmup=warmup, sample=sample, seed=seed,
                              limit=limit, strata_basis='NONE' if sample is None else
                              'FORM' if strata_forms is not None else 'PAGES_TEXT',
-                             external_ocr_disabled='O'),
+                             external_ocr_disabled='O', ocr_threads=settings),
                 counts={}, cold_start=None, own_threads=None)
     env = meta['environment']
     if env['load_start'][0] > (env['cores']['logical'] or 1) / 2:
@@ -754,7 +823,7 @@ def run(root, out, *, engines=('own',), repeat=1, warmup=3, sample=None, seed=20
 
         for doc in selected:
             if doc['code'] != 'NONE':
-                emit(_blank_row(doc, 'own', 'skipped', 0, doc['code']))
+                emit(_blank_row(doc, 'own', 'skipped', 0, doc['code'], settings))
         processable = [doc for doc in selected if doc['code'] == 'NONE']
         timer = StageTimer()
         started = time.perf_counter()
@@ -767,7 +836,7 @@ def run(root, out, *, engines=('own',), repeat=1, warmup=3, sample=None, seed=20
             for phase, number, batch_docs in plan:
                 timer.phase = phase
                 for index, doc in enumerate(batch_docs, 1):
-                    row = _blank_row(doc, 'own', phase, number, 'NONE')
+                    row = _blank_row(doc, 'own', phase, number, 'NONE', settings)
                     try:
                         with batch.guarded():
                             row.update(measure(doc['path'], timer))

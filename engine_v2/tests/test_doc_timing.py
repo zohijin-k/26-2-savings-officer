@@ -82,7 +82,7 @@ def row(key='0' * 16, repeat=1, total=1.0, phase='measure', form='NHIS_PAYMENT',
         schema_version=tool.VERSION, key=key, engine='own', phase=phase, repeat=repeat, code=code, form=form,
         text_layer=text_layer, pages=pages, page_bin=tool.page_bin(pages), first_image_later_text=later,
         tier=tier, decision=decision, ocr_pages=ocr_pages, text_pages=text_pages, cold_start=0.0,
-        seconds=seconds, reasons=[]))
+        seconds=seconds, reasons=[], intra_threads=2, page_workers=4))
 
 
 def meta(repeat=1):

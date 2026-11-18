@@ -108,6 +108,33 @@ def _engine_name() -> str:
     return engine_decision()[0]
 
 
+def preload_own() -> str:
+    """서버 시작 때 own 모델(쪽 작업 세션 포함)을 미리 불러 첫 요청 지연을 없앤다.
+
+    결과 코드만 돌려준다: LOADED / SKIPPED(own이 아님) / FAILED.
+    실패해도 아무것도 바꾸지 않는다. 그때는 지금처럼 첫 OCR 호출이 불러오고
+    같은 오류를 그 자리에서 낸다(세션 캐시는 실패를 기억하지 않는다).
+    """
+    try:
+        if engine_decision()[0] != "own":
+            return "SKIPPED"
+        import io
+
+        from PIL import Image
+        from engine_v2.pipeline.ocr import own
+
+        own.sessions()
+        own.prepare_page_workers(own.MAX_PAGE_WORKERS)
+        # 빈 그림 한 장으로 판독 경로의 지연 import(cv2·pyclipper)와 첫 실행 준비를 끝낸다.
+        blank = io.BytesIO()
+        Image.new("RGB", (32, 32), "white").save(blank, format="PNG")
+        own.recognize(blank.getvalue(), (32, 32))
+        return "LOADED"
+    except Exception as exc:  # noqa: BLE001 - 시작은 막지 않는다
+        _logger.warning("own 모델 미리 불러오기 실패(첫 호출 때 불러옴): %s", exception_code(exc))
+        return "FAILED"
+
+
 def _import_v2():
     """engine_v2는 지연 import 한다 — OCR을 안 쓰는 경로에서 의존성을 요구하지 않도록."""
     if str(_REPO_ROOT) not in sys.path:
@@ -121,6 +148,12 @@ def _import_v2():
     from engine_v2.schemas.models import DocType as V2DocType, DocumentInput
 
     return resident_abstract, nhis_payment, nhis_acquisition_loss, run_ocr, PageSource, preprocess, V2DocType, DocumentInput, _load_pages, insurance_4
+
+
+def _read_pages(run_ocr, engine: str, page_images):
+    """쪽마다 읽기 함수를 쪽 순서대로 낸다. 여러 쪽 own은 동시에 읽는다(engine_v2 run_ocr_pages)."""
+    from engine_v2.pipeline.ocr import run_ocr_pages
+    return run_ocr_pages(engine, [(p.png, p.pixel_size) for p in page_images], run=run_ocr)
 
 
 def _quality(pages) -> float:
@@ -829,8 +862,8 @@ class LocalOcr:
             return self._render_retry(path, engine, "IMAGE_TEXT_PAGE")
 
         pages = []
-        for p in page_images:
-            r = run_ocr(engine, p.png, p.pixel_size)
+        for p, read in zip(page_images, _read_pages(run_ocr, engine, page_images)):
+            r = read()
             if r.error:
                 return None  # 엔진 미설치 등 → 다음 계층
             pages.append((p, r))
@@ -849,8 +882,8 @@ class LocalOcr:
         if not page_images:
             return None
         pages = []
-        for page in page_images:
-            read = run_ocr(engine, page.png, page.pixel_size)
+        for page, reader in zip(page_images, _read_pages(run_ocr, engine, page_images)):
+            read = reader()
             if read.error:
                 return None
             pages.append((page, read))

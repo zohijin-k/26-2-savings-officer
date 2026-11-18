@@ -45,6 +45,16 @@ verdict, on the own engine. Never change operating code to make it measurable.
   survive (others become UNKNOWN_CODE); message, guidance and detail are never read.
   Format 1 rows stay readable (also for `--strata-from`). No summary lines use them;
   A7/A8 are computed from rows per the task's measurement definitions.
+- Row format 3 adds `intra_threads` and `page_workers` (ints ≥ 1): the own OCR
+  settings in force. `engine_v2.pipeline.ocr.own` reads `OWN_OCR_INTRA_THREADS`
+  (default 2) and `OWN_OCR_PAGE_WORKERS` (default 4; 1 = pages read sequentially)
+  once at import; unset/empty keeps the default silently, anything but 1-6 plain
+  digits > 0 keeps the default with one warning line that never echoes the value.
+  run.json `options.ocr_threads` and the summary `OCR_THREADS` line also carry
+  `page_workers_cap` = min(page_workers, cpu_count // intra_threads), at least 1.
+  Every reader of doc_timing rows (`load_strata`, `classify_recovery_diag`
+  crosstab/compare/run --timing, label_review on its branch) goes through `validate_row`, which
+  accepts formats 1-3; a format bump must keep older formats readable.
 - rows.jsonl uses a 16-hex key of the root-relative path. Screen, run.json and
   summary_brief.txt contain numbers, O/X and fixed codes only, never paths, names,
   keys, values or exception text. run.json records machine, cores, power, load,

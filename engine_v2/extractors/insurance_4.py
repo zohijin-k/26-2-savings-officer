@@ -376,6 +376,12 @@ def _parse_row(insurance: str, lines: list[list[Word]], anchors: dict[str, float
             cell = _normalize_cell(word.text)
             if cell and re.search(r"\d", cell):
                 row.management_number += re.sub(r"\D", "", cell)
+            elif (cell and not portal and word.x0 >= (anchors["management"] + anchors["workplace"]) / 2
+                  and cell not in CATEGORY_NAMES):
+                # Header words mark where a label starts, not where its column starts: a name cell
+                # can begin a little left of the 사업장명칭 label. A digit-free fragment past the
+                # midpoint between the two labels belongs to the name (11-18); digits stay 관리번호.
+                row.workplace_name += cell
         elif anchors["workplace"] <= word.x0 < anchors["date"]:
             cell = _normalize_cell(word.text)
             if cell and cell not in CATEGORY_NAMES and not re.search(r"\d{4}[.\-/]", cell):

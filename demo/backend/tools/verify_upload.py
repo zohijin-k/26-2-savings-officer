@@ -473,6 +473,7 @@ subscriber_matches_first_member supply_plus_vat_matches
 # Fixed production code vocabulary; never accept arbitrary OCR strings as codes.
 SAFE_CODES = frozenset("""
 NHIS_PAYMENT_PAGING_UNCERTAIN
+PAYMENT_AMOUNT_COLUMN_UNCERTAIN
 ADDRESS_HISTORY_INCOMPLETE
 ADMIN_CONSENT_IDENTITY_MISMATCH
 ADMIN_CONSENT_IDENTITY_UNCERTAIN

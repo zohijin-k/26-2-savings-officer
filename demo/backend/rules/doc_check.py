@@ -59,6 +59,7 @@ CODE_PAGES_DUPLICATED = "PAGES_DUPLICATED"
 CODE_ISSUE_DATE_MISSING = "ISSUE_DATE_MISSING"
 CODE_VIEW_ONLY_DOCUMENT = "VIEW_ONLY_DOCUMENT"
 CODE_ADDRESS_HISTORY_INCOMPLETE = "ADDRESS_HISTORY_INCOMPLETE"
+CODE_PAYMENT_AMOUNT_COLUMN_UNCERTAIN = "PAYMENT_AMOUNT_COLUMN_UNCERTAIN"
 #: Findings shown on the officer screen only; applicant responses drop them (11-18 열람용).
 OFFICER_ONLY_CODES = frozenset({CODE_VIEW_ONLY_DOCUMENT})
 CODE_PAYMENT_PAGING_UNCERTAIN = "NHIS_PAYMENT_PAGING_UNCERTAIN"
@@ -964,6 +965,20 @@ def _check_document(
             severity="NEEDS_REVIEW",
             detail=f"세부 사유: {ocr.fields.get('주소이력불확실사유') or '미상'} "
                    "(NUMBER_GAP 번호 누락, NUMBER_UNREADABLE 번호 판독 실패, EMPTY_PAGE 표 머리글만 읽힌 쪽).",
+        ))
+
+    if (ocr.detected_doc_type is DocType.NHIS_PAYMENT and req.accepts(ocr.detected_doc_type)
+            and ocr.fields.get("월별고지금액상태") == "불확실"):
+        # 11-19: a 2025-10~12 고지금액 may come from the 장기요양 column (or a 0원 pick); the income
+        # decision does not use the amounts (facts._payment_amounts_trusted) and values are not guessed.
+        findings.append(CheckFinding(
+            CODE_PAYMENT_AMOUNT_COLUMN_UNCERTAIN,
+            "납부확인서의 월별 건강보험료 고지금액을 확실히 읽지 못했습니다. 담당자가 원본에서 확인합니다.",
+            how_to_fix="그대로 두셔도 담당자가 원본을 확인합니다. 월별 표가 선명하게 보이는 납부확인서를 다시 올리면 더 빨리 확인됩니다.",
+            severity="NEEDS_REVIEW",
+            detail=f"세부 사유: {ocr.fields.get('월별고지금액불확실사유') or '미상'} "
+                   "(ZERO_AMOUNT 0원, CARE_RATIO 같은 줄 금액의 12~14%, HEADER_CARE 장기요양 머리글, "
+                   "HEADER_UNCERTAIN 머리글 판독 불확실, LARGER_HEALTH 같은 줄 건강 머리글에 더 큰 금액).",
         ))
 
     if nhis_review_needed:

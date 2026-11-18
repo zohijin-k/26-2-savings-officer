@@ -165,16 +165,183 @@ def _closest_amount(amounts, x):
     return min(amounts, key=lambda item: abs((item[0].x0 + item[0].x1) / 2 - x)) if amounts else None
 
 
+#: Printed label of one combined health+care column; such forms keep the group-header path.
+EXPLICIT_COMBINED = "건강보험료및장기요양보험료합계"
+#: Months whose 고지금액 decide the income check (same months as ``_average``).
+AMOUNT_GUARD_MONTHS = ((2025, 10), (2025, 11), (2025, 12))
+#: 11-19 guard reasons: a 0원 pick, a pick 12-14% of another amount in its row, a pick under a
+#: 장기요양 header or an unreadable header, a larger amount under a 건강 header in its row.
+AMOUNT_GUARD_CODES = ("ZERO_AMOUNT", "CARE_RATIO", "HEADER_CARE", "HEADER_UNCERTAIN", "LARGER_HEALTH")
+HEADER_CONFIDENCE = .85
+HEADER_LABELS = TABLE_LABELS + HEALTH + CARE + OUTSIDE_HEALTH + ("보수외소득월액(요양)", "합계")
+
+
+def _header_blocks(pages):
+    """(page number, header block lines) for every month header, in page and reading order."""
+    blocks = []
+    for page, result in pages:
+        lines = common.page_lines(page, result)
+        for index in _month_header(lines):
+            blocks.append((page.page, _header_block(lines, index)))
+    return blocks
+
+
+def _header_boxes(pages, labels):
+    """Boxes (x0, y0, x1, y1) of header label hits in the same order as ``_header_x``."""
+    boxes = []
+    for _, block in _header_blocks(pages):
+        for _, words in common.label_hits(block, labels):
+            if words:
+                boxes.append((min(w.x0 for w in words), min(w.y0 for w in words),
+                              max(w.x1 for w in words), max(w.y1 for w in words)))
+    return boxes
+
+
+def _short_health_boxes(pages):
+    """A sub-header printed only as '건강' (11-19). Exact word only: '(건강)' is 보수외소득월액(건강)."""
+    return [(w.x0, w.y0, w.x1, w.y1) for _, block in _header_blocks(pages)
+            for line in block for w in line if w.text.strip() == "건강"]
+
+
+def _char_span(line, key):
+    """x-span of the characters of ``key`` inside a line, splitting a fused OCR box by characters."""
+    chars = [(word, index, len(squash(word.text))) for word in line for index in range(len(squash(word.text)))]
+    start = "".join(squash(word.text) for word in line).find(key)
+    if start < 0:
+        return None
+
+    def edge(word, index, count, right):
+        return word.x0 + (index + right) / count * (word.x1 - word.x0)
+    return edge(*chars[start], 0), edge(*chars[start + len(key) - 1], 1)
+
+
+def _fused_component_xs(pages):
+    """Health/care centres when one OCR box holds both sub-headers ('건강보험료장기요양보험료')."""
+    for _, block in _header_blocks(pages):
+        for line in block:
+            for word in line:
+                text = squash(word.text)
+                if not (any(squash(h) in text for h in HEALTH) and any(squash(c) in text for c in CARE)):
+                    continue
+                health = next((span for h in HEALTH if (span := _char_span([word], squash(h)))), None)
+                care = next((span for c in CARE if (span := _char_span([word], squash(c)))), None)
+                if health and care:
+                    return sum(health) / 2, sum(care) / 2
+    return None
+
+
+def _column_words(header_lines, x):
+    """Header words of the column at ``x``: the nearest word of each header line, top to bottom."""
+    found = []
+    for line in header_lines:
+        chunks = []
+        for word in sorted((w for w in line if squash(w.text) not in MONTH_LABELS), key=lambda w: w.x0):
+            # Close words forming part of one known label are one label ('고지' '금액'); two
+            # neighbouring column headers ('건강보험료' '장기요양보험료') stay apart.
+            joined = "".join(squash(w.text) for w in chunks[-1]) + squash(word.text) if chunks else ""
+            if (chunks and word.x0 - chunks[-1][-1].x1 <= 2 * max(word.y1 - word.y0, chunks[-1][-1].y1 - chunks[-1][-1].y0)
+                    and any(joined in squash(label) for label in HEADER_LABELS)):
+                chunks[-1].append(word)
+            else:
+                chunks.append([word])
+        if chunks:
+            found.extend(min(chunks, key=lambda c: abs((c[0].x0 + c[-1].x1) / 2 - x)))
+    return found
+
+
+def _health_family(words):
+    """A 건강보험료 column header; never 보수외소득월액(건강) nor a 장기요양 column."""
+    text = "".join(squash(w.text) for w in words)
+    return (not any(part in text for part in ("요양", "보수", "소득")) and
+            any(squash(w.text) in ("건강", "건강보험", "건강보험료") or squash(w.text).startswith("건강보험")
+                for w in words))
+
+
+def amount_guard_reasons(billed, others, billed_header=None, other_headers=None):
+    """11-19 guard on one billed month: reason codes (empty when none apply).
+
+    ``billed``: picked amount; ``others``: the other amounts in its row. ``billed_header``: the
+    picked column's header words, or None when the header is fixed by the form (government form,
+    exact header match). ``other_headers``: header words per other amount (same order) or None.
+    """
+    reasons = set()
+    if billed == 0:
+        reasons.add("ZERO_AMOUNT")
+    if any(value > 0 and billed > 0 and .12 <= billed / value <= .14 for value in others):
+        reasons.add("CARE_RATIO")
+    if billed_header is not None:
+        text = "".join(squash(w.text) for w in billed_header)
+        if "요양" in text:
+            reasons.add("HEADER_CARE")
+        if (not billed_header or any(w.conf < HEADER_CONFIDENCE for w in billed_header) or
+                not ("건강" in text or "고지" in text)):
+            reasons.add("HEADER_UNCERTAIN")
+    # A negative pick is a refund/adjustment row; income already rejects it (PREMIUM_AMOUNT_INVALID).
+    if other_headers is not None and billed >= 0:
+        if any(value > billed and _health_family(words) for value, words in zip(others, other_headers)):
+            reasons.add("LARGER_HEALTH")
+    return reasons
+
+
+class _Monthly(tuple):
+    """The 16-value parse; ``amount_guard`` carries the 11-19 guard reasons per target month."""
+    amount_guard: dict = {}
+
+
+def charge_grouped(pages) -> bool:
+    """고지금액 is a group header: a component sub-header is printed below it (11-19).
+
+    Its centre is then not a column and falls on the 장기요양 column of a four-column group.
+    """
+    charge = _header_boxes(pages, ("고지금액", "고지보험료"))
+    components = (_header_boxes(pages, HEALTH) + _short_health_boxes(pages) + _header_boxes(pages, CARE) +
+                  _header_boxes(pages, OUTSIDE_HEALTH))
+    return bool(charge) and any(box[1] >= charge[0][3] - .25 * (charge[0][3] - charge[0][1]) for box in components)
+
+
+def amount_layout(pages) -> str:
+    """Legacy table layout code for diagnostics: SINGLE/GROUP × how the 건강 sub-header was found."""
+    if EXPLICIT_COMBINED in squash(" ".join(result.text for _, result in pages)):
+        return "COMBINED"
+    if not _header_x(pages, ("고지금액", "고지보험료")):
+        return "NO_CHARGE_HEADER"
+    health, care = _header_x(pages, HEALTH), _header_x(pages, CARE)
+    sub = ("FUSED" if health and care and health[0] == care[0] else "HEALTH" if health else
+           "SHORT" if _short_health_boxes(pages) else "MISSING")
+    return ("GROUP_" if charge_grouped(pages) else "SINGLE_") + sub
+
 
 def _extract_monthly(pages):
+    parsed, guard = _extract_monthly_detail(pages)
+    result = _Monthly(parsed)
+    result.amount_guard = guard
+    return result
+
+
+def _extract_monthly_detail(pages):
+    """``_extract_monthly`` plus the 11-19 guard reasons per target month."""
     charge_xs = _header_x(pages, ("고지금액", "고지보험료"))
     paid_xs = _header_x(pages, ("납부금액", "납부보험료", "실납부"))
     health_xs = _header_x(pages, HEALTH)
     care_xs = _header_x(pages, CARE)
     all_text = " ".join(result.text for _, result in pages)
     flat = squash(all_text)
+    explicit_combined = EXPLICIT_COMBINED in flat
+    if not explicit_combined:
+        # 11-19: locate the 건강보험료 sub-column of a 고지금액 group instead of using the group centre.
+        if not health_xs:
+            health_xs = [(b[0] + b[2]) / 2 for b in _short_health_boxes(pages)]
+        if health_xs and care_xs and health_xs[0] == care_xs[0]:
+            fused = _fused_component_xs(pages)
+            if fused is not None:
+                health_xs = [fused[0]] + health_xs[1:]
+                care_xs = [fused[1]] + care_xs[1:]
+    grouped = not explicit_combined and charge_grouped(pages)
+    blocks = _header_blocks(pages)
+    header_lines = blocks[0][1] if blocks else []
+    guard: dict[tuple[int, int], set[str]] = {}
     separate_components = bool(health_xs and care_xs and health_xs[0] != care_xs[0])
-    combined = ("건강보험료및장기요양보험료합계" in flat or
+    combined = (explicit_combined or
                 ("합계" in flat and any(word in flat for word in CARE) and not separate_components))
 
     monthly: dict[tuple[int, int], tuple[int, list[common.Word]]] = {}
@@ -289,10 +456,16 @@ def _extract_monthly(pages):
             care_x = page_care_xs[0] if page_care_xs else None
             component_columns = bool(page_health_xs and care_x is not None and page_health_xs[0] != care_x)
             health_x = page_health_xs[0] if component_columns else charge_x
+            if not component_columns and grouped:
+                # Never the group centre: the 건강보험료 sub-header or no value (review).
+                health_x = page_health_xs[0] if page_health_xs else None
             if charge_x is None or (paid_x is None and len(amounts) > 1 and not component_columns):
                 money_numeric = False
                 continue
-            billed = _closest_amount(amounts, health_x if health_x is not None else charge_x)
+            if health_x is None:
+                money_numeric = False
+                continue
+            billed = _closest_amount(amounts, health_x)
             if billed and component_columns and not combined:
                 # _closest_amount has no distance bound: when the 건강보험료 cell is unread the nearest
                 # remaining cell can be the 장기요양보험료 cell (11-18 A3). 장기요양보험료 is a fraction
@@ -312,6 +485,17 @@ def _extract_monthly(pages):
             if billed:
                 for ym in target:
                     monthly[ym] = (billed[1], [billed[0]])
+                if any(ym in AMOUNT_GUARD_MONTHS for ym in target):
+                    others = [item for item in amounts if item is not billed]
+
+                    def centre(item):
+                        return (item[0].x0 + item[0].x1) / 2
+                    reasons = amount_guard_reasons(
+                        billed[1], [value for _, value in others], _column_words(header_lines, centre(billed)),
+                        [_column_words(header_lines, centre(item)) for item in others])
+                    for ym in target:
+                        if ym in AMOUNT_GUARD_MONTHS:
+                            guard[ym] = reasons
             if care_x is not None and len(amounts) > 1 and not combined:
                 care_amount = _closest_amount([item for item in amounts if item is not billed], care_x)
                 if care_amount:
@@ -323,9 +507,21 @@ def _extract_monthly(pages):
                     for ym in target:
                         outside_health_monthly[ym] = (outside_amount[1], [outside_amount[0]])
 
-    return (monthly, care_monthly, outside_health_monthly, totals, paid_monthly, paid_totals,
-            settlement_billed, settlement_paid, has_settlement_billed, has_settlement_paid, all_months, target_seen,
-            target_words, money_numeric, combined, nonpositive)
+    return ((monthly, care_monthly, outside_health_monthly, totals, paid_monthly, paid_totals,
+             settlement_billed, settlement_paid, has_settlement_billed, has_settlement_paid, all_months, target_seen,
+             target_words, money_numeric, combined, nonpositive),
+            {ym: reasons for ym, reasons in guard.items() if ym in monthly})
+
+
+def put_amount_guard(fields, guard, page_map, sources):
+    """Mark 월별고지금액 uncertain (values unchanged) when a target month has a guard reason."""
+    reasons = sorted({code for month_reasons in guard.values() for code in month_reasons},
+                     key=AMOUNT_GUARD_CODES.index)
+    if not reasons:
+        return
+    fields["월별고지금액상태"] = common.make_field("불확실", "불확실", None, page_map, .9, sources)
+    joined = ",".join(reasons)
+    fields["월별고지금액불확실사유"] = common.make_field(joined, joined, None, page_map, .9, sources)
 
 
 def _average(values: dict[tuple[int, int], tuple[int, list[common.Word]]]):
@@ -437,7 +633,8 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
     (monthly, care_monthly, outside_health_monthly, totals, paid_monthly, paid_totals,
      settlement_billed, settlement_paid, has_settlement_billed, has_settlement_paid,
      all_months, found_months_set,
-     month_words, numeric, combined, nonpositive) = _extract_monthly(pages)
+     month_words, numeric, combined, nonpositive) = parsed = _extract_monthly(pages)
+    put_amount_guard(fields, getattr(parsed, "amount_guard", {}), page_map, sources)
     # 한 줄짜리 합성·구형 전자문서에서 고지금액 라벨과 금액이 하나만 있는 경우만
     # 분명한 값으로 남긴다. 두 단 표가 있으면 이 우회 경로를 사용하지 않는다.
     flat_text = " ".join(result.text for _, result in pages)

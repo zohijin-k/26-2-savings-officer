@@ -94,6 +94,8 @@ def _payment_amounts_trusted(doc: DocFact | None) -> bool:
         return True
     if has_failed_payment_validation(fields):
         return False
+    if fields.get("월별고지금액상태") == "불확실":
+        return False  # 11-19: the 고지금액 column may be 장기요양 or a 0원 pick; no income decision.
     if doc.get("status") not in {None, "PASS"}:
         return False
     if "confidence" in doc:

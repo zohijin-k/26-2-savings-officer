@@ -358,6 +358,55 @@ def _monthly_table(lines, *, allow_correction, metadata_bottom):
     return values, totals, corrections, checks, absence_states
 
 
+#: Column index (0-7 after 월별) → header family for the 11-19 guard; 4 is 납부금액 건강보험료.
+_HEALTH_COLUMNS = frozenset({0, 4})
+
+
+def _billed_health_header(lines, metadata_bottom):
+    """Words of the 고지금액 건강보험료 header cluster, as ``_monthly_table`` finds them, or None."""
+    words = [word for row in lines for word in row]
+    months = [word for word in words if word.y0 > metadata_bottom and MONTH.fullmatch(squash(word.text))]
+    if not months:
+        return None
+    first_y = min(word.y0 for word in months)
+    header_band = [word for word in words if metadata_bottom < word.y0 and word.cy < first_y]
+    component_top = _component_top(header_band)
+    groups = _header_columns([word for word in header_band if word.cy < component_top
+                              and any(squash(word.text) in label for label in GROUPS)], expected=GROUPS)
+    if groups is None:
+        return None
+    group_bottom = max(word.y1 for group in groups for word in group) - HEADER_BAND_SLACK
+    header_words = [word for word in words if word.y0 > group_bottom and word.cy < first_y]
+    headers = _header_columns(header_words)
+    sums = _unique_label(lines, "합계")
+    if headers is None and sums:
+        sum_y = sum(word.cy for word in sums) / len(sums)
+        sum_height = max(word.y1 - word.y0 for word in sums)
+        headers = _separate_headers([header_words], [word for word in words
+                                                     if first_y <= word.cy <= sum_y + sum_height * .8])
+    return headers[1] if headers else None
+
+
+def _put_amount_guard(fields, values, year, lines, metadata_bottom, page_map, sources):
+    """11-19 guard on 2025-10..12 of the fixed eight-column table (header family is the column)."""
+    from .nhis_payment import AMOUNT_GUARD_MONTHS, amount_guard_reasons, put_amount_guard
+
+    header = _billed_health_header(lines, metadata_bottom)
+    guard = {}
+    for target_year, month in AMOUNT_GUARD_MONTHS:
+        row = values[month - 1]
+        if target_year != year or row[0] is None:
+            continue
+        others = [(column, value) for column, value in enumerate(row) if column and value is not None]
+        reasons = amount_guard_reasons(row[0], [value for _, value in others])
+        if header is None or any(word.conf < .85 for word in header):
+            reasons.add("HEADER_UNCERTAIN")
+        if row[0] >= 0 and any(value > row[0] and column in _HEALTH_COLUMNS for column, value in others):
+            reasons.add("LARGER_HEALTH")
+        guard[(year, month)] = reasons
+    put_amount_guard(fields, guard, page_map, sources)
+
+
 def extract(pages, today=None):
     from .nhis_payment import PaymentResult, _average
 
@@ -476,6 +525,8 @@ def extract(pages, today=None):
         put("고지월", ",".join(f"{year}-{month:02}" for month in range(1, 13)))
     if len(totals) == 8:
         put("합계자료", [str(value) if value is not None else None for value in totals])
+    if len(values) == 12 and year is not None:
+        _put_amount_guard(fields, values, year, lines, metadata_bottom, page_map, sources)
 
     complete = all(check.passed for check in checks)
     workplace_state, workplace_words = _workplace_evidence(lines, middle, period_rows, complete)

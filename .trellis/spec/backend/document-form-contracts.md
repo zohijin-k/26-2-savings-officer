@@ -28,6 +28,19 @@ Use this contract when changing OCR/text ingestion, resident-number redaction, N
 - Payment `월별납부내역` is a JSON list with twelve printed months and eight amount cells per row. Empty optional cells serialize as JSON null. Existing `billed_by_month`, `paid_by_month`, `건강보험료` and average aliases retain their existing meanings. `숫자형식교정` records corrected row, column and categories. The dedicated government reader emits no unprinted insurance category.
 - Business proof requires `발급번호`, `과세유형`, `상호`, `사업자등록번호`, `성명`, `생년월일`, `사업장소재지`, `개업일`, `사업자등록일`, `업태`, `종목`, `공동사업자유무` and `발급일`. `업태` and `종목` serialize nonempty string lists as JSON. `공동사업자유무` is `있음` or `없음`. Internal address/list values stay within existing response allowlists.
 - Explicit payment review/failure, supplied subthreshold or invalid confidence, and present incomplete structure prevent monetary fields from establishing income facts. Preserve stored fields for officer inspection. Engine conversion carries a high-confidence explicit `NEEDS_REVIEW` through the existing OCR threshold without changing the stored confidence.
+- Legacy 월별고지금액 column (11-19): when 고지금액 is a group header (a component sub-header is
+  printed below it, `nhis_payment.charge_grouped`), its centre is never used as the billed column; it
+  falls on the 장기요양 column of a four-column group. The 건강보험료 sub-column comes from a 건강보험료/
+  건강보험 hit, an exact '건강' word ('(건강)' is 보수외소득월액), or the character span of a fused
+  '건강보험료장기요양보험료' box; otherwise the month gets no value (review). The explicit combined
+  label keeps the old path. The 합계 row still uses the group centre (changing it would turn current
+  reviews into passes).
+- 고지금액 guard (11-19, both readers, values never replaced): for 2025-10~12, a 0원 pick, a pick 12-14%
+  of another amount in its row, a pick under a 장기요양 or unreadable/low-confidence (<.85) header, or a
+  larger amount under a 건강 header in its row set `월별고지금액상태=불확실` and
+  `월별고지금액불확실사유` (ZERO_AMOUNT, CARE_RATIO, HEADER_CARE, HEADER_UNCERTAIN, LARGER_HEALTH).
+  `check_document` adds PAYMENT_AMOUNT_COLUMN_UNCERTAIN (NEEDS_REVIEW) and
+  `facts._payment_amounts_trusted` returns False (PREMIUM_UNTRUSTED), whatever the stored status.
 - Historical payment rows retaining a critical failed validation require the same read-time monetary suppression and review confidence even when cached status is PASS. Retain the stored row for owner-controlled cleanup.
 
 ## 4. Validation and error matrix

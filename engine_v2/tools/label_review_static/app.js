@@ -104,7 +104,10 @@
     checkList($('checks'), (app.checks[app.doc.form] || {}).items);
     $('stage1').hidden = false;
     $('cross-start-box').hidden = true;
-    setMsg('blind-msg', app.saved ? '저장됨 · 고치려면 다시 고르고 저장' : '');
+    const carried = app.saved && app.saved.inherited ? `${app.saved.inherited}회차 정답 이어받음` : '';
+    $('blind-inherited').textContent = carried;
+    $('blind-inherited').hidden = !carried;
+    setMsg('blind-msg', app.saved ? (carried ? '고치려면 다시 고르고 저장' : '저장됨 · 고치려면 다시 고르고 저장') : '');
     renderChoices();
     showPage();
     hideStage2();
@@ -119,6 +122,7 @@
     $('form-label').textContent = '-';
     $('cutoff').textContent = '-';
     $('checks').textContent = '';
+    $('blind-inherited').hidden = true;
     hideStage2();
     renderBar();
   }
@@ -226,7 +230,8 @@
     app.busy = true;
     try {
       await api('POST', docUrl(app.doc.key) + (app.mode === 'cross' ? '' : '/blind'), { status: app.status, reasons });
-      app.saved = { status: app.status, reasons };
+      app.saved = { status: app.status, reasons, inherited: null };
+      $('blind-inherited').hidden = true;
       setMsg('blind-msg', '저장됨');
       await refresh();
     } catch (e) {
@@ -250,6 +255,7 @@
     $('values-box').hidden = true;
     $('save-values').hidden = true;
     $('go-next').hidden = true;
+    $('values-inherited').hidden = true;
     setMsg('values-msg', '');
   }
 
@@ -313,6 +319,8 @@
       : `주의: 다시 계산한 결과(${r.decision}, ${r.form})가 측정 결과와 다릅니다.`) + ` 판독 계층: ${r.tier}`;
     $('unread').textContent = data.unread.length ? '엔진이 읽지 못한 항목: ' + data.unread.join(', ') : '';
     renderValues();
+    $('values-inherited').textContent = data.inherited ? `${data.inherited}회차 이어받음 · 고치려면 다시 고르고 저장` : '';
+    $('values-inherited').hidden = !data.inherited;
     if (!data.items.length) {
       setMsg('values-msg', '대조할 값이 없습니다', true);
       $('go-next').hidden = false;

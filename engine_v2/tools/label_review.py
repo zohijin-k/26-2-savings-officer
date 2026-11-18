@@ -2,7 +2,11 @@
 
 Serve the labeling screen (127.0.0.1 only)::
 
-    python -B -m engine_v2.tools.label_review serve --rows ROWS --root ROOT --out OUT
+    python -B -m engine_v2.tools.label_review serve --rows ROWS --root ROOT --out OUT [--revalue-forms F1,F2]
+
+A later rows file opens the next round. Stage-one labels carry over by document key; C key-value O/X carry
+over from the previous round for every form not named in ``--revalue-forms`` (without the option every C
+document of the new round is checked again).
 
 Print the summary (numbers and codes only)::
 
@@ -269,14 +273,28 @@ def draw(docs, size, seed):
     return dict(b=b, c=sorted(c), c_alloc={form: alloc[form] for form in sorted(strata)})
 
 
-def _round(number, digest, docs, size, seed):
+#: Decision code for an earlier sampled key that has no measured row in the new rows file.
+ABSENT = 'ABSENT'
+#: Round fields added for later rounds; plans written before them stay valid.
+ROUND_FIELDS = {'round', 'rows_sha256', 'created', 'counts', 'b', 'c', 'c_alloc', 'docs'}
+ROUND_EXTRA = {'revalue', 'label_base', 'carried'}
+
+
+def _carried(previous, docs):
+    """New decision (or ABSENT) of every key sampled in an earlier round: the before → after table."""
+    keys = sorted({key for item in previous for key in item['b'] + item['c']})
+    return {key: docs[key]['decision'] if key in docs else ABSENT for key in keys}
+
+
+def _round(number, digest, docs, size, seed, previous=(), revalue=None, label_base=0):
     sample = draw(docs, size, seed)
     counts = Counter(doc['decision'] for doc in docs.values())
     chosen = sample['b'] + sample['c']
     return dict(round=number, rows_sha256=digest, created=_now(),
                 counts=dict(documents=len(docs), **{d: counts[d] for d in timing.DECISIONS}),
                 b=sample['b'], c=sample['c'], c_alloc=sample['c_alloc'],
-                docs={key: docs[key] for key in sorted(chosen)})
+                docs={key: docs[key] for key in sorted(chosen)},
+                revalue=revalue, label_base=label_base, carried=_carried(previous, docs))
 
 
 def _keys(value):
@@ -291,15 +309,24 @@ def validate_plan(plan):
         batch._require(plan['schema_version'] == VERSION and plan['criteria'] in CRITERIA_VERSIONS)
         batch._require(all(type(plan[k]) is int and plan[k] >= 0 for k in ('seed', 'sample', 'cross_size')))
         batch._require(isinstance(plan['rounds'], list) and plan['rounds'])
+        base = 0
         for number, item in enumerate(plan['rounds'], 1):
-            batch._require(isinstance(item, dict) and set(item) == {'round', 'rows_sha256', 'created', 'counts', 'b',
-                                                                     'c', 'c_alloc', 'docs'})
+            batch._require(isinstance(item, dict) and ROUND_FIELDS <= set(item) <= ROUND_FIELDS | ROUND_EXTRA)
             batch._require(item['round'] == number and SHA_RE.fullmatch(item['rows_sha256']))
             batch._require(_keys(item['b']) and _keys(item['c']) and not set(item['b']) & set(item['c']))
             batch._require(set(item['docs']) == set(item['b']) | set(item['c']))
             for doc in item['docs'].values():
                 batch._require(set(doc) == {'form', 'decision', 'reasons'} and doc['form'] in batch.KINDS)
                 batch._require(doc['decision'] in timing.DECISIONS and isinstance(doc['reasons'], list))
+            revalue = item.get('revalue')
+            batch._require(revalue is None or (isinstance(revalue, list) and all(
+                isinstance(form, str) and form in batch.KINDS for form in revalue) and revalue == sorted(set(revalue))))
+            label_base = item.get('label_base', 0)
+            batch._require(type(label_base) is int and label_base >= base)
+            base = label_base
+            carried = item.get('carried', {})
+            batch._require(isinstance(carried, dict) and _keys(list(carried)) and
+                           all(value in timing.DECISIONS + (ABSENT,) for value in carried.values()))
         cross = plan['cross']
         batch._require(cross is None or (isinstance(cross, dict) and set(cross) == {'round', 'keys', 'created'}
                                          and _keys(cross['keys'])))
@@ -327,18 +354,26 @@ def write_plan(out, plan):
     batch._atomic(batch._target(Path(out) / 'plan.json'), plan)
 
 
-def update_plan(plan, digest, docs, size, seed):
-    """Same rows → same round (re-derived and compared); new rows → a new round. Returns (plan, round)."""
+def update_plan(plan, digest, docs, size, seed, revalue=None, label_base=0):
+    """Same rows → same round (re-derived and compared); new rows → a new round. Returns (plan, round).
+
+    ``revalue`` (sorted form codes, or None for every form) is stored on the round; given again for an existing
+    round it replaces the stored list, omitted it keeps it. ``label_base`` is the number of label records that
+    existed when the round was opened: records before it are carried over from earlier rounds.
+    """
     if plan is None:
         plan = dict(schema_version=VERSION, criteria=CRITERIA, seed=seed, sample=size, cross_size=CROSS_SIZE,
                     rounds=[], cross=None)
     _require(plan['seed'] == seed and plan['sample'] == size, 'PLAN_MISMATCH')
     for item in plan['rounds']:
         if item['rows_sha256'] == digest:
-            fresh = _round(item['round'], digest, docs, size, seed)
-            _require(all(fresh[k] == item[k] for k in ('b', 'c', 'c_alloc', 'docs')), 'PLAN_MISMATCH')
+            fresh = _round(item['round'], digest, docs, size, seed, plan['rounds'][:item['round'] - 1])
+            _require(all(fresh[k] == item[k] for k in ('b', 'c', 'c_alloc', 'docs', 'carried') if k in item),
+                     'PLAN_MISMATCH')
+            if revalue is not None:
+                item['revalue'] = revalue
             return plan, item
-    item = _round(len(plan['rounds']) + 1, digest, docs, size, seed)
+    item = _round(len(plan['rounds']) + 1, digest, docs, size, seed, plan['rounds'], revalue, label_base)
     plan['rounds'].append(item)
     return plan, item
 
@@ -425,6 +460,37 @@ def latest(records):
     return result
 
 
+def blind_rounds(plan, records):
+    """Round in which each key's latest blind record was saved (by its position against ``label_base``)."""
+    bases = [(item['round'], item.get('label_base', 0)) for item in plan['rounds']]
+    result = {}
+    for index, record in enumerate(records):
+        if record['stage'] == 'blind':
+            result[record['key']] = max(number for number, base in bases if base <= index)
+    return result
+
+
+def values_record(plan, best, number, key):
+    """O/X of a C key for round ``number``: its own record, else the one carried from the previous round.
+
+    A record carries over only when the round names its revalue forms (``--revalue-forms``), the key's form is
+    not among them, and the key was a C member of the previous round with the same form.
+    """
+    rounds = plan['rounds']
+    while True:
+        record = best.get(('values', key, number))
+        if record is not None:
+            return record
+        item = rounds[number - 1]
+        revalue = item.get('revalue')
+        if number == 1 or revalue is None or key not in item['c']:
+            return None
+        form, previous = item['docs'][key]['form'], rounds[number - 2]
+        if form in revalue or key not in previous['c'] or previous['docs'][key]['form'] != form:
+            return None
+        number -= 1
+
+
 # ---------------------------------------------------------------- locations
 
 
@@ -474,6 +540,7 @@ class Session:
         self.values = OrderedDict()
         self.records = read_labels(out, repair=True)
         self.latest = latest(self.records)
+        self.origins = blind_rounds(plan, self.records)
         seed = plan['seed']
         members = [k for k in current['b'] + current['c'] if k in keymap]
         self.queue = sorted(members, key=lambda key: rank(seed, 'order', key))
@@ -524,8 +591,16 @@ class Session:
     def blind(self, key, stage='blind'):
         return self.latest.get((stage, key))
 
+    def values_of(self, key):
+        return values_record(self.plan, self.latest, self.current['round'], key)
+
     def values_done(self, key):
-        return ('values', key, self.current['round']) in self.latest
+        return self.values_of(key) is not None
+
+    def inherited(self, key):
+        """Earlier round whose blind label this key carries, else None."""
+        origin = self.origins.get(key)
+        return origin if origin is not None and origin < self.current['round'] else None
 
     def complete(self, key):
         return self.blind(key) is not None and (key not in self.c_keys or self.values_done(key))
@@ -545,6 +620,7 @@ class Session:
             append_label(self.out, record)
             self.records.append(record)
             self.latest = latest(self.records)
+            self.origins = blind_rounds(self.plan, self.records)
 
     # -- views
 
@@ -574,7 +650,9 @@ class Session:
         queue = self.cross_queue() if stage == 'cross' else self.queue
         return dict(key=key, n=queue.index(key) + 1, total=len(queue), pages=pages, form=form,
                     form_label=form_label(form), cutoff=cutoff(form),
-                    label=None if record is None else dict(status=record['status'], reasons=record['reasons']))
+                    label=None if record is None else dict(
+                        status=record['status'], reasons=record['reasons'],
+                        inherited=self.inherited(key) if stage == 'blind' else None))
 
     def engine(self, key):
         if self.blind(key) is None:
@@ -600,12 +678,13 @@ class Session:
                 while len(self.values) > VALUE_CACHE:
                     self.values.popitem(last=False)
             result = self.values[key]
-        record = self.latest.get(('values', key, self.current['round']))
+        record = self.values_of(key)
         marks = dict(record['fields']) if record else {}
         doc = self.doc(key)
+        carried = record is not None and record['round'] != self.current['round']
         return dict(items=[dict(name=item['name'], value=item['value'], mark=marks.get(item['name']))
                            for item in result['items']],
-                    unread=result['unread'],
+                    unread=result['unread'], inherited=record['round'] if carried else None,
                     recomputed=dict(decision=result['decision'], form=result['form'], tier=result['tier'],
                                     same='O' if (result['decision'], result['form']) ==
                                     (doc['decision'], doc['form']) else 'X'))
@@ -835,7 +914,8 @@ def create_app(session):
 # ---------------------------------------------------------------- serve
 
 
-def prepare(rows, root, out, *, sample=None, seed=None, port=DEFAULT_PORT, compute=None, render=None):
+def prepare(rows, root, out, *, sample=None, seed=None, revalue=None, port=DEFAULT_PORT, compute=None,
+            render=None):
     """Validate inputs, fix the sample in plan.json and return a Session (prints counts only)."""
     for name in timing.DISABLED_ENV:
         os.environ.pop(name, None)
@@ -853,7 +933,7 @@ def prepare(rows, root, out, *, sample=None, seed=None, port=DEFAULT_PORT, compu
     plan = read_plan(out)
     seed = (plan['seed'] if plan else DEFAULT_SEED) if seed is None else seed
     sample = (plan['sample'] if plan else DEFAULT_SAMPLE) if sample is None else sample
-    plan, current = update_plan(plan, digest, docs, sample, seed)
+    plan, current = update_plan(plan, digest, docs, sample, seed, revalue, len(read_labels(out)))
     write_plan(out, plan)
     wanted = set(current['b']) | set(current['c'])
     if plan['cross'] is not None:
@@ -861,8 +941,12 @@ def prepare(rows, root, out, *, sample=None, seed=None, port=DEFAULT_PORT, compu
     keymap = key_map(root, wanted)
     session = Session(root, out, plan, current, keymap, port=port, compute=compute, render=render)
     labeled = sum(session.blind(key) is not None for key in session.queue)
+    carried = sum(session.inherited(key) is not None for key in session.queue)
+    carried_values = sum(session.values_done(key) and session.values_of(key)['round'] != current['round']
+                         for key in session.queue if key in session.c_keys)
     print(f'round {current["round"]} rounds {len(plan["rounds"])} b {len(current["b"])} c {len(current["c"])} '
-          f'queue {len(session.queue)} labeled {labeled} missing {session.missing}', flush=True)
+          f'queue {len(session.queue)} labeled {labeled} inherited {carried} values_inherited {carried_values} '
+          f'revalue {_revalue_text(current)} missing {session.missing}', flush=True)
     if session.missing:
         print('WARNING KEYS_MISSING', flush=True)
     return session
@@ -878,10 +962,10 @@ def _lock(out):
     return fd
 
 
-def serve(rows, root, out, *, sample=None, seed=None, port=DEFAULT_PORT):
+def serve(rows, root, out, *, sample=None, seed=None, revalue=None, port=DEFAULT_PORT):
     import logging
     import uvicorn
-    session = prepare(rows, root, out, sample=sample, seed=seed, port=port)
+    session = prepare(rows, root, out, sample=sample, seed=seed, revalue=revalue, port=port)
     fd = _lock(session.out)
     try:
         app = create_app(session)
@@ -909,6 +993,12 @@ def _line(*values):
     return ' '.join(_fmt(v) for v in values)
 
 
+def _revalue_text(item):
+    """ALL (no option: every C document again), NONE (empty list) or the form codes."""
+    revalue = item.get('revalue')
+    return 'ALL' if revalue is None else ' '.join(revalue) or 'NONE'
+
+
 def summarize(plan, records, round_number=None):
     """Summary lines (numbers and fixed codes only) for one round (default: latest)."""
     rounds = {item['round']: item for item in plan['rounds']}
@@ -917,8 +1007,10 @@ def summarize(plan, records, round_number=None):
     current = rounds[round_number]
     best = latest(records)
     blind = {key: best[('blind', key)] for key in current['docs'] if ('blind', key) in best}
-    values = {key: best[('values', key, round_number)] for key in current['c']
-              if ('values', key, round_number) in best}
+    values = {key: values_record(plan, best, round_number, key) for key in current['c']}
+    values = {key: record for key, record in values.items() if record is not None}
+    origins = blind_rounds(plan, records)
+    carried = {key for key in blind if origins[key] < round_number}
     lines = ['LABEL_SUMMARY']
     lines.append('RUN criteria round rounds seed sample alpha')
     lines.append(_line('RUN', CRITERIA, round_number, len(rounds), plan['seed'], plan['sample'], ALPHA))
@@ -930,6 +1022,12 @@ def summarize(plan, records, round_number=None):
     lines.append(_line('SAMPLE', 'C', len(current['c']), sum(k in blind for k in current['c']), len(values)))
     for form, count in sorted(current['c_alloc'].items()):
         lines.append(_line('C_ALLOC', form, count))
+    lines.append('REVALUE forms')
+    lines.append(_line('REVALUE', _revalue_text(current)))
+    lines.append('INHERITED set blind values')
+    for name, keys in (('B', current['b']), ('C', current['c'])):
+        lines.append(_line('INHERITED', name, sum(k in carried for k in keys),
+                           sum(k in values and values[k]['round'] != round_number for k in keys)))
 
     # B: engine FAIL documents; correct when the truth is FAIL as well.
     b_docs = [key for key in current['b'] if key in blind]
@@ -962,6 +1060,7 @@ def summarize(plan, records, round_number=None):
     lines.append(_line('C_DETAIL', 'VALUE_X', sum(any(m == 'X' for _, m in values[k]['fields']) for k in c_done)))
     lines.append(_line('C_DETAIL', 'HOLD', len(c_hold)))
     lines.append(_line('C_DETAIL', 'VALUES_PENDING', c_pending))
+    lines.append(_line('C_DETAIL', 'VALUES_INHERITED', sum(values[k]['round'] != round_number for k in c_done)))
     lines.append('C_TRUTH state documents')
     for state in STATES:
         lines.append(_line('C_TRUTH', state, sum(blind[k]['status'] == state for k in c_done)))
@@ -1015,6 +1114,23 @@ def summarize(plan, records, round_number=None):
     lines.append(_line('REVISED', 'blind', sum(blind[k]['revised'] == 'O' for k in blind)))
     lines.append(_line('REVISED', 'values', sum(values[k]['revised'] == 'O' for k in values)))
 
+    # Documents whose truth was labeled in an earlier round: engine decision before → after, by truth.
+    lines.append('TRANSITION before_set before after after_set documents ' + ' '.join(STATES))
+    table = defaultdict(Counter)
+    changed = 0
+    for key, after in sorted(current.get('carried', {}).items()):
+        if ('blind', key) not in best or origins[key] >= round_number:
+            continue
+        earlier = next(item for item in reversed(plan['rounds'][:round_number - 1]) if key in item['docs'])
+        before = earlier['docs'][key]['decision']
+        after_set = 'B' if key in current['b'] else 'C' if key in current['c'] else 'OUT'
+        table[('B' if key in earlier['b'] else 'C', before, after, after_set)][best[('blind', key)]['status']] += 1
+        changed += before != after
+    for (before_set, before, after, after_set), states in sorted(table.items()):
+        lines.append(_line('TRANSITION', before_set, before, after, after_set, sum(states.values()),
+                           *(states[s] for s in STATES)))
+    lines.append(_line('TRANSITION_CHANGED', changed))
+
     cross = plan['cross']
     pairs = []
     if cross is not None:
@@ -1048,7 +1164,7 @@ def mismatches(plan, records, round_number=None):
         record = best.get(('blind', key))
         if record is None:
             continue
-        values = best.get(('values', key, round_number))
+        values = values_record(plan, best, round_number, key) if key not in b_keys else None
         if key in b_keys:
             if record['status'] == 'FAIL':
                 continue
@@ -1102,6 +1218,7 @@ def parser():
     run.add_argument('--sample', type=int)
     run.add_argument('--seed', type=int)
     run.add_argument('--port', type=int, default=DEFAULT_PORT)
+    run.add_argument('--revalue-forms', dest='revalue_forms')
     report = commands.add_parser('summary')
     report.add_argument('--out', required=True)
     report.add_argument('--round', type=int)
@@ -1111,6 +1228,15 @@ def parser():
     return result
 
 
+def parse_forms(text):
+    """``--revalue-forms`` value: comma-separated form codes (None when the option is absent)."""
+    if text is None:
+        return None
+    forms = [part.strip() for part in text.split(',') if part.strip()]
+    _require(all(form in batch.KINDS for form in forms), 'ARGUMENT_ERROR')
+    return sorted(set(forms))
+
+
 def main(argv=None):
     try:
         args = parser().parse_args(argv)
@@ -1118,7 +1244,8 @@ def main(argv=None):
             if ((args.sample is not None and not 1 <= args.sample <= 100000) or
                     (args.seed is not None and args.seed < 0) or not 1024 <= args.port <= 65535):
                 _fail('ARGUMENT_ERROR')
-            return serve(args.rows, args.root, args.out, sample=args.sample, seed=args.seed, port=args.port)
+            return serve(args.rows, args.root, args.out, sample=args.sample, seed=args.seed,
+                         revalue=parse_forms(args.revalue_forms), port=args.port)
         if args.round is not None and args.round < 1:
             _fail('ARGUMENT_ERROR')
         return (mismatch if args.command == 'mismatch' else summary)(args.out, args.round)

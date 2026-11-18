@@ -51,6 +51,7 @@
 
     <section class="card" id="stage1">
       <h2>1단계 · 정답 상태 <span class="small">(엔진 판정은 저장 뒤에 보입니다)</span></h2>
+      <div id="blind-inherited" class="inherited" hidden></div>
       <div class="choices" id="states">
         <button type="button" class="state" data-state="PASS"><kbd>1</kbd> 적합</button>
         <button type="button" class="state" data-state="NEEDS_REVIEW"><kbd>2</kbd> 확인 필요</button>
@@ -80,6 +81,7 @@
       <div id="values-box" hidden>
         <h3>핵심 값 대조 <span class="small">(화면에만 표시, 저장하지 않음)</span></h3>
         <div id="values-status" class="hint"></div>
+        <div id="values-inherited" class="inherited" hidden></div>
         <table id="values">
           <thead><tr><th>항목</th><th>엔진이 읽은 값</th><th>O/X</th></tr></thead>
           <tbody></tbody>

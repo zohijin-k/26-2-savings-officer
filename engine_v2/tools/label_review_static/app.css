@@ -50,6 +50,7 @@ button.primary kbd { background: transparent; color: #fff; border-color: rgba(25
 .actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 .msg { color: var(--muted); font-size: 12px; }
 .msg.error { color: var(--fail); }
+.inherited { display: inline-block; margin: 2px 0 6px; padding: 2px 8px; border: 1px solid var(--accent); border-radius: 10px; background: var(--on); color: var(--accent); font-size: 12px; font-weight: 600; }
 .notice { background: #fff4e5; border: 1px solid #f0c27b; border-radius: 8px; padding: 8px 10px; }
 .codes { margin: 4px 0 0; padding-left: 18px; }
 .codes li { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }

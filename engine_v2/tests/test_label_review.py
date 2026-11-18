@@ -690,3 +690,121 @@ def test_mismatch_lists_ordinals_and_codes_only(corpus, capsys):
     assert not any(key in out for key in sess.queue)
     assert tool.main(['mismatch', '--out', str(corpus['tmp'] / 'missing')]) == 2
     assert capsys.readouterr().out == 'ERROR INPUT_UNAVAILABLE\n'
+
+
+# ---------------------------------------------------------------- round two carry-over
+
+
+def test_round_two_labels_only_new_and_revalued_documents(tmp_path, env, capsys):
+    """Three round-one labels; round two flips one decision, adds a PASS and a FAIL, revalues one form."""
+    import re
+    root = tmp_path / f'FAKE-input-{SENTINEL}'
+    root.mkdir()
+    source = text_pdf(tmp_path / 'source.pdf')
+    keys = {}
+    for name in ('revalued', 'kept', 'flipped', 'new-pass', 'new-fail'):
+        relative = f'person-{SENTINEL}-{name}/secret-{name}.pdf'
+        (root / relative).parent.mkdir()
+        shutil.copyfile(source, root / relative)
+        keys[name] = timing.document_key(relative)
+    k = keys
+    first_rows = [row(k['revalued'], 'PASS', 'NHIS_PAYMENT'), row(k['kept'], 'PASS', 'INSURANCE_4'),
+                  row(k['flipped'], 'PASS', 'INSURANCE_4')]
+    out = tmp_path / 'labels-out'
+    first = tool.prepare(write_rows(tmp_path / 'rows-1.jsonl', first_rows), root, out, port=PORT,
+                         compute=fake_compute)
+    assert set(first.queue) == {k['revalued'], k['kept'], k['flipped']}
+    http = client(first)
+    for name, status, x in (('revalued', 'PASS', ()), ('kept', 'PASS', ('성명',)), ('flipped', 'PASS', ())):
+        key = k[name]
+        assert post(http, first, f'/api/doc/{key}/blind', {'status': status, 'reasons': []}).status_code == 200
+        names = [item['name'] for item in http.get(f'/api/doc/{key}/values').json()['items']]
+        marks = {item: 'X' if item in x else 'O' for item in names}
+        assert post(http, first, f'/api/doc/{key}/values', {'fields': marks}).status_code == 200
+    assert http.get(f'/api/doc/{k["kept"]}').json()['label']['inherited'] is None  # labeled in this round
+    before = (out / 'labels.jsonl').read_bytes()
+
+    # Round two: one decision flips (PASS → NEEDS_REVIEW), a new PASS and a new FAIL appear, and the
+    # NHIS_PAYMENT extraction changed, so only that form's key values are checked again.
+    second_rows = [row(k['revalued'], 'PASS', 'NHIS_PAYMENT'), row(k['kept'], 'PASS', 'INSURANCE_4'),
+                   row(k['flipped'], 'NEEDS_REVIEW', 'INSURANCE_4',
+                       reasons=[['LOW_OCR_CONFIDENCE', 'NEEDS_REVIEW']]),
+                   row(k['new-pass'], 'PASS', 'INSURANCE_4'), row(k['new-fail'], 'FAIL', 'NHIS_PAYMENT')]
+    rows_two = write_rows(tmp_path / 'rows-2.jsonl', second_rows)
+    capsys.readouterr()
+    second = tool.prepare(rows_two, root, out, port=PORT, compute=fake_compute,
+                          revalue=tool.parse_forms('NHIS_PAYMENT'))
+    console = capsys.readouterr().out
+    assert (out / 'labels.jsonl').read_bytes() == before
+    assert second.current['round'] == 2 and second.current['revalue'] == ['NHIS_PAYMENT']
+    assert set(second.current['b']) == {k['new-fail']}
+    assert set(second.current['c']) == {k['revalued'], k['kept'], k['new-pass']}
+    assert k['flipped'] not in second.queue
+
+    http = client(second)
+    states = {entry['key']: entry['state'] for entry in http.get('/api/session').json()['queue']}
+    # Stage one is needed only for the new PASS and the new FAIL; the revalued form needs O/X again.
+    assert {key for key, state in states.items() if state == 'todo'} == {k['new-pass'], k['new-fail']}
+    assert states[k['revalued']] == 'blind_done' and states[k['kept']] == 'complete'
+    assert http.get(f'/api/doc/{k["kept"]}').json()['label']['inherited'] == 1
+    assert http.get(f'/api/doc/{k["revalued"]}').json()['label']['inherited'] == 1
+    assert http.get(f'/api/doc/{k["new-pass"]}').json()['label'] is None
+    kept = http.get(f'/api/doc/{k["kept"]}/values').json()
+    assert kept['inherited'] == 1 and {i['name']: i['mark'] for i in kept['items']}['성명'] == 'X'
+    revalued = http.get(f'/api/doc/{k["revalued"]}/values').json()
+    assert revalued['inherited'] is None and all(item['mark'] is None for item in revalued['items'])
+
+    # Re-serving the same rows keeps the stored revalue list.
+    again = tool.prepare(rows_two, root, out, port=PORT, compute=fake_compute)
+    assert again.current['round'] == 2 and again.current['revalue'] == ['NHIS_PAYMENT']
+
+    lines = summary_lines(tool.summarize(second.plan, second.records))
+    assert [line for line in lines if line[0] == 'REVALUE'][1] == ['REVALUE', 'NHIS_PAYMENT']
+    assert pick(lines, 'INHERITED', 'C')[2:] == ['2', '1'] and pick(lines, 'INHERITED', 'B')[2:] == ['0', '0']
+    assert pick(lines, 'SAMPLE', 'C')[2:] == ['3', '2', '1']
+    assert pick(lines, 'C_DETAIL', 'VALUES_PENDING')[2] == '1'
+    assert pick(lines, 'C_DETAIL', 'VALUES_INHERITED')[2] == '1'
+    assert pick(lines, 'C', 'EXCL_HOLD')[2:4] == ['1', '1']  # the carried X on the kept document
+    assert pick(lines, 'TRANSITION', 'C', 'PASS', 'PASS', 'C')[5:] == ['2', '2', '0', '0', '0']
+    assert pick(lines, 'TRANSITION', 'C', 'PASS', 'NEEDS_REVIEW', 'OUT')[5:] == ['1', '1', '0', '0', '0']
+    assert pick(lines, 'TRANSITION_CHANGED') == ['TRANSITION_CHANGED', '1']
+
+    # Finish round two: only the targets are labeled; the carried O/X is never asked again.
+    post(http, second, f'/api/doc/{k["new-fail"]}/blind', {'status': 'FAIL', 'reasons': ['R3']})
+    post(http, second, f'/api/doc/{k["new-pass"]}/blind', {'status': 'PASS', 'reasons': []})
+    for key in (k['new-pass'], k['revalued']):
+        names = [item['name'] for item in http.get(f'/api/doc/{key}/values').json()['items']]
+        assert post(http, second, f'/api/doc/{key}/values', {'fields': {n: 'O' for n in names}}).status_code == 200
+    assert second.main_complete()
+    lines = summary_lines(tool.summarize(second.plan, second.records))
+    assert pick(lines, 'B', 'EXCL_HOLD')[2:4] == ['1', '1']
+    assert pick(lines, 'C', 'EXCL_HOLD')[2:4] == ['1', '3']
+    assert [r['round'] for r in second.records if r['stage'] == 'values'] == [1, 1, 1, 2, 2]
+
+    # Without the option every C document of a new round is checked again.
+    plan = json.loads((out / 'plan.json').read_text())
+    plan['rounds'][1]['revalue'] = None
+    assert tool.values_record(tool.validate_plan(plan), tool.latest(second.records), 2, k['kept']) is None
+    assert tool.parse_forms(None) is None
+    with pytest.raises(tool.ToolError):
+        tool.parse_forms('NHIS_PAYMENT,BOGUS')
+
+    capsys.readouterr()
+    assert tool.main(['summary', '--out', str(out)]) == 0
+    assert tool.main(['mismatch', '--out', str(out)]) == 0
+    text = console + capsys.readouterr().out
+    mismatch = [line.split() for line in text.splitlines() if line.startswith('MISMATCH ')]
+    assert [line[3:] for line in mismatch[1:]] == [['C', 'INSURANCE_4', 'PASS', '-', 'PASS', '-', '성명']]
+
+    # Codes and counts only: no path, file name, read value or date anywhere in the output or stored files.
+    stored = (out / 'labels.jsonl').read_text() + (out / 'plan.json').read_text()
+    for marker in ('/', '\\', '.pdf', SENTINEL, 'secret', 'person', root.name, out.name, '2026-03-04'):
+        assert marker not in text, marker
+    for marker in ('.pdf', SENTINEL, 'secret', 'person', root.name, '2026-03-04'):
+        assert marker not in stored, marker
+    assert not re.search(r'\d{4}\s*[-./년]\s*\d{1,2}', text)
+    assert not re.search(r'\d{1,2}\s*[./]\s*\d{1,2}\s*[./]\s*\d{2,4}', text)
+    assert not any(key in text for key in keys.values())
+    assert tool.main(['serve', '--rows', str(rows_two), '--root', str(root), '--out', str(out),
+                      '--revalue-forms', 'BOGUS']) == 2
+    assert capsys.readouterr().out == 'ERROR ARGUMENT_ERROR\n'

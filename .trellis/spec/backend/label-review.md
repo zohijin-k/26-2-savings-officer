@@ -8,7 +8,7 @@ changes operating code; values are recomputed through the service path only for 
 ## Signatures
 
 ```text
-python -B -m engine_v2.tools.label_review serve --rows FAKE-rows.jsonl --root FAKE-input --out FAKE-labels [--sample 150] [--seed 20261117] [--port 8765]
+python -B -m engine_v2.tools.label_review serve --rows FAKE-rows.jsonl --root FAKE-input --out FAKE-labels [--sample 150] [--seed 20261117] [--port 8765] [--revalue-forms NHIS_PAYMENT,...]
 python -B -m engine_v2.tools.label_review summary --out FAKE-labels [--round N]
 python -B -m engine_v2.tools.label_review mismatch --out FAKE-labels [--round N]
 ```
@@ -31,6 +31,17 @@ python -B -m engine_v2.tools.label_review mismatch --out FAKE-labels [--round N]
   round, re-derived and compared (PLAN_MISMATCH); new rows → new round. Seed and size are fixed per out.
   Queue order uses a separate rank so position never reveals B vs C. Cross-check keys (20, `seed:cross`)
   are frozen in plan.json and only after the main queue is complete.
+- Later rounds (carry-over): stage-one labels are per key across rounds, so a new round asks stage one only for
+  B ∪ C members without one. Each new round stores `label_base` (label records existing when it opened; earlier
+  records are "carried"), `carried` ({key: new decision or `ABSENT`} for every key sampled in an earlier round)
+  and `revalue` (sorted form codes from `--revalue-forms`, or null). C values O/X carry over from the previous
+  round only when `revalue` is a list, the key's form is not in it, and the key was a C member of the previous
+  round with the same form (`values_record`); otherwise that round's own O/X is required. No option → null →
+  every C document of the new round needs O/X again. Given again for the same rows the list replaces the stored
+  one; omitted it keeps it. Plans and rounds without these fields stay valid. Value hashes are never stored:
+  the labeler chooses the forms whose extraction changed.
+- Screen: a carried stage-one label shows "N회차 정답 이어받음" (`label.inherited`), carried O/X shows
+  "N회차 이어받음" (`values.inherited`); saving again records a label of the current round.
 - Blind order: `GET /api/doc/{key}` returns ordinal, page count, form, issue-date bounds from
   `doc_timing.requirement(form)` and the own earlier label only. `GET /api/checks` returns, per form in the
   session, the "확인할 것" list (text, R codes, source file name) built by `checks(form)` from the same slot
@@ -57,7 +68,11 @@ Numbers and fixed codes only. B: k = truth FAIL among labeled engine-FAIL docume
 `HOLD_AS_WRONG`; one-sided 95% Clopper-Pearson lower bound (`k = n` → `0.05^(1/n)`). C: wrong pass = truth
 FAIL or any item X in that round's values; documents count only with blind and values; upper bound
 (`k = 0` → `1 − 0.05^(1/n)`). Also truth NEEDS_REVIEW among PASS, per form, per R code, per engine FAIL
-reason, per value item, revised counts and cross-check agreement (status, status+reasons). The bound is
+reason, per value item, revised counts and cross-check agreement (status, status+reasons). Round carry-over:
+`REVALUE` (ALL, NONE or form codes), `INHERITED` per set (carried blind and values),
+`C_DETAIL VALUES_INHERITED`, and `TRANSITION before_set before after after_set documents` with truth counts per
+state for every carried key (after_set B, C or OUT), plus `TRANSITION_CHANGED`. Values in C and in the mismatch
+listing use `values_record`, so carried O/X count. The bound is
 computed by bisection on the exact binomial tail; no new dependency.
 
 ## Mismatch listing
@@ -73,5 +88,6 @@ vocabulary. Never keys, paths, file names, values or dates.
 Synthetic only: sample reproducibility and tamper detection, blind ordering, closed storage without
 sentinel values/paths in labels, plan, console or logs, traversal/symlink refusal, out location, fixed
 host and request checks, no external resources, Clopper-Pearson (0, 1, many; scipy cross-check when
-installed), both HOLD treatments, round merge, cross-check agreement, and the real service path on a
+installed), both HOLD treatments, round merge, cross-check agreement, round-two carry-over (only new documents and revalued forms are asked; transition
+table; output free of paths, names, values and dates), and the real service path on a
 synthetic text PDF.

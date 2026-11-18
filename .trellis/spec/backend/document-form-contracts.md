@@ -25,6 +25,14 @@ Use this contract when changing OCR/text ingestion, resident-number redaction, N
 - Qualification `가구원목록` is JSON with Korean keys `성명`, `생년월일`, `자격취득일`, `자격상실일`. Emit it and `가구원수` only for a complete structure. Partial members must not become an authoritative reduced household count.
 - Emit `자격확인요청일` separately; it is never an issue-date source. Notification number and validity date stay internal, and validity adds no eligibility rule. Do not infer `가입구분` from subscriber-role labels.
 - Insurance row output preserves existing names and fields. Acquisition and parenthesized receipt dates are separate occurrences even when their values are equal. Erase resident-number source tokens even when header identity is ambiguous.
+- Insurance 사업장관리번호 (11-19): no decision reads it on the general (government24/unknown) path;
+  on the portal path its strict 11-digit cell check feeds `portal_row_cells` (review when unreadable).
+  General path: a digit word belongs to the column when it starts at/after the 관리번호 label edge or its
+  centre is at/after it (a centred 11-digit number is wider than the stacked label); hyphens, spaces and
+  two-line splits are joined; a number fused with the name is split at the first Hangul/bracket; a
+  digit-bearing fragment starting with Hangul past the label midpoint is a name. Lookalike letters
+  (O, l) or other marks are never converted, and a total other than 11 digits is not kept: the cell is
+  blank and the 가입내역 row carries `사업장관리번호상태=불확실`. Other columns stay as read.
 - Payment `월별납부내역` is a JSON list with twelve printed months and eight amount cells per row. Empty optional cells serialize as JSON null. Existing `billed_by_month`, `paid_by_month`, `건강보험료` and average aliases retain their existing meanings. `숫자형식교정` records corrected row, column and categories. The dedicated government reader emits no unprinted insurance category.
 - Business proof requires `발급번호`, `과세유형`, `상호`, `사업자등록번호`, `성명`, `생년월일`, `사업장소재지`, `개업일`, `사업자등록일`, `업태`, `종목`, `공동사업자유무` and `발급일`. `업태` and `종목` serialize nonempty string lists as JSON. `공동사업자유무` is `있음` or `없음`. Internal address/list values stay within existing response allowlists.
 - Explicit payment review/failure, supplied subthreshold or invalid confidence, and present incomplete structure prevent monetary fields from establishing income facts. Preserve stored fields for officer inspection. Engine conversion carries a high-confidence explicit `NEEDS_REVIEW` through the existing OCR threshold without changing the stored confidence.

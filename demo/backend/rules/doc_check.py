@@ -58,6 +58,7 @@ CODE_PAGES_UNREADABLE = "PAGES_UNREADABLE"
 CODE_PAGES_DUPLICATED = "PAGES_DUPLICATED"
 CODE_ISSUE_DATE_MISSING = "ISSUE_DATE_MISSING"
 CODE_VIEW_ONLY_DOCUMENT = "VIEW_ONLY_DOCUMENT"
+CODE_ADDRESS_HISTORY_INCOMPLETE = "ADDRESS_HISTORY_INCOMPLETE"
 #: Findings shown on the officer screen only; applicant responses drop them (11-18 열람용).
 OFFICER_ONLY_CODES = frozenset({CODE_VIEW_ONLY_DOCUMENT})
 CODE_PAYMENT_PAGING_UNCERTAIN = "NHIS_PAYMENT_PAGING_UNCERTAIN"
@@ -951,6 +952,18 @@ def _check_document(
             "과거 주소 변동사항이 빠진 초본으로 보입니다. 정부24에서 '과거의 주소 변동사항'을 포함해 다시 발급받으면 거주기간이 정확히 계산됩니다.",
             severity="NEEDS_REVIEW",
             detail="판독한 주소 이력이 1건뿐이어서 과거 주소 변동사항이 생략됐을 가능성이 있습니다. 부적합으로 단정하지 않습니다.",
+        ))
+
+    if (ocr.detected_doc_type is DocType.RESIDENT_ABSTRACT and req.accepts(ocr.detected_doc_type)
+            and ocr.fields.get("주소이력상태") == "불확실"):
+        # 11-18: missing ordinals or a table page without rows may hide history rows; 전입일 is not used.
+        findings.append(CheckFinding(
+            CODE_ADDRESS_HISTORY_INCOMPLETE,
+            "초본 주소 이력 일부를 읽지 못했을 수 있습니다. 전입일과 주소 이력은 담당자가 원본에서 확인합니다.",
+            how_to_fix="그대로 두셔도 담당자가 원본을 확인합니다. 주소 이력이 모든 쪽에 선명하게 보이는 초본 전체를 다시 올리면 더 빨리 확인됩니다.",
+            severity="NEEDS_REVIEW",
+            detail=f"세부 사유: {ocr.fields.get('주소이력불확실사유') or '미상'} "
+                   "(NUMBER_GAP 번호 누락, NUMBER_UNREADABLE 번호 판독 실패, EMPTY_PAGE 표 머리글만 읽힌 쪽).",
         ))
 
     if nhis_review_needed:

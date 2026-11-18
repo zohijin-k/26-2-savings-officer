@@ -315,6 +315,11 @@ def build_facts(form1: dict[str, Any], documents: list[DocFact], payment_months:
     else:
         transfer_in = parse_ymd(form1.get("transferIn"))
         residence_source = FactSource(origin="신청서 입력값(최종 전입일)")
+        if _field(abstract, "전입일") == "불확실":
+            residence_source = FactSource(origin=(
+                "신청서 입력값(최종 전입일) · 초본 주소 이력 일부 미판독 의심으로 판독 전입일을 쓰지 않음; "
+                "담당자 확인 필요"
+            ))
         try:
             evidence = json.loads(_field(abstract, "주소날짜검증자료") or "null")
             if isinstance(evidence, dict) and evidence.get("status") == "MISSING":

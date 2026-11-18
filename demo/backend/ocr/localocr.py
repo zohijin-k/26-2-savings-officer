@@ -202,6 +202,23 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
         if len(ex.history) >= 2:
             fields["주소변동내역"] = "포함"
 
+    # 주소 이력 누락 의심 (11-18): 순번이 1부터 이어지지 않거나, 번호를 못 읽었거나, 표 머리글은 있는데
+    # 이력 줄을 0건 읽은 쪽이 있으면 전입일·주소이력건수를 '불확실'로 두고 doc_check가 확인필요로 보낸다.
+    # 번호 누락과 번호 판독 실패는 세부 사유를 나눠 남긴다.
+    if ex.detected_type == v2types.RESIDENT_ABSTRACT:
+        uncertain = [code for code, hit in (
+            ("NUMBER_GAP", getattr(ex, "history_numbers", "NA") == "GAP"),
+            ("NUMBER_UNREADABLE", getattr(ex, "history_numbers", "NA") == "UNREADABLE"),
+            ("EMPTY_PAGE", getattr(ex, "history_empty_page", False)),
+        ) if hit]
+        if uncertain:
+            fields["주소이력상태"] = "불확실"
+            fields["주소이력불확실사유"] = ",".join(uncertain)
+            for label in ("전입일", "주소이력건수"):
+                if label in fields:
+                    fields[label] = "불확실"
+                bboxes.pop(label, None)
+
     passed = sum(v.passed for v in ex.validations)
     fields["판독검증"] = f"{passed}/{len(ex.validations)} 통과"
     failed = [v.name for v in ex.validations if not v.passed]

@@ -137,6 +137,11 @@ class ResidentAbstractResult:
     classification_evidence: str = ""
     #: 쪽 수 확인에서 뺀 내용 없는 쪽 수 (page_markers에 들어 있지 않다).
     blank_pages: int = 0
+    #: 주소 이력 순번 상태 (11-18): CONTIGUOUS(1..N 모두), GAP(빠진 번호·1로 시작 안 함·중복),
+    #: UNREADABLE(번호 없는 이력이 있어 연속성 확인 불가), NA(이력 없음).
+    history_numbers: str = "NA"
+    #: 주소 표 머리글은 찾았는데 이력 줄을 0건 읽은 쪽이 있음 (쪽 수에서 뺀 중복 빈 쪽 제외).
+    history_empty_page: bool = False
 
 
 # --- 유틸 ---------------------------------------------------------------
@@ -398,6 +403,7 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
     warnings: list[str] = []
 
     contentless: list[bool] = []
+    table_without_rows: list[bool] = []
     #: 표 머리글만 되풀이되고 이력 줄·내용이 없는 쪽 (다른 쪽과 같은 쪽표기일 때만 쪽 수에서 뺀다).
     table_only: list[bool] = []
     for p, r in pages:
@@ -407,13 +413,14 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
         headers.append(_parse_header(lines))
         bounds = _table_bounds(lines)
         contentless.append(bounds is None and _content_chars(lines, BODY_TOP_Y) <= BLANK_BODY_MAX_CHARS)
-        before = len(entries)
+        before, notes_before = len(entries), len(note_numbers)
         if bounds:
             _parse_rows(lines, *bounds, p.page, entries, pending, note_numbers, observed_numbers)
         else:
             warnings.append(f"page {p.page}: 주소 이력 표를 찾지 못함")
         table_only.append(bool(bounds) and len(entries) == before
                           and _content_chars(lines, bounds[0]) <= BLANK_BODY_MAX_CHARS)
+        table_without_rows.append(bool(bounds) and len(entries) == before and len(note_numbers) == notes_before)
 
     # --- 서류 종류 ---
     titles = "".join(h["title"] for h in headers)
@@ -582,8 +589,16 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
             multi = True
         else:
             sheets.append([headers[i]["page_no"]])
+    # 주소 이력 누락 감지 (11-18): 순번은 1부터 빠짐없이 이어져야 하고(메모 줄도 자기 순번을 가진다),
+    # 표 머리글을 찾은 쪽은 이력 줄을 한 건 이상 읽어야 한다. 쪽 수에서 뺀 중복 빈 쪽은 보지 않는다.
+    numbers = sorted([e.no for e in entries if e.no is not None] + note_numbers)
+    history_numbers = ("NA" if not entries else
+                       "UNREADABLE" if any(e.no is None for e in entries) else
+                       "CONTIGUOUS" if numbers == list(range(1, len(numbers) + 1)) else "GAP")
+    history_empty_page = any(table_without_rows[i] for i in kept)
     return ResidentAbstractResult(
         detected, tconf, fields, entries, validations, warnings,
+        history_numbers=history_numbers, history_empty_page=history_empty_page,
         sheet_markers=sheets if multi else None,
         page_markers=[headers[i]["page_no"] for i in kept],
         classification_evidence=classification_evidence,

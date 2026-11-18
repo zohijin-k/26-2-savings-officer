@@ -155,3 +155,11 @@ candidate rules would change, without changing production behaviour.
   image bytes / same reading text (-1 none). Document `path`: MARKER_DUP (the only production
   PAGES_DUPLICATED route: repeated counted markers), IMAGE_SAME, OTHER. Summary lines `D10`,
   `D10_DOC` and `D10_PAGE` (document ordinal and page number, never a key).
+- Row format 8 adds `t3` for NHIS_PAYMENT rows (shadow, production unchanged): the held T3 change
+  (the legacy 합계 row read from the 건강보험료 column the months come from, not the 고지금액 group
+  centre) is applied in memory by exact source substitution of `nhis_payment._extract_monthly_detail`
+  (`T3_SOURCE`; a source that no longer matches raises `T3_SOURCE_CHANGED`, recorded as a shadow
+  error, never guessed). `layout` is `amount_layout` (GOV rows: before/after `NA`); `before`/`after`
+  are MATCH, MISMATCH or NO_TOTAL of `monthly_total_matches` on the production pages; `decision` is
+  the verdict of a second read with the change installed (OCR reused). Summary lines `T3`
+  (match counts, newly matching, lost, PASS before/after), `T3_DECISION`, `T3_TOTAL`, `T3_LAYOUT`.

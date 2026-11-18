@@ -33,7 +33,7 @@ from unittest.mock import patch
 from . import batch_assess as batch
 from . import doc_timing as timing
 
-VERSION = 7
+VERSION = 8
 #: Format 1 (commit 2) had no consent/payment/p1/c1 keys. Format 2 had no ``recovery`` key.
 KINDS = batch.KINDS
 TIERS = timing.TIERS
@@ -659,6 +659,31 @@ D10_SOURCES = ('TEXT_LAYER', 'EMBEDDED', 'RENDER', 'UPLOAD', 'NA')
 D10_INK_THRESHOLD = 128   # grey level below which a pixel counts as ink
 D10_RENDER_DPI = 72       # low-resolution render of the page as displayed, for its ink ratio
 D10_MAX_PAGES = 200
+#: T3 (11-19): the legacy 합계 row read from the 건강보험료 column the months are read from, not the
+#: 고지금액 group centre (held patch HELD-T3). State of the 합계 check before and after.
+T3_TOTALS = ('MATCH', 'MISMATCH', 'NO_TOTAL', 'NA')
+#: Exact source substitution of the held patch inside ``nhis_payment._extract_monthly_detail``.
+T3_SOURCE = (
+    ('''        lines = common.page_lines(page, result)
+        header_indices = _month_header(lines)
+''', '''        page_total_care = page_care_xs[0] if page_care_xs else None
+        total_components = bool(page_health_xs and page_total_care is not None and
+                                page_health_xs[0] != page_total_care)
+        total_x = page_health_xs[0] if total_components else page_charge_xs[0] if page_charge_xs else None
+        if not total_components and grouped:
+            total_x = page_health_xs[0] if page_health_xs else None
+        lines = common.page_lines(page, result)
+        header_indices = _month_header(lines)
+''', 1),
+    ('''amounts and page_charge_xs:
+                    chosen = _closest_amount(amounts, page_charge_xs[0])''',
+     '''amounts and page_charge_xs and total_x is not None:
+                    chosen = _closest_amount(amounts, total_x)''', 1),
+    ('''amounts and page_charge_xs:
+                        chosen = _closest_amount(amounts, page_charge_xs[0])''',
+     '''amounts and page_charge_xs and total_x is not None:
+                        chosen = _closest_amount(amounts, total_x)''', 1),
+)
 #: D8: address-history ordinal state of resident abstracts read by LocalOcr (production 11-18 rule).
 HISTORY_NUMBERS = ('CONTIGUOUS', 'GAP', 'UNREADABLE', 'NA')
 #: S2: sheets read poorly (few Hangul characters) or of unclassified documents are re-read rotated.
@@ -705,6 +730,38 @@ def c1_patch():
     with patch.object(doc_check, 'ESSENTIAL_FIELD_UNREADABLE_CODES',
                       set(doc_check.ESSENTIAL_FIELD_UNREADABLE_CODES) - C1_EXCLUDED):
         yield
+
+
+def t3_function():
+    """``_extract_monthly_detail`` with the held T3 change, built from the current source in memory."""
+    import inspect
+    import textwrap
+    from engine_v2.extractors import nhis_payment as legacy
+    source = textwrap.dedent(inspect.getsource(legacy._extract_monthly_detail))
+    for old, new, count in T3_SOURCE:
+        if source.count(old) != count:
+            raise RuntimeError('T3_SOURCE_CHANGED')
+        source = source.replace(old, new)
+    namespace = dict(vars(legacy))
+    exec(compile(source, legacy.__file__, 'exec'), namespace)
+    return namespace['_extract_monthly_detail']
+
+
+@contextmanager
+def t3_patch():
+    """Shadow T3: the 합계 row is read from the column the monthly 건강보험료 values come from."""
+    from engine_v2.extractors import nhis_payment as legacy
+    with patch.object(legacy, '_extract_monthly_detail', t3_function()):
+        yield
+
+
+def t3_total_state(pages):
+    """MATCH / MISMATCH / NO_TOTAL of the legacy 합계 check on these pages under the installed reader."""
+    from engine_v2.extractors import nhis_payment as legacy
+    (_, _, _, totals, *_), _ = legacy._extract_monthly_detail(pages)
+    if not totals:
+        return 'NO_TOTAL'
+    return 'MATCH' if _validations(legacy.extract(pages)).get('monthly_total_matches') else 'MISMATCH'
 
 
 def _validations(result):
@@ -1562,13 +1619,30 @@ def pages_duplicated_check(trace, path, row):
                       consistent=consistent, pages=rows)
 
 
+def total_row_shadow(trace, path, row):
+    """T3: legacy 합계 check before/after reading the 합계 row from the 건강 column, and the verdict after."""
+    from engine_v2.extractors import nhis_payment as legacy, nhis_payment_gov as gov
+    pages = trace.payment[0] if trace.payment is not None else None
+    if pages is None or gov.recognizes(pages):
+        layout = 'NA' if pages is None else 'GOV'
+        row['t3'] = dict(layout=layout, before='NA', after='NA', decision=row['decision'])
+        return
+    layout = legacy.amount_layout(pages)
+    before = t3_total_state(pages)
+    with t3_patch():
+        after = t3_total_state(pages)
+    shadow = _shadow_read(trace, path, lambda stack: stack.enter_context(t3_patch()))
+    decision, _ = _assess(path, _kind(shadow.detected_doc_type), shadow)
+    row['t3'] = dict(layout=layout if layout in G4_LAYOUTS else 'NA', before=before, after=after, decision=decision)
+
+
 def blank_row(key, code='NONE'):
     return dict(schema_version=VERSION, key=key, code=code, form='X', tier='none', decision='NOT_ASSESSED',
                 reasons=[], exit=None, reclass=None, exceptions={}, ocr_chars='NA', cause=None,
                 struct=None, scan=None, scan_code=None, text_all=None,
                 g1={name: None for name in CANDIDATES}, g1_decision={name: None for name in CANDIDATES},
                 consent=None, c1=None, payment=None, p1=None, c2=None, a2=None, a4=None, recovery=None,
-                s1=None, s2=None, s3=None, s4=None, early=None, billing=None, history=None, g4=None, d10=None, shadow_errors=[])
+                s1=None, s2=None, s3=None, s4=None, early=None, billing=None, history=None, g4=None, d10=None, t3=None, shadow_errors=[])
 
 
 def gave_up(row):
@@ -1612,6 +1686,7 @@ def process(path, key, trace):
                                     ('D6', True, lambda: failure_detail(trace, path, row, ocr)),
                                     ('D8', row['form'] == 'RESIDENT_ABSTRACT', lambda: history_check(trace, row)),
                                     ('G4', row['form'] == 'NHIS_PAYMENT', lambda: amount_guard_check(trace, row, ocr)),
+                                    ('T3', row['form'] == 'NHIS_PAYMENT', lambda: total_row_shadow(trace, path, row)),
                                     ('D10', any(code == 'PAGES_DUPLICATED' for code, _ in row['reasons']),
                                      lambda: pages_duplicated_check(trace, path, row)),
                                     ('QUALITY', True, lambda: quality_shadows(trace, path, row, ocr))):
@@ -1662,7 +1737,7 @@ def validate_row(row):
     keys = {'schema_version', 'key', 'code', 'form', 'tier', 'decision', 'reasons', 'exit', 'reclass',
             'exceptions', 'ocr_chars', 'cause', 'struct', 'scan', 'scan_code', 'text_all', 'g1', 'g1_decision',
             'consent', 'c1', 'payment', 'p1', 'c2', 'a2', 'a4', 'recovery', 's1', 's2', 's3', 's4',
-            'early', 'billing', 'history', 'g4', 'd10', 'shadow_errors'}
+            'early', 'billing', 'history', 'g4', 'd10', 't3', 'shadow_errors'}
     req(isinstance(row, dict) and set(row) == keys and row['schema_version'] == VERSION)
     req(isinstance(row['key'], str) and timing.KEY_RE.fullmatch(row['key']) is not None)
     req(row['code'] in ROW_CODES and row['form'] in KINDS and row['tier'] in TIERS and row['decision'] in DECISIONS)
@@ -1687,7 +1762,7 @@ def validate_row(row):
         and all(_code_in(v, DECISIONS, True) for v in row['g1_decision'].values()))
     req(isinstance(row['shadow_errors'], list)
         and set(row['shadow_errors']) <= {'G1', 'CONSENT', 'PAYMENT', 'A4', 'QUALITY', 'S1', 'S2', 'S3', 'S4', 'D6',
-                                          'D8', 'G4', 'D10'})
+                                          'D8', 'G4', 'D10', 'T3'})
     req(row['early'] is None or (isinstance(row['early'], dict) and set(row['early']) == {'source', 'gap'}
                                  and row['early']['source'] in EARLY_SOURCES and row['early']['gap'] in EARLY_GAPS))
     req(row['g4'] is None or (isinstance(row['g4'], dict) and set(row['g4']) == {'layout', 'zero', 'ratio', 'header',
@@ -1695,6 +1770,9 @@ def validate_row(row):
                               and row['g4']['layout'] in G4_LAYOUTS and row['g4']['header'] in G4_HEADER
                               and all(row['g4'][k] in ('O', 'X') for k in ('zero', 'ratio', 'larger'))))
     req(row['d10'] is None or _valid_d10(row['d10']))
+    req(row['t3'] is None or (isinstance(row['t3'], dict) and set(row['t3']) == {'layout', 'before', 'after', 'decision'}
+                              and row['t3']['layout'] in G4_LAYOUTS + ('GOV',) and row['t3']['before'] in T3_TOTALS
+                              and row['t3']['after'] in T3_TOTALS and row['t3']['decision'] in DECISIONS))
     req(row['history'] is None or (isinstance(row['history'], dict) and set(row['history']) == {'numbers', 'empty_page'}
                                    and row['history']['numbers'] in HISTORY_NUMBERS
                                    and row['history']['empty_page'] in ('O', 'X', 'NA')))
@@ -2000,6 +2078,18 @@ def _stage_summary(done):
                        sum(r['history']['empty_page'] == 'O' for r in history)))
     _counted(lines, 'D8_DECISION numbers empty_page decision n',
              ((r['history']['numbers'], r['history']['empty_page'], r['decision']) for r in history))
+    t3 = [r for r in done if r['t3'] is not None and r['t3']['before'] != 'NA']
+    lines.append('T3 legacy_docs match_before match_after newly_match lost_match pass_before pass_after')
+    lines.append(_line('T3', len(t3), *(sum(r['t3'][k] == 'MATCH' for r in t3) for k in ('before', 'after')),
+                       sum(r['t3']['before'] != 'MATCH' and r['t3']['after'] == 'MATCH' for r in t3),
+                       sum(r['t3']['before'] == 'MATCH' and r['t3']['after'] != 'MATCH' for r in t3),
+                       sum(r['decision'] == 'PASS' for r in t3), sum(r['t3']['decision'] == 'PASS' for r in t3)))
+    _counted(lines, 'T3_DECISION before after n', ((r['decision'], r['t3']['decision']) for r in t3))
+    _counted(lines, 'T3_TOTAL before after decision_before decision_after n',
+             ((r['t3']['before'], r['t3']['after'], r['decision'], r['t3']['decision']) for r in t3))
+    _counted(lines, 'T3_LAYOUT layout before after decision_before decision_after n',
+             ((r['t3']['layout'], r['t3']['before'], r['t3']['after'], r['decision'], r['t3']['decision'])
+              for r in t3))
     d10 = [r for r in done if r['d10'] is not None]
     lines.append('D10 dup_docs marker_dup image_same text_same other replay_mismatch')
     lines.append(_line('D10', len(d10), *(sum(r['d10'][k] == 'O' for r in d10)

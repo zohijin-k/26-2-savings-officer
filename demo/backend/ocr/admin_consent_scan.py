@@ -15,6 +15,10 @@ MARK_RATIO = 0.035
 ALIGN_PEAK_STRONG = 20.0
 #: 위치 맞춤 뒤 칸 테두리 인쇄 차이를 빼려고 칸 각 변에서 안쪽으로 줄이는 폭(pt).
 INNER_INSET_PT = 2.0
+#: 표시 판독을 '확실'로 보는 기준 (11-18): 위치가 확실히 맞았고, 고른 칸의 추가 잉크가 이 비율 이상이며
+#: (합성 선명 표시 0.52~0.66), 다른 칸은 MARK_RATIO의 절반 이하일 때만. 아니면 '불확실'.
+MARK_CONFIDENT_RATIO = 0.15
+MARK_EMPTY_RATIO = MARK_RATIO / 2
 
 
 def _page_image(path: Path, width: int) -> Image.Image:
@@ -61,24 +65,33 @@ def _phase_shift(scan: Image.Image, template: Image.Image) -> tuple[int, int, fl
     return 2 * int(x), 2 * int(y), strength
 
 
-def _marks(scan, template, spec, page_width, page_height, inset=0.0) -> list[str]:
-    selected = []
+def _box_ratios(scan, template, spec, page_width, page_height, inset=0.0) -> dict[str, float]:
+    ratios = {}
     for key, label in (("agree.동의함", "동의함"), ("agree.동의하지 않음", "동의하지 않음")):
         field = spec.fields.get(key)
         if not field:
             continue
         x0, y0, x1, y1 = field["box"]
         box = [x0 + inset, y0 + inset, x1 - inset, y1 - inset]
-        if _extra_ink_ratio(scan, template, box, page_width, page_height) > MARK_RATIO:
-            selected.append(label)
-    return selected
+        ratios[label] = _extra_ink_ratio(scan, template, box, page_width, page_height)
+    return ratios
+
+
+def mark_confidence(ratios: dict[str, float], aligned: bool) -> str:
+    """'확실' only for one clear mark and one clearly empty box after a strong alignment."""
+    selected = [label for label, ratio in ratios.items() if ratio > MARK_RATIO]
+    if not aligned or len(ratios) != 2 or len(selected) != 1:
+        return "불확실"
+    others = [ratio for label, ratio in ratios.items() if label != selected[0]]
+    confident = ratios[selected[0]] >= MARK_CONFIDENT_RATIO and all(ratio <= MARK_EMPTY_RATIO for ratio in others)
+    return "확실" if confident else "불확실"
 
 
 def inspect_admin_consent_scan(path_value: str) -> dict[str, str]:
     """Return safe checklist observations only; never stores an image or OCR value."""
     spec = form_coords.load("서식5")
     if spec is None or not spec.available:
-        return {"동의여부": "확인필요", "서명잉크확인": "확인필요"}
+        return {"동의여부": "확인필요", "서명잉크확인": "확인필요", "동의표시판독": "불확실"}
     import fitz
 
     with fitz.open(spec.template) as template_pdf:
@@ -91,9 +104,9 @@ def inspect_admin_consent_scan(path_value: str) -> dict[str, str]:
         scan = _page_image(Path(path_value), width)
         scan = scan.resize(template_image.size)
     except Exception:
-        return {"동의여부": "확인필요", "서명잉크확인": "확인필요"}
+        return {"동의여부": "확인필요", "서명잉크확인": "확인필요", "동의표시판독": "불확실"}
 
-    selected = _marks(scan, template_image, spec, page_width, page_height)
+    ratios = _box_ratios(scan, template_image, spec, page_width, page_height)
     try:
         dx, dy, strength = _phase_shift(scan, template_image)
     except Exception:  # noqa: BLE001 - 위치 맞춤을 못 하면 지금 판독을 그대로 쓴다
@@ -102,10 +115,13 @@ def inspect_admin_consent_scan(path_value: str) -> dict[str, str]:
         # 위치가 확실히 맞을 때만, 옮긴 스캔의 칸 안쪽(테두리 인쇄 차이 제외)으로 표시를 다시 센다.
         # 표시가 정확히 하나가 아니면 지금처럼 확인필요다. 상관이 약하면 지금 판독을 그대로 둔다.
         moved = scan.transform(scan.size, Image.Transform.AFFINE, (1, 0, dx, 0, 1, dy), fillcolor=255)
-        selected = _marks(moved, template_image, spec, page_width, page_height, inset=INNER_INSET_PT)
+        ratios = _box_ratios(moved, template_image, spec, page_width, page_height, inset=INNER_INSET_PT)
+    selected = [label for label, ratio in ratios.items() if ratio > MARK_RATIO]
     signature = spec.fields.get("signature")
     signed = bool(signature and _extra_ink_ratio(scan, template_image, signature["box"], page_width, page_height) > 0.012)
     return {
         "동의여부": selected[0] if len(selected) == 1 else "확인필요",
         "서명잉크확인": "있음" if signed else "확인필요",
+        # 판독 신뢰도(고정 낱말). '동의하지 않음' FAIL은 이 값이 '확실'이고 화질 기준을 넘을 때만 (11-18).
+        "동의표시판독": mark_confidence(ratios, strength >= ALIGN_PEAK_STRONG),
     }

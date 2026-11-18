@@ -6,8 +6,10 @@ No automatic download and no filename-based recognition.
 from __future__ import annotations
 
 from functools import lru_cache
+import logging
 import math
 import os
+import re
 import threading
 
 from ...tools.fetch_own_models import MODEL_DIR, verify_models
@@ -37,11 +39,31 @@ def polygon_bbox(points, source_size, map_size):
     return tuple(float(v) for v in (*pts.min(axis=0), *pts.max(axis=0)))
 
 
-#: onnxruntime threads per session. Page workers are bounded so that
-#: workers x INTRA_OP_THREADS never exceeds the logical CPU count.
-INTRA_OP_THREADS = 2
-#: Upper bound on concurrent page sessions (memory: one det+rec pair each).
-MAX_PAGE_WORKERS = 4
+_log = logging.getLogger(__name__)
+
+
+def _env_count(name: str, default: int) -> int:
+    """Positive integer from environment variable ``name``; unset or empty → default.
+
+    Anything else (0, negative, not 1-6 plain decimal digits) gives the default, with one
+    warning line that names the variable but never echoes its value.
+    """
+    raw = os.environ.get(name, '').strip()
+    if not raw:
+        return default
+    if re.fullmatch('[0-9]{1,6}', raw) and int(raw) > 0:
+        return int(raw)
+    _log.warning('%s is not a positive integer; using default %d', name, default)
+    return default
+
+
+#: onnxruntime threads per session (env OWN_OCR_INTRA_THREADS, read at import).
+#: Page workers are bounded so that workers x INTRA_OP_THREADS never exceeds the
+#: logical CPU count.
+INTRA_OP_THREADS = _env_count('OWN_OCR_INTRA_THREADS', 2)
+#: Upper bound on concurrent page sessions (memory: one det+rec pair each);
+#: env OWN_OCR_PAGE_WORKERS, read at import. 1 reads pages sequentially.
+MAX_PAGE_WORKERS = _env_count('OWN_OCR_PAGE_WORKERS', 4)
 _worker = threading.local()
 
 

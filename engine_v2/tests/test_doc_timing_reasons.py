@@ -139,7 +139,7 @@ def test_cli_rows_carry_registered_reasons_only(tmp_path, monkeypatch, capsys):
     out = tmp_path / 'out'
     assert tool.main(['--root', str(root), '--out', str(out), '--warmup', '0']) == 0
     rows = [json.loads(line) for line in (out / 'rows.jsonl').read_text().splitlines()]
-    assert rows and all(row['schema_version'] == 2 and 'reasons' in row for row in rows)
+    assert rows and all(row['schema_version'] == tool.VERSION and 'reasons' in row for row in rows)
     assert all(code in SAFE_CODES | {'UNKNOWN_CODE'} for row in rows for code, _ in row['reasons'])
     text = (out / 'rows.jsonl').read_text() + (out / 'summary_brief.txt').read_text() + capsys.readouterr().out
     assert SECRET[:4] not in text and 'secret' not in text and str(tmp_path) not in text

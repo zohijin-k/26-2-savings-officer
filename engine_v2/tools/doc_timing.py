@@ -12,7 +12,9 @@ change arguments, results or exceptions.
 Screen output and summary_brief.txt contain numbers, O/X and fixed codes only.
 rows.jsonl carries a 16-hex document key, never a path, name or value. Row format 2
 adds ``reasons``: distinct registered verdict reason codes with their severity,
-recorded outside the timed region (unregistered codes become UNKNOWN_CODE).
+recorded outside the timed region (unregistered codes become UNKNOWN_CODE). Row
+format 3 adds ``intra_threads`` and ``page_workers``: the own OCR settings in force
+(``OWN_OCR_INTRA_THREADS`` / ``OWN_OCR_PAGE_WORKERS`` after validation, defaults 2 / 4).
 """
 from __future__ import annotations
 
@@ -39,9 +41,10 @@ from unittest.mock import patch
 
 from . import batch_assess as batch
 
-VERSION = 2
-#: Row format 1 (fea711b) had no ``reasons``; both remain readable.
-READABLE_VERSIONS = (1, 2)
+VERSION = 3
+#: Row format 1 (fea711b) had no ``reasons``; format 2 had no OCR thread settings.
+#: All remain readable.
+READABLE_VERSIONS = (1, 2, 3)
 SEVERITIES = ('FAIL', 'NEEDS_REVIEW', 'INFO', 'PASS', 'OTHER')
 UNKNOWN_CODE = 'UNKNOWN_CODE'
 ENGINES = ('own',)
@@ -422,12 +425,13 @@ def measure(path, timer, *, slot=requirement):
 # ---------------------------------------------------------------- rows
 
 
-def _blank_row(doc, engine, phase, repeat, code):
+def _blank_row(doc, engine, phase, repeat, code, settings):
     return dict(schema_version=VERSION, key=doc['key'], engine=engine, phase=phase, repeat=repeat, code=code,
                 form='X', text_layer=doc.get('text_layer'), pages=doc.get('pages'),
                 page_bin=page_bin(doc['pages']) if doc.get('pages') else None,
                 first_image_later_text=doc.get('first_image_later_text', 0), tier='none',
-                decision='NOT_ASSESSED', ocr_pages=0, text_pages=0, cold_start=0.0, seconds=None, reasons=[])
+                decision='NOT_ASSESSED', ocr_pages=0, text_pages=0, cold_start=0.0, seconds=None, reasons=[],
+                intra_threads=settings['intra_threads'], page_workers=settings['page_workers'])
 
 
 def _finite(value):
@@ -441,7 +445,11 @@ def validate_row(row):
     batch._require(isinstance(row, dict) and row.get('schema_version') in READABLE_VERSIONS)
     if row['schema_version'] >= 2:
         keys = keys | {'reasons'}
+    if row['schema_version'] >= 3:
+        keys = keys | {'intra_threads', 'page_workers'}
     batch._require(set(row) == keys)
+    if row['schema_version'] >= 3:
+        batch._require(all(type(row[k]) is int and row[k] >= 1 for k in ('intra_threads', 'page_workers')))
     batch._require(isinstance(row['key'], str) and KEY_RE.fullmatch(row['key']) is not None)
     batch._require(row['engine'] in ENGINES and row['phase'] in PHASES and row['code'] in ROW_CODES)
     batch._require(type(row['repeat']) is int and row['repeat'] >= 0)
@@ -541,6 +549,10 @@ def summarize(rows, meta):
     lines.append('RUN engine repeat warmup sample limit strata_basis documents_selected')
     lines.append(_line('RUN', 'own', options['repeat'], options['warmup'], options['sample'], options['limit'],
                        options['strata_basis'], meta['counts']['selected']))
+    threads = options.get('ocr_threads') or {}
+    lines.append('OCR_THREADS engine intra_threads page_workers page_workers_cap')
+    lines.append(_line('OCR_THREADS', 'own', threads.get('intra_threads'), threads.get('page_workers'),
+                       threads.get('page_workers_cap')))
     skipped = Counter(r['code'] for r in rows if r['phase'] == 'skipped')
     errors = Counter(r['code'] for r in rows if r['phase'] == 'measure' and r['code'] != 'NONE')
     lines.append('SKIP code documents')
@@ -711,6 +723,13 @@ def own_threads():
         return dict(intra=None, inter=None, loaded='X')
 
 
+def ocr_settings():
+    """Own OCR settings in force: validated env values and the CPU-bounded worker cap."""
+    from engine_v2.pipeline.ocr import own
+    return dict(intra_threads=own.INTRA_OP_THREADS, page_workers=own.MAX_PAGE_WORKERS,
+                page_workers_cap=own.page_workers(own.MAX_PAGE_WORKERS))
+
+
 def own_available():
     from engine_v2.pipeline.ocr import own
     from engine_v2.tools.fetch_own_models import ASSETS
@@ -747,12 +766,13 @@ def run(root, out, *, engines=('own',), repeat=1, warmup=3, sample=None, seed=20
     if not own_available():
         _fail('ENGINE_UNAVAILABLE')
     strata_forms = load_strata(strata_from) if strata_from is not None else None
+    settings = ocr_settings()
 
     meta = dict(schema_version=VERSION, environment=environment(),
                 options=dict(engines=list(engines), repeat=repeat, warmup=warmup, sample=sample, seed=seed,
                              limit=limit, strata_basis='NONE' if sample is None else
                              'FORM' if strata_forms is not None else 'PAGES_TEXT',
-                             external_ocr_disabled='O'),
+                             external_ocr_disabled='O', ocr_threads=settings),
                 counts={}, cold_start=None, own_threads=None)
     env = meta['environment']
     if env['load_start'][0] > (env['cores']['logical'] or 1) / 2:
@@ -803,7 +823,7 @@ def run(root, out, *, engines=('own',), repeat=1, warmup=3, sample=None, seed=20
 
         for doc in selected:
             if doc['code'] != 'NONE':
-                emit(_blank_row(doc, 'own', 'skipped', 0, doc['code']))
+                emit(_blank_row(doc, 'own', 'skipped', 0, doc['code'], settings))
         processable = [doc for doc in selected if doc['code'] == 'NONE']
         timer = StageTimer()
         started = time.perf_counter()
@@ -816,7 +836,7 @@ def run(root, out, *, engines=('own',), repeat=1, warmup=3, sample=None, seed=20
             for phase, number, batch_docs in plan:
                 timer.phase = phase
                 for index, doc in enumerate(batch_docs, 1):
-                    row = _blank_row(doc, 'own', phase, number, 'NONE')
+                    row = _blank_row(doc, 'own', phase, number, 'NONE', settings)
                     try:
                         with batch.guarded():
                             row.update(measure(doc['path'], timer))

@@ -54,6 +54,10 @@ SHEET_SPREAD = 25.0
 BODY_TOP_Y = 26.0
 #: 본문 영역 글자가 이 수 이하이면 내용 없는 쪽(스캔 잡티 허용).
 BLANK_BODY_MAX_CHARS = 3
+#: 빈 쪽 판정에서 글자로 세지 않는 것 (11-18 L1 보완): 쪽표기·쪽 번호("2/3", "- 3 -"),
+#: 한글·영문·숫자가 아닌 잡티, 쪽 테두리가 글자로 읽힌 한 글자.
+_PAGE_MARK_TEXT = re.compile(r"^[\-–—(]*\d{1,2}(?:/\d{1,2})?[\-–—)]*$")
+_FRAME_GLYPHS = frozenset("|lI1!/\\")
 COL_NO_MAX_X = 11.5
 COL_ADDR_MAX_X = 50.0
 COL_OCCUR_X = (50.0, 61.0)
@@ -263,6 +267,20 @@ def _parse_applicant(lines: list[list[Word]]) -> dict:
     return {"name": None, "birth": None, "words": []}
 
 
+def _content_chars(lines: list[list[Word]], top: float) -> int:
+    """Letters and digits between top and FOOTER_Y, without page marks, frame glyphs or 이하 여백."""
+    count = 0
+    for line in lines:
+        if "이하여백" in squash(line_text(line)):
+            continue
+        for word in line:
+            text = re.sub(r"\s+", "", word.text)
+            if not top <= word.cy < FOOTER_Y or _PAGE_MARK_TEXT.match(text) or text in _FRAME_GLYPHS:
+                continue
+            count += len(re.findall(r"[가-힣A-Za-z0-9]", text))
+    return count
+
+
 def _table_bounds(lines: list[list[Word]]) -> tuple[float, float] | None:
     start = None
     for line in lines:
@@ -380,19 +398,22 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
     warnings: list[str] = []
 
     contentless: list[bool] = []
+    #: 표 머리글만 되풀이되고 이력 줄·내용이 없는 쪽 (다른 쪽과 같은 쪽표기일 때만 쪽 수에서 뺀다).
+    table_only: list[bool] = []
     for p, r in pages:
         lines = group_lines(normalize(r.words, p.page, p.pixel_size))
         if p.page == 0:
             first_page_lines = lines
         headers.append(_parse_header(lines))
         bounds = _table_bounds(lines)
-        body_chars = sum(len(re.sub(r"\s+", "", w.text)) for line in lines for w in line
-                         if BODY_TOP_Y <= w.cy < FOOTER_Y)
-        contentless.append(bounds is None and body_chars <= BLANK_BODY_MAX_CHARS)
+        contentless.append(bounds is None and _content_chars(lines, BODY_TOP_Y) <= BLANK_BODY_MAX_CHARS)
+        before = len(entries)
         if bounds:
             _parse_rows(lines, *bounds, p.page, entries, pending, note_numbers, observed_numbers)
         else:
             warnings.append(f"page {p.page}: 주소 이력 표를 찾지 못함")
+        table_only.append(bool(bounds) and len(entries) == before
+                          and _content_chars(lines, bounds[0]) <= BLANK_BODY_MAX_CHARS)
 
     # --- 서류 종류 ---
     titles = "".join(h["title"] for h in headers)
@@ -535,13 +556,17 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
             extracted.confidence = min(extracted.confidence, .4)
 
     # 내용 없는 쪽(빈 쪽, 머리 상자만 되풀이된 쪽)은 쪽표기가 없거나 다른 쪽과 같은 쪽표기일 때만
-    # 쪽 수 확인에서 뺀다. 내용이 있는 쪽은 중복이어도 그대로 센다.
-    kept = [i for i in range(len(headers)) if not contentless[i]]
+    # 쪽 수 확인에서 뺀다. 내용이 있는 쪽은 중복이어도 그대로 센다. 표 머리글까지 되풀이된 빈 쪽은
+    # 다른 쪽과 같은 쪽표기일 때만 뺀다(쪽표기를 못 읽으면 그대로 세어 판독 불가로 남는다).
+    blank = [contentless[i] or table_only[i] for i in range(len(headers))]
+    kept = [i for i in range(len(headers)) if not blank[i]]
     kept_markers = {headers[i]["page_no"] for i in kept}
     for i in range(len(headers)):
-        if contentless[i] and headers[i]["page_no"] is not None and headers[i]["page_no"] not in kept_markers:
+        marker = headers[i]["page_no"]
+        if blank[i] and ((marker is not None and marker not in kept_markers)
+                         or (not contentless[i] and marker is None)):
             kept.append(i)
-            kept_markers.add(headers[i]["page_no"])
+            kept_markers.add(marker)
     kept.sort()
     if not kept:
         kept = list(range(len(headers)))

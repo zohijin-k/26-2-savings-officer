@@ -466,7 +466,7 @@ def test_new_rows_reuse_labels_and_add_only_new_documents(corpus):
     assert (corpus['out'] / 'labels.jsonl').read_bytes() == before
     assert [r['round'] for r in second.plan['rounds']] == [1, 2] and second.current['round'] == 2
     assert flipped in second.current['b'] and added['FAIL'] in second.current['b']
-    assert added['PASS'] in second.current['c']
+    assert added['PASS'] in second.current['n']
     over = client(second).get('/api/session').json()
     states = {entry['key']: entry['state'] for entry in over['queue']}
     todo = {k for k, s in states.items() if s == 'todo'}
@@ -738,7 +738,7 @@ def test_round_two_labels_only_new_and_revalued_documents(tmp_path, env, capsys)
     assert (out / 'labels.jsonl').read_bytes() == before
     assert second.current['round'] == 2 and second.current['revalue'] == ['NHIS_PAYMENT']
     assert set(second.current['b']) == {k['new-fail']}
-    assert set(second.current['c']) == {k['revalued'], k['kept'], k['new-pass']}
+    assert set(second.current['c']) == {k['revalued'], k['kept']}
     assert k['flipped'] not in second.queue
 
     http = client(second)
@@ -761,7 +761,7 @@ def test_round_two_labels_only_new_and_revalued_documents(tmp_path, env, capsys)
     lines = summary_lines(tool.summarize(second.plan, second.records))
     assert [line for line in lines if line[0] == 'REVALUE'][1] == ['REVALUE', 'NHIS_PAYMENT']
     assert pick(lines, 'INHERITED', 'C')[2:] == ['2', '1'] and pick(lines, 'INHERITED', 'B')[2:] == ['0', '0']
-    assert pick(lines, 'SAMPLE', 'C')[2:] == ['3', '2', '1']
+    assert pick(lines, 'SAMPLE', 'C')[2:] == ['2', '2', '1']
     assert pick(lines, 'C_DETAIL', 'VALUES_PENDING')[2] == '1'
     assert pick(lines, 'C_DETAIL', 'VALUES_INHERITED')[2] == '1'
     assert pick(lines, 'C', 'EXCL_HOLD')[2:4] == ['1', '1']  # the carried X on the kept document
@@ -778,7 +778,7 @@ def test_round_two_labels_only_new_and_revalued_documents(tmp_path, env, capsys)
     assert second.main_complete()
     lines = summary_lines(tool.summarize(second.plan, second.records))
     assert pick(lines, 'B', 'EXCL_HOLD')[2:4] == ['1', '1']
-    assert pick(lines, 'C', 'EXCL_HOLD')[2:4] == ['1', '3']
+    assert pick(lines, 'C', 'EXCL_HOLD')[2:4] == ['1', '2']
     assert [r['round'] for r in second.records if r['stage'] == 'values'] == [1, 1, 1, 2, 2]
 
     # Without the option every C document of a new round is checked again.
@@ -808,3 +808,135 @@ def test_round_two_labels_only_new_and_revalued_documents(tmp_path, env, capsys)
     assert tool.main(['serve', '--rows', str(rows_two), '--root', str(root), '--out', str(out),
                       '--revalue-forms', 'BOGUS']) == 2
     assert capsys.readouterr().out == 'ERROR ARGUMENT_ERROR\n'
+
+
+# ---------------------------------------------------------------- new-PASS census set N
+
+
+def test_round_two_keeps_the_c_sample_and_labels_every_new_pass(tmp_path, env, capsys):
+    """Round-1 C = 3 of 5 PASS (one turns NEEDS_REVIEW), two NEEDS_REVIEW turn PASS (→ N), one new FAIL."""
+    import re
+    root = tmp_path / f'FAKE-input-{SENTINEL}'
+    root.mkdir()
+    source = text_pdf(tmp_path / 'source.pdf')
+    keys = {}
+    names = [f'pass-{i}' for i in range(5)] + ['review-0', 'review-1', 'new-fail']
+    for name in names:
+        relative = f'person-{SENTINEL}-{name}/secret-{name}.pdf'
+        (root / relative).parent.mkdir()
+        shutil.copyfile(source, root / relative)
+        keys[name] = timing.document_key(relative)
+    review = [['LOW_OCR_CONFIDENCE', 'NEEDS_REVIEW']]
+    first_rows = [row(keys[f'pass-{i}'], 'PASS', 'INSURANCE_4') for i in range(5)]
+    first_rows += [row(keys[name], 'NEEDS_REVIEW', 'NHIS_PAYMENT', reasons=review) for name in ('review-0', 'review-1')]
+    out = tmp_path / 'labels-out'
+    rows_one = write_rows(tmp_path / 'rows-1.jsonl', first_rows)
+    first = tool.prepare(rows_one, root, out, port=PORT, compute=fake_compute, sample=3)
+    c_one = list(first.current['c'])
+    assert len(c_one) == 3 and first.current['n'] == [] and first.current['b'] == []
+    http = client(first)
+    for key in c_one:
+        assert post(http, first, f'/api/doc/{key}/blind', {'status': 'PASS', 'reasons': []}).status_code == 200
+        names_shown = [item['name'] for item in http.get(f'/api/doc/{key}/values').json()['items']]
+        assert post(http, first, f'/api/doc/{key}/values', {'fields': {n: 'O' for n in names_shown}}).status_code == 200
+
+    flipped = c_one[0]
+    second_rows = []
+    for item in first_rows:
+        item = dict(item)
+        if item['key'] == flipped:
+            item.update(decision='NEEDS_REVIEW', reasons=review)
+        elif item['decision'] == 'NEEDS_REVIEW':
+            item.update(decision='PASS', reasons=[])
+        second_rows.append(item)
+    second_rows.append(row(keys['new-fail'], 'FAIL', 'NHIS_PAYMENT'))
+    rows_two = write_rows(tmp_path / 'rows-2.jsonl', second_rows)
+
+    # A plan written before N has no round-1 PASS keys: round two asks for the round-1 rows once.
+    plan = json.loads((out / 'plan.json').read_text())
+    del plan['rounds'][0]['pass_keys']
+    (out / 'plan.json').write_text(json.dumps(plan))
+    with pytest.raises(tool.ToolError) as error:
+        tool.prepare(rows_two, root, out, port=PORT, compute=fake_compute)
+    assert error.value.args[0] == 'BASE_ROWS_REQUIRED'
+    with pytest.raises(tool.ToolError) as error:
+        tool.prepare(rows_two, root, out, port=PORT, compute=fake_compute, base_rows=rows_two)
+    assert error.value.args[0] == 'PLAN_MISMATCH'  # not the round-1 file
+    capsys.readouterr()
+    second = tool.prepare(rows_two, root, out, port=PORT, compute=fake_compute, base_rows=rows_one)
+    console = capsys.readouterr().out
+    assert second.plan['rounds'][0]['pass_keys'] == sorted(keys[f'pass-{i}'] for i in range(5))
+
+    # C is the round-1 sample minus the flipped document (not drawn again); N is exactly the two new PASS.
+    assert second.current['c'] == sorted(c_one[1:])
+    redrawn = tool.draw({item['key']: dict(form=item['form'], decision=item['decision']) for item in second_rows},
+                        3, second.plan['seed'])['c']
+    assert len(redrawn) == 3 and len(second.current['c']) == 2
+    assert second.current['n'] == sorted([keys['review-0'], keys['review-1']])
+    assert second.current['b'] == [keys['new-fail']]
+    assert flipped not in second.queue and set(second.queue) == set(second.current['c'] + second.current['n'] +
+                                                                    second.current['b'])
+    http = client(second)
+    states = {entry['key']: entry['state'] for entry in http.get('/api/session').json()['queue']}
+    assert {k for k, s in states.items() if s == 'todo'} == {keys['review-0'], keys['review-1'], keys['new-fail']}
+    lines = summary_lines(tool.summarize(second.plan, second.records))
+    assert pick(lines, 'SAMPLE', 'N')[2:] == ['2', '0', '0']
+    assert pick(lines, 'PASS_COMBINED', 'EXCL_HOLD')[-2:] == ['NA', 'NA']  # N not labeled yet
+
+    # Label round two: C values again (no --revalue-forms), N gets stage one and O/X, B stage one.
+    c_keep, c_x = second.current['c']
+    n_pass, n_review = keys['review-0'], keys['review-1']
+
+    def marks(key, x=()):
+        shown = [item['name'] for item in http.get(f'/api/doc/{key}/values').json()['items']]
+        body = {'fields': {name: 'X' if name in x else 'O' for name in shown}}
+        assert post(http, second, f'/api/doc/{key}/values', body).status_code == 200
+
+    assert http.get(f'/api/doc/{n_pass}/values').json() == {'error': 'BLIND_FIRST'}
+    post(http, second, f'/api/doc/{n_pass}/blind', {'status': 'PASS', 'reasons': []})
+    post(http, second, f'/api/doc/{n_review}/blind', {'status': 'NEEDS_REVIEW', 'reasons': []})
+    post(http, second, f'/api/doc/{keys["new-fail"]}/blind', {'status': 'FAIL', 'reasons': ['R3']})
+    assert http.get(f'/api/doc/{n_pass}/engine').json()['needs_values'] is True
+    marks(c_keep)
+    marks(c_x, x=('성명',))
+    marks(n_pass)
+    marks(n_review)
+    assert second.main_complete()
+
+    lines = summary_lines(tool.summarize(second.plan, second.records))
+    assert pick(lines, 'C', 'EXCL_HOLD')[2:4] == ['1', '2']
+    assert [line for line in lines if line[0] == 'N_TOTAL'][1] == ['N_TOTAL', '2', '2', '2', '0']
+    assert pick(lines, 'N', 'EXCL_HOLD')[2:] == ['1', '2', '0.5000']
+    assert pick(lines, 'N_DETAIL', 'TRUTH_PASS')[2] == '1' and pick(lines, 'N_DETAIL', 'FAIL_OR_VALUE_X')[2] == '0'
+    assert pick(lines, 'C_DETAIL', 'PASS_NOT_TRUTH_OR_VALUE_X')[2] == '1'
+    combined = pick(lines, 'PASS_COMBINED', 'EXCL_HOLD')
+    # Strict wrong (truth not PASS or any X) in both strata. Old: 4 PASS in both rounds, C labeled 2 with 1
+    # wrong (value X); new: N = 2 with 1 wrong (truth NEEDS_REVIEW, missed because nobody looks at a PASS).
+    assert combined[2:8] == ['4', '2', '1', '2', '2', '1']
+    assert float(combined[8]) == pytest.approx((4 * 0.5 + 2 * 0.5) / 6, abs=1e-4)
+    assert float(combined[9]) == pytest.approx((4 * tool.cp_upper(1, 2) + 2 * 0.5) / 6, abs=1e-4)
+    assert pick(lines, 'BY_FORM', 'N', 'NHIS_PAYMENT')[3:] == ['2', '1', '1', '0', '0', '1']
+    assert pick(lines, 'VALUE_ITEM_N', 'NHIS_PAYMENT', '성명')[3:] == ['2', '0']
+    assert pick(lines, 'R_CODE', 'N', 'R3')[3] == '0'
+    assert pick(lines, 'TRANSITION', 'C', 'PASS', 'NEEDS_REVIEW', 'OUT')[5] == '1'
+    # Round one alone: no N, and PASS_COMBINED equals the C stratum.
+    one = summary_lines(tool.summarize(second.plan, second.records, 1))
+    assert pick(one, 'PASS_COMBINED', 'EXCL_HOLD')[2:8] == ['5', '3', '0', '0', '0', '0']
+
+    capsys.readouterr()
+    assert tool.main(['summary', '--out', str(out)]) == 0
+    assert tool.main(['mismatch', '--out', str(out)]) == 0
+    text = console + capsys.readouterr().out
+    listed = [line.split() for line in text.splitlines() if line.startswith('MISMATCH ')][1:]
+    assert sorted(line[3] for line in listed) == ['C', 'N']
+    assert next(line for line in listed if line[3] == 'N')[7:] == ['NEEDS_REVIEW', '-', '-']
+
+    # Codes and counts only: no path, file name, read value, date or key in the output or stored files.
+    stored = (out / 'labels.jsonl').read_text() + (out / 'plan.json').read_text()
+    for marker in ('/', '\\', '.pdf', SENTINEL, 'secret', 'person', root.name, out.name, '2026-03-04'):
+        assert marker not in text, marker
+    for marker in ('.pdf', SENTINEL, 'secret', 'person', root.name, '2026-03-04'):
+        assert marker not in stored, marker
+    assert not re.search(r'\d{4}\s*[-./년]\s*\d{1,2}', text)
+    assert not re.search(r'\d{1,2}\s*[./]\s*\d{1,2}\s*[./]\s*\d{2,4}', text)
+    assert not any(key in text for key in keys.values())

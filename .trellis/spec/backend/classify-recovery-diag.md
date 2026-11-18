@@ -123,3 +123,11 @@ candidate rules would change, without changing production behaviour.
   LABEL_LEFT, OTHER, NONE) and counts '열람용'; S4 counts absence FAILs with unreadable or
   low-confidence evidence and whether the address table header was seen. Converter pages,
   resident pages and preprocess images are captured in memory for one document only.
+- Row format 4 adds `early` and `billing` (D6, no values): for a DOCUMENT_ISSUED_TOO_EARLY
+  FAIL, the S3 source class of the 발급일 (`NA` outside the issue-dated forms) and the gap
+  before the slot cutoff (`D1_30`, `D31_365`, `D366P`, `FUTURE` after today, `NA`); for a
+  MISSING_BILLING_MONTHS FAIL, the number of months in 월별고지금액 (`M0`, `M1_2`, `M3_5`,
+  `M6_11`, `M12P`, `NA`). Summary lines `D6_EARLY` and `D6_BILLING`.
+- Known limit of S3: `issue_source` locates dates with `nhis_common.dates_in_line`, which
+  does not parse a date merged with its time ("2026-03-0310:20"); such a 4대보험 발급일시
+  value is reported as OTHER although the extractor took it from the 발급일시 label cell.

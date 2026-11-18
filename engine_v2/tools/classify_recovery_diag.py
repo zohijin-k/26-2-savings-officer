@@ -33,7 +33,7 @@ from unittest.mock import patch
 from . import batch_assess as batch
 from . import doc_timing as timing
 
-VERSION = 3
+VERSION = 4
 #: Format 1 (commit 2) had no consent/payment/p1/c1 keys. Format 2 had no ``recovery`` key.
 KINDS = batch.KINDS
 TIERS = timing.TIERS
@@ -635,6 +635,11 @@ S4_ABSENT = ('MISSING_ADDRESS_HISTORY', 'MISSING_ADDRESS_DATES', 'MISSING_BILLIN
 S4_UNREADABLE = ('REQUIRED_FIELD_UNREADABLE', 'LOW_OCR_CONFIDENCE')
 S4_COOCCUR = ('RFU', 'LOWCONF', 'BOTH', 'NONE')
 S4_REGIONS = ('FOUND', 'NOT_FOUND', 'NA')
+#: D6: DOCUMENT_ISSUED_TOO_EARLY FAIL — days before the cutoff (or a future date), and the number of
+#: billing months read on MISSING_BILLING_MONTHS FAIL documents. Bins only, never values.
+EARLY_GAPS = ('D1_30', 'D31_365', 'D366P', 'FUTURE', 'NA')
+EARLY_SOURCES = S3_SOURCES + ('NA',)
+BILLING_BINS = ('M0', 'M1_2', 'M3_5', 'M6_11', 'M12P', 'NA')
 #: S2: sheets read poorly (few Hangul characters) or of unclassified documents are re-read rotated.
 S2_MIN_HANGUL = 50      # a sheet with fewer Hangul characters counts as poorly read
 S2_RATIO = 2.0          # a rotation must read at least this many times the Hangul characters
@@ -1004,6 +1009,46 @@ def absence_shadow(trace, path, row, ocr):
     row['s4'] = dict(codes=absent, cooccur=cooccur, region=region, decision=after)
 
 
+def early_gap(issue, cutoff, today):
+    """D6: how far before the cutoff the document was issued (FUTURE: after today)."""
+    if issue is None or cutoff is None:
+        return 'NA'
+    if issue > today:
+        return 'FUTURE'
+    days = (cutoff - issue).days
+    return 'D1_30' if 1 <= days <= 30 else 'D31_365' if 31 <= days <= 365 else 'D366P' if days >= 366 else 'NA'
+
+
+def billing_bin(raw):
+    """D6: number of months in the read monthly charge map (월별고지금액)."""
+    try:
+        months = json.loads(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        months = None
+    if not isinstance(months, dict):
+        return 'NA'
+    n = len(months)
+    return 'M0' if n == 0 else 'M1_2' if n <= 2 else 'M3_5' if n <= 5 else 'M6_11' if n <= 11 else 'M12P'
+
+
+def failure_detail(trace, path, row, ocr):
+    """D6: issue-date source and cutoff gap of TOO_EARLY FAILs; months read on MISSING_BILLING_MONTHS FAILs."""
+    from demo.backend.rules.doc_check import to_engine_document
+    from engine_v2.extractors.resident_abstract import kst_today
+    del path
+    reasons = [tuple(pair) for pair in row['reasons']]
+    if ('DOCUMENT_ISSUED_TOO_EARLY', 'FAIL') in reasons:
+        req = timing.requirement(row['form'])
+        issue = (to_engine_document(req, ocr, None, 'pdf', req.date_basis).issue_date if req is not None else None)
+        source = 'NA'
+        if row['form'] in S3_FORMS:
+            pages = trace.read_pages if ocr.tier == 'localocr' else None
+            source = issue_source(row['form'], pages, ocr.fields.get('발급일'))
+        row['early'] = dict(source=source, gap=early_gap(issue, req.min_issue_date if req else None, kst_today()))
+    if ('MISSING_BILLING_MONTHS', 'FAIL') in reasons:
+        row['billing'] = dict(months=billing_bin(ocr.fields.get('월별고지금액')))
+
+
 def _hangul(words):
     return sum(len(re.findall(r'[가-힣]', word.text)) for word in words)
 
@@ -1331,7 +1376,7 @@ def blank_row(key, code='NONE'):
                 struct=None, scan=None, scan_code=None, text_all=None,
                 g1={name: None for name in CANDIDATES}, g1_decision={name: None for name in CANDIDATES},
                 consent=None, c1=None, payment=None, p1=None, c2=None, a2=None, a4=None, recovery=None,
-                s1=None, s2=None, s3=None, s4=None, shadow_errors=[])
+                s1=None, s2=None, s3=None, s4=None, early=None, billing=None, shadow_errors=[])
 
 
 def gave_up(row):
@@ -1372,6 +1417,7 @@ def process(path, key, trace):
                                     ('S2', True, lambda: rotation_shadow(trace, path, row, ocr)),
                                     ('S1', row['form'] in ('RESIDENT_ABSTRACT', 'RESIDENT_CERTIFICATE'),
                                      lambda: resident_sheet_shadow(trace, path, row, ocr)),
+                                    ('D6', True, lambda: failure_detail(trace, path, row, ocr)),
                                     ('QUALITY', True, lambda: quality_shadows(trace, path, row, ocr))):
         if not applies:
             continue
@@ -1395,7 +1441,7 @@ def validate_row(row):
     keys = {'schema_version', 'key', 'code', 'form', 'tier', 'decision', 'reasons', 'exit', 'reclass',
             'exceptions', 'ocr_chars', 'cause', 'struct', 'scan', 'scan_code', 'text_all', 'g1', 'g1_decision',
             'consent', 'c1', 'payment', 'p1', 'c2', 'a2', 'a4', 'recovery', 's1', 's2', 's3', 's4',
-            'shadow_errors'}
+            'early', 'billing', 'shadow_errors'}
     req(isinstance(row, dict) and set(row) == keys and row['schema_version'] == VERSION)
     req(isinstance(row['key'], str) and timing.KEY_RE.fullmatch(row['key']) is not None)
     req(row['code'] in ROW_CODES and row['form'] in KINDS and row['tier'] in TIERS and row['decision'] in DECISIONS)
@@ -1419,7 +1465,11 @@ def validate_row(row):
     req(set(row['g1_decision']) == set(CANDIDATES)
         and all(_code_in(v, DECISIONS, True) for v in row['g1_decision'].values()))
     req(isinstance(row['shadow_errors'], list)
-        and set(row['shadow_errors']) <= {'G1', 'CONSENT', 'PAYMENT', 'A4', 'QUALITY', 'S1', 'S2', 'S3', 'S4'})
+        and set(row['shadow_errors']) <= {'G1', 'CONSENT', 'PAYMENT', 'A4', 'QUALITY', 'S1', 'S2', 'S3', 'S4', 'D6'})
+    req(row['early'] is None or (isinstance(row['early'], dict) and set(row['early']) == {'source', 'gap'}
+                                 and row['early']['source'] in EARLY_SOURCES and row['early']['gap'] in EARLY_GAPS))
+    req(row['billing'] is None or (isinstance(row['billing'], dict) and set(row['billing']) == {'months'}
+                                   and row['billing']['months'] in BILLING_BINS))
     req(row['s2'] is None or (isinstance(row['s2'], dict)
                               and set(row['s2']) == {'tried', 'better', 'form', 'decision', 's1', 'seconds'}
                               and type(row['s2']['tried']) is int and row['s2']['better'] in S2_BETTER
@@ -1693,6 +1743,15 @@ def _stage_summary(done):
              ((r['s1']['sheets'], r['s1']['result'], r['decision']) for r in s1 if r['s1']['sheets'] != 'M0'))
     _counted(lines, 'S1_DECISION result before after n',
              ((r['s1']['result'], r['decision'], r['s1']['decision']) for r in s1 if r['s1']['decision'] is not None))
+    early = [r for r in done if r['early'] is not None]
+    lines.append('D6_EARLY too_early_fail_docs')
+    lines.append(_line('D6_EARLY', len(early)))
+    _counted(lines, 'D6_EARLY form source gap n',
+             ((r['form'], r['early']['source'], r['early']['gap']) for r in early))
+    billing = [r for r in done if r['billing'] is not None]
+    lines.append('D6_BILLING missing_billing_fail_docs')
+    lines.append(_line('D6_BILLING', len(billing)))
+    _counted(lines, 'D6_BILLING months n', ((r['billing']['months'],) for r in billing))
     _counted(lines, 'P1_DECISION margin before after n',
              ((key, r['decision'], r['p1'][key]['decision']) for r in payment for key in P1_KEYS
               if r['p1'] is not None and r['p1'][key]['decision'] != r['decision']))

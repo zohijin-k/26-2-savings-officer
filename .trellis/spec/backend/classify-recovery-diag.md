@@ -133,6 +133,7 @@ candidate rules would change, without changing production behaviour.
   starting at 1, `UNREADABLE` an entry without an ordinal, `NA` no entries or no OCR pages)
   and `empty_page` (a counted page whose table header was found but yielded no row). Summary
   lines `D8` and `D8_DECISION`.
-- Known limit of S3: `issue_source` locates dates with `nhis_common.dates_in_line`, which
-  does not parse a date merged with its time ("2026-03-0310:20"); such a 4대보험 발급일시
-  value is reported as OTHER although the extractor took it from the 발급일시 label cell.
+- S3 `issue_source` locates dates with `nhis_common.dates_in_line` plus `_line_dates`, which
+  also reads a date immediately followed by HH:MM ("2026-03-0310:20"). Before this, a 4대보험
+  발급일시 value was reported as OTHER although the extractor took it from the 발급일시 label
+  cell (synthetic originals 5/5 OTHER, now LABEL).

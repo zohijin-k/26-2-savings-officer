@@ -74,3 +74,19 @@ def test_yeollam_mark_is_counted():
     pages = acquisition((40, 760, '※ 이 문서는 열람용입니다.', 8))
     assert tool._yeollam(pages, None) == 'O'
     assert tool._yeollam(acquisition(), None) == 'X'
+
+
+@pytest.mark.parametrize('extra, source', [
+    ([(300, 140, '발급일시', 8), (360, 140, '2026-03-0310:20', 8)], 'LABEL'),       # date merged with its time
+    ([(300, 140, '발급일시', 8), (360, 140, '2026-03-03', 8), (420, 140, '10:20', 8)], 'LABEL'),
+    ([(300, 140, '2026-03-0310:20', 8), (380, 140, '발급일시', 8)], 'LABEL_LEFT'),
+    ([(300, 140, '출력일시', 8), (360, 140, '2026.03.0310:20', 8)], 'OUTPUT_LABEL'),
+])
+def test_issue_date_merged_with_time_is_located(extra, source):
+    assert tool.issue_source('INSURANCE_4', acquisition(*extra), '2026-03-03') == source
+
+
+def test_time_alone_or_an_impossible_date_is_not_a_date():
+    pages = acquisition((300, 140, '발급일시', 8), (360, 140, '2026-02-3010:20', 8))
+    assert tool.issue_source('INSURANCE_4', pages, '2026-03-03') == 'OTHER'   # still not located
+    assert tool._line_dates([]) == []

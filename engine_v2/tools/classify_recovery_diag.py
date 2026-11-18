@@ -625,6 +625,9 @@ S1_SHEETS = ('M0', 'M1', 'M2P')
 S1_RESULTS = ('COMPLETE', 'INCOMPLETE', 'DUPLICATED', 'UNREADABLE', 'DOC_NO_DIFFERS', 'NOT_MULTI')
 #: S3: where the final 발급일 value is found on the read pages (first legitimate match wins).
 ISSUE_LABELS = ('발급일시', '발급일자', '발급일', '발행일자', '발행일', '발급년월일', '교부일자')
+#: A date immediately followed by HH:MM, with or without a space (S3 source lookup only).
+_DATE_BEFORE_TIME = re.compile(r"(?<!\d)(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*일?"
+                               r"(?=\s*(?:[01]\d|2[0-3]):[0-5]\d)")
 S3_SOURCES = ('LABEL', 'LABEL_TEXT', 'HEADER_BAND', 'CONFIRM_BAND', 'OUTPUT_LABEL', 'LABEL_LEFT', 'OTHER', 'NONE')
 #: Sources the held production candidate keeps; the rest leave 발급일 empty (NEEDS_REVIEW).
 S3_ACCEPTED = ('LABEL', 'LABEL_TEXT', 'HEADER_BAND', 'CONFIRM_BAND')
@@ -918,6 +921,25 @@ def _starts_label(text, following):
                for label in ISSUE_LABELS)
 
 
+def _line_dates(line):
+    """Dates of a line, including a date merged with its time ("2026-03-0310:20", 4대보험 발급일시)."""
+    from datetime import date
+    from engine_v2.extractors import nhis_common as common
+    from engine_v2.extractors.format_text import normalize_format_text
+    found = list(common.dates_in_line(line))
+    seen = {day for day, _ in found}
+    for word in line:
+        for match in _DATE_BEFORE_TIME.finditer(normalize_format_text(word.text)):
+            try:
+                day = date(*(int(part) for part in match.groups()))
+            except ValueError:
+                continue
+            if day not in seen:
+                seen.add(day)
+                found.append((day, [word]))
+    return found
+
+
 def issue_source(form, pages, value):
     """S3: classify where the final 발급일 appears on the pages the production converter read."""
     from engine_v2.extractors import nhis_common as common
@@ -933,7 +955,7 @@ def issue_source(form, pages, value):
         flats = [squash(line_text(line)) for line in lines]
         confirms = [i for i, flat in enumerate(flats) if '확인합니다' in flat]
         for index, line in enumerate(lines):
-            for day, words in common.dates_in_line(line):
+            for day, words in _line_dates(line):
                 if day.isoformat() != target:
                     continue
                 date_x = min(w.x0 for w in words) if words else 0.0

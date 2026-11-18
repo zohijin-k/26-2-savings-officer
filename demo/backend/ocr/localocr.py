@@ -108,6 +108,33 @@ def _engine_name() -> str:
     return engine_decision()[0]
 
 
+def preload_own() -> str:
+    """서버 시작 때 own 모델(쪽 작업 세션 포함)을 미리 불러 첫 요청 지연을 없앤다.
+
+    결과 코드만 돌려준다: LOADED / SKIPPED(own이 아님) / FAILED.
+    실패해도 아무것도 바꾸지 않는다. 그때는 지금처럼 첫 OCR 호출이 불러오고
+    같은 오류를 그 자리에서 낸다(세션 캐시는 실패를 기억하지 않는다).
+    """
+    try:
+        if engine_decision()[0] != "own":
+            return "SKIPPED"
+        import io
+
+        from PIL import Image
+        from engine_v2.pipeline.ocr import own
+
+        own.sessions()
+        own.prepare_page_workers(own.MAX_PAGE_WORKERS)
+        # 빈 그림 한 장으로 판독 경로의 지연 import(cv2·pyclipper)와 첫 실행 준비를 끝낸다.
+        blank = io.BytesIO()
+        Image.new("RGB", (32, 32), "white").save(blank, format="PNG")
+        own.recognize(blank.getvalue(), (32, 32))
+        return "LOADED"
+    except Exception as exc:  # noqa: BLE001 - 시작은 막지 않는다
+        _logger.warning("own 모델 미리 불러오기 실패(첫 호출 때 불러옴): %s", exception_code(exc))
+        return "FAILED"
+
+
 def _import_v2():
     """engine_v2는 지연 import 한다 — OCR을 안 쓰는 경로에서 의존성을 요구하지 않도록."""
     if str(_REPO_ROOT) not in sys.path:

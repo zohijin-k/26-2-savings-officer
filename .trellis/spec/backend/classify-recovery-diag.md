@@ -133,6 +133,11 @@ candidate rules would change, without changing production behaviour.
   starting at 1, `UNREADABLE` an entry without an ordinal, `NA` no entries or no OCR pages)
   and `empty_page` (a counted page whose table header was found but yielded no row). Summary
   lines `D8` and `D8_DECISION`.
+- Row format 6 adds `g4` for NHIS_PAYMENT rows: the 11-19 고지금액 guard reasons carried by the
+  stored reading (`zero` ZERO_AMOUNT, `ratio` CARE_RATIO, `header` CARE / UNCERTAIN / BOTH / X,
+  `larger` LARGER_HEALTH) and the table layout (`GOV`, `COMBINED`, `NO_CHARGE_HEADER`, `NA`, or
+  `SINGLE_`/`GROUP_` × `HEALTH`/`SHORT`/`FUSED`/`MISSING` from `nhis_payment.amount_layout`).
+  Summary lines `G4`, `G4_HEADER`, `G4_LAYOUT` and `G4_DECISION`.
 - S3 `issue_source` locates dates with `nhis_common.dates_in_line` plus `_line_dates`, which
   also reads a date immediately followed by HH:MM ("2026-03-0310:20"). Before this, a 4대보험
   발급일시 value was reported as OTHER although the extractor took it from the 발급일시 label

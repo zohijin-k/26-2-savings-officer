@@ -33,7 +33,7 @@ from unittest.mock import patch
 from . import batch_assess as batch
 from . import doc_timing as timing
 
-VERSION = 5
+VERSION = 6
 #: Format 1 (commit 2) had no consent/payment/p1/c1 keys. Format 2 had no ``recovery`` key.
 KINDS = batch.KINDS
 TIERS = timing.TIERS
@@ -643,6 +643,11 @@ S4_REGIONS = ('FOUND', 'NOT_FOUND', 'NA')
 EARLY_GAPS = ('D1_30', 'D31_365', 'D366P', 'FUTURE', 'NA')
 EARLY_SOURCES = S3_SOURCES + ('NA',)
 BILLING_BINS = ('M0', 'M1_2', 'M3_5', 'M6_11', 'M12P', 'NA')
+#: G4 (11-19): payment 고지금액 guard flags (a 0원, b 12-14%, c header 장기요양/uncertain, d larger 건강)
+#: and the table layout, from the production reading.
+G4_LAYOUTS = ('GOV', 'COMBINED', 'NO_CHARGE_HEADER', 'NA') + tuple(
+    f'{g}_{s}' for g in ('SINGLE', 'GROUP') for s in ('HEALTH', 'SHORT', 'FUSED', 'MISSING'))
+G4_HEADER = ('CARE', 'UNCERTAIN', 'BOTH', 'X')
 #: D8: address-history ordinal state of resident abstracts read by LocalOcr (production 11-18 rule).
 HISTORY_NUMBERS = ('CONTIGUOUS', 'GAP', 'UNREADABLE', 'NA')
 #: S2: sheets read poorly (few Hangul characters) or of unclassified documents are re-read rotated.
@@ -1406,13 +1411,26 @@ def member_type_shadow(trace, row, ocr):
                      after=member_type_candidate(pages) if pages is not None else 'X')
 
 
+def amount_guard_check(trace, row, ocr):
+    """G4: which 11-19 guard reasons the stored reading carries, and the table layout."""
+    from engine_v2.extractors import nhis_payment as legacy, nhis_payment_gov as gov
+    pages = trace.payment[0] if trace.payment is not None else None
+    layout = 'NA' if pages is None else 'GOV' if gov.recognizes(pages) else legacy.amount_layout(pages)
+    codes = set(str(ocr.fields.get('월별고지금액불확실사유') or '').split(','))
+    care, uncertain = 'HEADER_CARE' in codes, 'HEADER_UNCERTAIN' in codes
+    row['g4'] = dict(layout=layout if layout in G4_LAYOUTS else 'NA',
+                     zero='O' if 'ZERO_AMOUNT' in codes else 'X', ratio='O' if 'CARE_RATIO' in codes else 'X',
+                     header='BOTH' if care and uncertain else 'CARE' if care else 'UNCERTAIN' if uncertain else 'X',
+                     larger='O' if 'LARGER_HEALTH' in codes else 'X')
+
+
 def blank_row(key, code='NONE'):
     return dict(schema_version=VERSION, key=key, code=code, form='X', tier='none', decision='NOT_ASSESSED',
                 reasons=[], exit=None, reclass=None, exceptions={}, ocr_chars='NA', cause=None,
                 struct=None, scan=None, scan_code=None, text_all=None,
                 g1={name: None for name in CANDIDATES}, g1_decision={name: None for name in CANDIDATES},
                 consent=None, c1=None, payment=None, p1=None, c2=None, a2=None, a4=None, recovery=None,
-                s1=None, s2=None, s3=None, s4=None, early=None, billing=None, history=None, shadow_errors=[])
+                s1=None, s2=None, s3=None, s4=None, early=None, billing=None, history=None, g4=None, shadow_errors=[])
 
 
 def gave_up(row):
@@ -1455,6 +1473,7 @@ def process(path, key, trace):
                                      lambda: resident_sheet_shadow(trace, path, row, ocr)),
                                     ('D6', True, lambda: failure_detail(trace, path, row, ocr)),
                                     ('D8', row['form'] == 'RESIDENT_ABSTRACT', lambda: history_check(trace, row)),
+                                    ('G4', row['form'] == 'NHIS_PAYMENT', lambda: amount_guard_check(trace, row, ocr)),
                                     ('QUALITY', True, lambda: quality_shadows(trace, path, row, ocr))):
         if not applies:
             continue
@@ -1478,7 +1497,7 @@ def validate_row(row):
     keys = {'schema_version', 'key', 'code', 'form', 'tier', 'decision', 'reasons', 'exit', 'reclass',
             'exceptions', 'ocr_chars', 'cause', 'struct', 'scan', 'scan_code', 'text_all', 'g1', 'g1_decision',
             'consent', 'c1', 'payment', 'p1', 'c2', 'a2', 'a4', 'recovery', 's1', 's2', 's3', 's4',
-            'early', 'billing', 'history', 'shadow_errors'}
+            'early', 'billing', 'history', 'g4', 'shadow_errors'}
     req(isinstance(row, dict) and set(row) == keys and row['schema_version'] == VERSION)
     req(isinstance(row['key'], str) and timing.KEY_RE.fullmatch(row['key']) is not None)
     req(row['code'] in ROW_CODES and row['form'] in KINDS and row['tier'] in TIERS and row['decision'] in DECISIONS)
@@ -1503,9 +1522,13 @@ def validate_row(row):
         and all(_code_in(v, DECISIONS, True) for v in row['g1_decision'].values()))
     req(isinstance(row['shadow_errors'], list)
         and set(row['shadow_errors']) <= {'G1', 'CONSENT', 'PAYMENT', 'A4', 'QUALITY', 'S1', 'S2', 'S3', 'S4', 'D6',
-                                          'D8'})
+                                          'D8', 'G4'})
     req(row['early'] is None or (isinstance(row['early'], dict) and set(row['early']) == {'source', 'gap'}
                                  and row['early']['source'] in EARLY_SOURCES and row['early']['gap'] in EARLY_GAPS))
+    req(row['g4'] is None or (isinstance(row['g4'], dict) and set(row['g4']) == {'layout', 'zero', 'ratio', 'header',
+                                                                                 'larger'}
+                              and row['g4']['layout'] in G4_LAYOUTS and row['g4']['header'] in G4_HEADER
+                              and all(row['g4'][k] in ('O', 'X') for k in ('zero', 'ratio', 'larger'))))
     req(row['history'] is None or (isinstance(row['history'], dict) and set(row['history']) == {'numbers', 'empty_page'}
                                    and row['history']['numbers'] in HISTORY_NUMBERS
                                    and row['history']['empty_page'] in ('O', 'X', 'NA')))
@@ -1793,6 +1816,17 @@ def _stage_summary(done):
     lines.append('D6_BILLING missing_billing_fail_docs')
     lines.append(_line('D6_BILLING', len(billing)))
     _counted(lines, 'D6_BILLING months n', ((r['billing']['months'],) for r in billing))
+    g4 = [r for r in done if r['g4'] is not None]
+    lines.append('G4 payment_docs zero ratio header larger any')
+    flagged = [r for r in g4 if 'O' in (r['g4']['zero'], r['g4']['ratio'], r['g4']['larger'])
+               or r['g4']['header'] != 'X']
+    lines.append(_line('G4', len(g4), *(sum(r['g4'][k] == 'O' for r in g4) for k in ('zero', 'ratio')),
+                       sum(r['g4']['header'] != 'X' for r in g4), sum(r['g4']['larger'] == 'O' for r in g4),
+                       len(flagged)))
+    _counted(lines, 'G4_HEADER header n', ((r['g4']['header'],) for r in g4 if r['g4']['header'] != 'X'))
+    _counted(lines, 'G4_LAYOUT layout any n', ((r['g4']['layout'], 'O' if r in flagged else 'X') for r in g4))
+    _counted(lines, 'G4_DECISION layout any decision n',
+             ((r['g4']['layout'], 'O' if r in flagged else 'X', r['decision']) for r in g4))
     history = [r for r in done if r['history'] is not None]
     lines.append('D8 abstract_docs contiguous gap unreadable empty_page')
     lines.append(_line('D8', len(history), *(sum(r['history']['numbers'] == state for r in history)

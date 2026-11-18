@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from sqlmodel import select
 from engine_v2.pipeline.privacy import mask_data
 
+from ..officer_summary import summarize
 from ..models import (
     STATUS_DECIDED,
     STATUS_DRAFT,
@@ -914,6 +915,32 @@ def review_detail(application_id: int, role: str = Query(ROLE_PROVINCE)) -> dict
         },
         "role": _role_dict(role_config),
     }
+
+
+# ---------------------------------------------------------------- AI 종합의견
+
+
+def _summary(application_id: int, role: str, force: bool) -> dict[str, Any]:
+    # 상세 화면과 같은 저장값·같은 404/400 규칙을 그대로 쓴다. 판정은 다시 계산하지 않는다.
+    detail = review_detail(application_id, role)
+    app = load_application(application_id)
+    return summarize(application_id, detail, app.form1_json or {}, app.identity_json or {}, force=force)
+
+
+@router.get("/applications/{application_id}/summary")
+def review_summary(application_id: int, role: str = Query(ROLE_PROVINCE)) -> dict[str, Any]:
+    """최종 판정 패널 맨 위의 'AI 종합의견'.
+
+    캐시가 입력과 같으면 그대로, 판정·서류가 바뀌었으면 새로 만든다. 전북AI가
+    꺼져 있거나 실패하면 같은 형태의 규칙 기반 요약(`source="rules"`)을 준다.
+    """
+    return _summary(application_id, role, force=False)
+
+
+@router.post("/applications/{application_id}/summary")
+def regenerate_summary(application_id: int, role: str = Query(ROLE_PROVINCE)) -> dict[str, Any]:
+    """'다시 생성' — 캐시를 무시하고 새로 만든다."""
+    return _summary(application_id, role, force=True)
 
 
 # ---------------------------------------------------------------- 담당자 판단

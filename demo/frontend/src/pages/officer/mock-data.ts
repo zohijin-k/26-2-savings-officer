@@ -1,7 +1,7 @@
 /** 두배적금 화면을 위한 명시적 합성 미리보기. 실제 인물·기관 서류가 아니다. */
 import type {
   DecisionKey, DocStatus, OfficerDocument, OfficerList, OfficerListQuery, OfficerRole, OfficerRow,
-  ReviewDetailData, RoleKey, ScoreItemRow, ScoreSheetData,
+  OfficerSummary, ReviewDetailData, RoleKey, ScoreItemRow, ScoreSheetData,
 } from '../../api.ts'
 
 const HOLD = { key: 'hold', label: '보류', result_label: '보류', tone: 'neutral' } as const
@@ -178,6 +178,36 @@ export function mockReviewDetail(id: number, role: RoleKey = 'province'): Review
   const entry = entries.get(id)
   if (!entry) throw new Error('해당 합성 신청이 없습니다.')
   return { ...entry.detail, role: ROLES[role] }
+}
+
+/** 미리보기용 종합의견. 서버의 규칙 기반 요약과 같은 모양을 합성 판정에서 만든다. */
+export function mockOfficerSummary(id: number): OfficerSummary {
+  const { detail } = entries.get(id) ?? (() => { throw new Error('해당 합성 신청이 없습니다.') })()
+  const label = { PASS: '적합', NEEDS_REVIEW: '확인필요', FAIL: '부적합' } as const
+  const flagged = detail.documents.filter((doc) => doc.status && doc.status !== 'PASS')
+  const status = detail.ai.final_status ? label[detail.ai.final_status] : '미심사'
+  const total = `심사표 ${detail.score_sheet.total}/${detail.score_sheet.max_total}점`
+  return {
+    headline: flagged.length || detail.ai.reasons.length
+      ? `${status}: ${[...flagged.map((doc) => `${doc.label} ${doc.status ? label[doc.status] : ''}`), ...detail.ai.reasons.map((r) => r.message)].slice(0, 2).join(', ')} · ${total}`
+      : `모든 서류 적합 · ${total}`,
+    status_explanation: `AI 제안은 '${status}'입니다. ${detail.ai.reasons[0]?.message ?? flagged[0]?.findings[0]?.message ?? '저장된 확인 사유가 없습니다.'}`,
+    check_points: [
+      ...detail.ai.reasons.map((reason) => ({ slot_key: null, title: '필수 서류 미제출', detail: reason.message, codes: [reason.code],
+        evidence: [{ code: reason.code, label: '필수 서류 미제출', kind: 'rule', kind_label: '규칙 판정' }], field: null })),
+      ...flagged.flatMap((doc) => doc.findings.map((finding) => {
+        const label = finding.code === 'LOW_CONFIDENCE' ? '자동 판독 신뢰도 낮음' : '공고일 이전 발급'
+        return { slot_key: doc.slot_key, title: label, detail: finding.how_to_fix, codes: [finding.code],
+          evidence: [{ code: finding.code, label, kind: 'rule', kind_label: '규칙 판정' }], field: null }
+      })),
+    ].slice(0, 4),
+    document_notes: detail.documents.map((doc) => ({
+      slot_key: doc.slot_key,
+      note: `${doc.status ? label[doc.status] : '판정 없음'} · ${doc.findings[0]?.message ?? '저장된 확인 사유 없음'}`,
+    })),
+    score_note: `${total} (${detail.score_sheet.items.map((item) => `${item.label} ${item.score}/${item.max_score}`).join(', ')}).`,
+    source: 'rules', label: '규칙 기반 요약', model: null, generated_at: '2026-03-12T09:00:00', cached: false,
+  }
 }
 
 export function mockDecision(id: number, decision: DecisionKey, memo: string, role: RoleKey = 'province'): void {

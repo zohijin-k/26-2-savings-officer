@@ -172,6 +172,24 @@ class Review(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now)
 
 
+class ReviewSummary(SQLModel, table=True):
+    """담당자 화면 'AI 종합의견' 캐시 (`officer_summary.py`).
+
+    판정이 아니라 저장된 판정을 풀어 쓴 참고 문구다. `input_hash`는 LLM에 보낸
+    투영 입력의 해시라, 판정·서류가 바뀌면 다음 조회에서 다시 생성된다. 전북AI가
+    만든 결과만 저장하고, 규칙 기반 대체 요약은 저장하지 않는다.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    application_id: int = Field(index=True, unique=True, foreign_key="application.id")
+    input_hash: str
+    summary_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    #: jbai (규칙 대체본은 저장하지 않는다)
+    source: str
+    model: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
 #: 병합 PDF 페이지 중 어느 슬롯에도 배정되지 않은 것.
 UNASSIGNED_SLOT = "unassigned"
 

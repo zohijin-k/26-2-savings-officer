@@ -151,6 +151,64 @@
 .verdict__reasons { margin-top: var(--space-3); }
 .verdict__reasons summary { font-size: var(--fs-13); color: var(--color-primary); }
 
+/* 1-0. AI 종합의견: 한눈에 보는 요약지. 점선 테두리로 'AI 제안'과 같은 참고용 계열임을 보인다. */
+.ai-summary { display: grid; gap: var(--space-2); margin-bottom: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px dashed var(--info-10); border-radius: var(--radius-8); background: linear-gradient(180deg, var(--info-5), var(--color-surface) 56px); }
+.ai-summary p { margin: 0; }
+.ai-summary__head { display: flex; align-items: center; gap: var(--space-2); }
+.ai-summary__title { font-size: var(--fs-13); font-weight: 700; color: var(--info-60); }
+.ai-summary__tag { padding: 1px var(--space-2); border: 1px solid; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.ai-summary__tag--ai { color: var(--info-60); background: var(--color-surface); border-color: var(--info-10); }
+.ai-summary__tag--rules { color: #464c53; background: var(--color-head); border-color: var(--color-border); }
+.ai-summary__time { margin-left: auto; font-size: 12px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.ai-summary__refresh { width: 26px; height: 26px; border: 1px solid var(--color-border); border-radius: 50%; background: var(--color-surface); color: var(--color-text-muted); font-size: 14px; line-height: 1; cursor: pointer; }
+.ai-summary__refresh:hover:not(:disabled) { color: var(--info-60); border-color: var(--info-10); }
+.ai-summary__refresh:disabled { opacity: .6; cursor: progress; }
+.ai-summary__headline { font-size: var(--fs-17); font-weight: 700; line-height: 1.4; color: var(--color-text); }
+.ai-summary__why { font-size: var(--fs-13); line-height: 1.5; color: var(--color-text-muted); }
+
+.ai-summary__points { margin: var(--space-1) 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.ai-summary__point { display: grid; grid-template-columns: 22px 1fr auto; gap: var(--space-2); align-items: start; width: 100%; padding: var(--space-2) var(--space-3); border: 1px solid var(--warning-10); border-left: 3px solid var(--warning-50); border-radius: var(--radius-6); background: var(--warning-5); color: var(--color-text); font: inherit; text-align: left; cursor: pointer; transition: background var(--ease), border-color var(--ease); }
+.ai-summary__point:hover { background: #ffecc4; }
+.ai-summary__point--on { background: var(--color-surface); border-color: var(--info-50); border-left-color: var(--info-50); box-shadow: var(--shadow-2); }
+.ai-summary__num { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--warning-60); color: white; font-size: 12px; font-weight: 700; }
+.ai-summary__point--on .ai-summary__num { background: var(--info-60); }
+.ai-summary__body { display: grid; gap: 4px; min-width: 0; }
+.ai-summary__line { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); font-size: var(--fs-15); }
+.ai-summary__doc { padding: 0 6px; border-radius: var(--radius-4); background: var(--color-surface); color: var(--color-text-muted); font-size: 12px; font-weight: 500; }
+.ai-summary__evidence { display: flex; flex-wrap: wrap; gap: 4px; }
+.ai-summary__ev { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: var(--radius-4); background: var(--color-surface); font-size: 12px; color: var(--color-text); }
+.ai-summary__ev b { font-size: 11px; font-weight: 700; }
+.ai-summary__ev--rule b { color: var(--warning-60); }
+.ai-summary__ev--auto { border: 1px dashed var(--info-10); }
+.ai-summary__ev--auto b { color: var(--info-60); }
+.ai-summary__ev--other b { color: var(--color-primary); }
+.ai-summary__detail { font-size: var(--fs-13); line-height: 1.5; color: var(--color-text); }
+.ai-summary__go { align-self: center; color: var(--info-60); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.ai-summary__toggle { justify-self: start; padding: 0; border: 0; background: none; color: var(--color-primary); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.ai-summary__toggle:hover { text-decoration: underline; }
+.ai-summary__clear { font-size: var(--fs-13); color: var(--success-60); }
+
+.ai-summary__more summary { font-size: 12px; font-weight: 500; color: var(--color-primary); cursor: pointer; }
+.ai-summary__more ul { margin: var(--space-2) 0 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: var(--fs-13); }
+.ai-summary__more li { display: grid; grid-template-columns: minmax(96px, 36%) 1fr; gap: var(--space-2); padding: 3px 0; border-bottom: 1px solid var(--color-divider); }
+.ai-summary__jump { padding: 0; border: 0; background: none; color: var(--info-60); font: inherit; font-size: var(--fs-13); font-weight: 700; text-align: left; cursor: pointer; }
+.ai-summary__jump:hover { text-decoration: underline; }
+.ai-summary__score { margin-top: var(--space-2) !important; display: flex; gap: var(--space-2); font-size: var(--fs-13); }
+.ai-summary__score b { flex: none; color: var(--color-primary); }
+.ai-summary__foot { font-size: 11px; color: var(--color-text-muted); }
+.ai-summary__error { font-size: var(--fs-13); color: var(--danger-60); display: flex; align-items: center; gap: var(--space-2); }
+.ai-summary__skeleton { display: grid; gap: var(--space-2); }
+.ai-summary__skeleton i { display: block; height: 14px; border-radius: var(--radius-4); background: linear-gradient(90deg, var(--color-head), var(--color-divider), var(--color-head)); background-size: 200% 100%; animation: ai-summary-shimmer 1.2s ease-in-out infinite; }
+.ai-summary__skeleton i:nth-child(1) { width: 78%; height: 18px; }
+.ai-summary__skeleton i:nth-child(3) { width: 56%; }
+@keyframes ai-summary-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+/* 확인 포인트 → 원본: 같은 서류가 열려 있어도 반응이 보이도록 원본 영역을 잠깐 표시한다. */
+.review__left { position: relative; }
+.review__pulse { position: absolute; inset: 0; z-index: 5; pointer-events: none; border: 3px solid var(--info-50); animation: review-pulse 1.4s ease-out forwards; }
+@keyframes review-pulse { 0% { opacity: 1; box-shadow: inset 0 0 0 9999px rgb(11 127 212 / 10%); } 100% { opacity: 0; box-shadow: inset 0 0 0 9999px rgb(11 127 212 / 0%); } }
+@media (prefers-reduced-motion: reduce) { .ai-summary__skeleton i { animation: none; } .review__pulse { animation-duration: .01s; } }
+
 /* 2. 심사표 */
 .score-summary { display: flex; align-items: baseline; gap: var(--space-2); margin: 0 0 var(--space-3); }
 .score-summary strong { font-size: var(--fs-28); font-weight: 700; color: var(--color-primary); line-height: 1.2; }

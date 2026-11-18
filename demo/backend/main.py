@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .api import applications, criteria, documents, files, forms, officer, review, subsidy
 from .engine_adapter import apply_runtime_overrides
 from .models import init_db
+from .officer_summary import SummaryWorker, worker_enabled
 from .rules.programs import PROGRAMS, get_program
 from .rules.self_check import item_numbers
 from .rules.subsidy import catalog
@@ -26,7 +27,15 @@ async def lifespan(app: FastAPI):
     # 엔진 config를 공고문 실제값으로 덮어쓴다. 엔진 파일은 건드리지 않는다.
     apply_runtime_overrides()
     init_db()
-    yield
+    # 담당자 화면 AI 종합의견을 접수 순서대로 미리 만들어 둔다(전북AI가 켜져 있을 때만).
+    worker = SummaryWorker() if worker_enabled() else None
+    if worker is not None:
+        worker.start()
+    try:
+        yield
+    finally:
+        if worker is not None:
+            worker.stop()
 
 
 app = FastAPI(

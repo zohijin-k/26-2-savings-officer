@@ -312,7 +312,8 @@ def clean():
             marked = [app for app in apps if _scenario(app)]
             ids = {app.id for app in marked}
             rows = {kind: session.exec(select(kind)).all()
-                    for kind in (models.Document, models.Consent, models.Review, models.SubsidyItem)}
+                    for kind in (models.Document, models.Consent, models.Review, models.SubsidyItem,
+                                 models.ReviewSummary)}
             protected = set()
             for app in apps:
                 if app.id not in ids:

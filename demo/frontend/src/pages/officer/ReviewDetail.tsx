@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { fetchReviewDetail, postDecision, type BBox, type DecisionKey, type DocStatus, type ReviewDetailData, type RoleKey, type ScoreItemRow } from '../../api.ts'
+import { useEffect, useRef, useState } from 'react'
+import { fetchReviewDetail, postDecision, type BBox, type DecisionKey, type DocStatus, type OfficerDocument, type ReviewDetailData, type RoleKey, type ScoreItemRow } from '../../api.ts'
 import StatusBadge from '../../components/StatusBadge.tsx'
+import AiSummaryCard from './AiSummaryCard.tsx'
 import DocumentViewer from './DocumentViewer.tsx'
 import ScoreSheet6 from './ScoreSheet6.tsx'
 import { selectOfficerDocument } from './list-model.ts'
@@ -71,6 +72,17 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
     } : null)
     onSelect(doc.document_id, doc.slot_key)
   }
+  // AI 종합의견의 확인 포인트 → 원본. 같은 서류가 이미 열려 있어도 반응이 보이도록
+  // 위치가 있으면 강조하고, 없으면 원본 영역을 잠깐 표시한다.
+  const [pulse, setPulse] = useState(0)
+  const leftRef = useRef<HTMLElement>(null)
+  const jumpToOriginal = (doc: OfficerDocument, field: string | null, label: string) => {
+    const bbox = field ? doc.bboxes[field] : undefined
+    setFocus(bbox ? { documentId: doc.document_id, bbox, label, scoreKey: null } : null)
+    setPulse((n) => n + 1)
+    leftRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    onSelect(doc.document_id, doc.slot_key)
+  }
   const tiebreak = detail ? tiebreakParts(detail.score_sheet) : null
 
   return <div className="review">
@@ -93,7 +105,8 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
         })}
       </nav>
       <div className="review__split">
-        <section className="review__left" aria-label="신청자 원본 서류">
+        <section className="review__left" aria-label="신청자 원본 서류" ref={leftRef}>
+          {pulse > 0 && <div key={pulse} className="review__pulse" aria-hidden="true" />}
           {activeDoc ? <DocumentViewer doc={activeDoc}
             highlight={focus?.documentId === activeDoc.document_id ? focus.bbox : null}
             highlightLabel={focus?.documentId === activeDoc.document_id ? focus.label : undefined} /> : <p className="empty-state">
@@ -103,6 +116,8 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
         <section className="review__right" aria-label="판독 결과">
           <section className="panel verdict" aria-labelledby="panel-verdict">
             <div className="panel__head"><h2 id="panel-verdict"><span className="panel__step">1</span>최종 판정</h2></div>
+            <AiSummaryCard key={applicationId} applicationId={applicationId} role={role}
+              documents={detail.documents} onJump={jumpToOriginal} />
             <div className="verdict__grid">
               <div className="verdict__box verdict__box--ai">
                 <span className="verdict__tag">AI 제안</span>

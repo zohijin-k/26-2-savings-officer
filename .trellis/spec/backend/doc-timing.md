@@ -52,6 +52,11 @@ verdict, on the own engine. Never change operating code to make it measurable.
   digits > 0 keeps the default with one warning line that never echoes the value.
   run.json `options.ocr_threads` and the summary `OCR_THREADS` line also carry
   `page_workers_cap` = min(page_workers, cpu_count // intra_threads), at least 1.
+  `run_ocr_pages` reads pages concurrently only when `ENGINES["own"]` is the real
+  reader or a wrapper reaching it through `__wrapped__` (doc_timing's timing wrapper
+  qualifies). A reader swapped in by a test (e.g. a fake handing out page results in
+  call order) is called sequentially on the caller's thread, whatever
+  `OWN_OCR_PAGE_WORKERS` says; to test concurrency, patch `own.recognize` instead.
   Every reader of doc_timing rows (`load_strata`, `classify_recovery_diag`
   crosstab/compare/run --timing, label_review on its branch) goes through `validate_row`, which
   accepts formats 1-3; a format bump must keep older formats readable.

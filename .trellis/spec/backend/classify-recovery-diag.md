@@ -128,6 +128,11 @@ candidate rules would change, without changing production behaviour.
   before the slot cutoff (`D1_30`, `D31_365`, `D366P`, `FUTURE` after today, `NA`); for a
   MISSING_BILLING_MONTHS FAIL, the number of months in 월별고지금액 (`M0`, `M1_2`, `M3_5`,
   `M6_11`, `M12P`, `NA`). Summary lines `D6_EARLY` and `D6_BILLING`.
+- Row format 5 adds `history` (D8) for RESIDENT_ABSTRACT rows: the production ordinal state
+  recomputed from the pages the extractor read (`CONTIGUOUS`, `GAP` missing/duplicate/not
+  starting at 1, `UNREADABLE` an entry without an ordinal, `NA` no entries or no OCR pages)
+  and `empty_page` (a counted page whose table header was found but yielded no row). Summary
+  lines `D8` and `D8_DECISION`.
 - Known limit of S3: `issue_source` locates dates with `nhis_common.dates_in_line`, which
   does not parse a date merged with its time ("2026-03-0310:20"); such a 4대보험 발급일시
   value is reported as OTHER although the extractor took it from the 발급일시 label cell.

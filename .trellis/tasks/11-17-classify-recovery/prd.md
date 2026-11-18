@@ -78,3 +78,9 @@
 | R33 | S3 발급일: 이름표 오른쪽(발급일·발급일자·발행일) 또는 서식 고정 위치만 인정, 출력일은 발급일 아님, 없으면 ISSUE_DATE_MISSING(NEEDS_REVIEW, 발급일이 인쇄되는 여섯 서식만), 열람용은 담당자 메모만 |
 | R34 | S5 화질 점수만으로는 FAIL 없음(engine `image_quality_status`), IMAGE_RESOLUTION_TOO_LOW는 FAIL 유지 |
 | R35 | S4 영역 자체의 신뢰도 근거가 없는 '없음' FAIL(MISSING_ADDRESS_HISTORY·MISSING_REQUIRED_FIELD)은 REQUIRED_FIELD_UNREADABLE·LOW_OCR_CONFIDENCE와 겹치면 NEEDS_REVIEW("판독 불확실"). 영역을 0.85 이상으로 읽어야 하는 MISSING_ADDRESS_DATES·확정 MISSING_BILLING_MONTHS·NHIS_HISTORY_PERIOD_MISSING은 그대로 |
+| R36 | (11-18 2차) A4·S1 보관 패치 운영 반영. 기존 시험이 실패하면 고치지 않고 보고(A4는 판정과 무관한 기대값 2개로 보류) |
+| R37 | 동의서 ADMIN_CONSENT_NOT_GIVEN(FAIL)은 화질 기준(LOW_IMAGE_QUALITY·IMAGE_RESOLUTION_TOO_LOW 아님)과 미동의 표시 신뢰도(강한 위치 맞춤, 표시 칸 0.15 이상, 다른 칸 MARK_RATIO/2 이하)를 모두 만족할 때만. 아니면 ADMIN_CONSENT_MARK_UNCERTAIN(NEEDS_REVIEW) |
+| R38 | '열람용' 문구가 있으면 VIEW_ONLY_DOCUMENT(NEEDS_REVIEW, 담당자 화면에만) |
+| R39 | 조사 보고: 4대보험 발급일 출처(S3 OTHER), 발급일 없음 경로(PASS 가능 경로 있으면 보고 후 시험 커밋 안 함), L1 빈 쪽 조건(재현되면 보완) |
+| R40 | 진단 D6(조기 발급 FAIL의 발급일 출처·기준일 차이 구간, 고지월 누락 FAIL의 판독 개수 구간), D8(초본 순번 상태·이력 0건 쪽과 판정). 숫자만 |
+| R41 | 초본 주소 이력 순번이 1..N이 아니거나(누락·1로 시작 안 함), 번호를 못 읽었거나, 표 머리글을 찾은 쪽에서 이력 0건이면 전입일·주소이력건수 '불확실', ADDRESS_HISTORY_INCOMPLETE(NEEDS_REVIEW). 세부 사유 NUMBER_GAP·NUMBER_UNREADABLE·EMPTY_PAGE 분리 |

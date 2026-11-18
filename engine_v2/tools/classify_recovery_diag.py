@@ -33,7 +33,7 @@ from unittest.mock import patch
 from . import batch_assess as batch
 from . import doc_timing as timing
 
-VERSION = 4
+VERSION = 5
 #: Format 1 (commit 2) had no consent/payment/p1/c1 keys. Format 2 had no ``recovery`` key.
 KINDS = batch.KINDS
 TIERS = timing.TIERS
@@ -640,6 +640,8 @@ S4_REGIONS = ('FOUND', 'NOT_FOUND', 'NA')
 EARLY_GAPS = ('D1_30', 'D31_365', 'D366P', 'FUTURE', 'NA')
 EARLY_SOURCES = S3_SOURCES + ('NA',)
 BILLING_BINS = ('M0', 'M1_2', 'M3_5', 'M6_11', 'M12P', 'NA')
+#: D8: address-history ordinal state of resident abstracts read by LocalOcr (production 11-18 rule).
+HISTORY_NUMBERS = ('CONTIGUOUS', 'GAP', 'UNREADABLE', 'NA')
 #: S2: sheets read poorly (few Hangul characters) or of unclassified documents are re-read rotated.
 S2_MIN_HANGUL = 50      # a sheet with fewer Hangul characters counts as poorly read
 S2_RATIO = 2.0          # a rotation must read at least this many times the Hangul characters
@@ -1049,6 +1051,18 @@ def failure_detail(trace, path, row, ocr):
         row['billing'] = dict(months=billing_bin(ocr.fields.get('월별고지금액')))
 
 
+def history_check(trace, row):
+    """D8: ordinal state and table pages without rows, recomputed from the pages the extractor read."""
+    from engine_v2.extractors import resident_abstract
+    pages = trace.resident
+    if not pages:
+        row['history'] = dict(numbers='NA', empty_page='NA')
+        return
+    ex = resident_abstract.extract(pages)
+    row['history'] = dict(numbers=ex.history_numbers if ex.history_numbers in HISTORY_NUMBERS else 'NA',
+                          empty_page='O' if ex.history_empty_page else 'X')
+
+
 def _hangul(words):
     return sum(len(re.findall(r'[가-힣]', word.text)) for word in words)
 
@@ -1376,7 +1390,7 @@ def blank_row(key, code='NONE'):
                 struct=None, scan=None, scan_code=None, text_all=None,
                 g1={name: None for name in CANDIDATES}, g1_decision={name: None for name in CANDIDATES},
                 consent=None, c1=None, payment=None, p1=None, c2=None, a2=None, a4=None, recovery=None,
-                s1=None, s2=None, s3=None, s4=None, early=None, billing=None, shadow_errors=[])
+                s1=None, s2=None, s3=None, s4=None, early=None, billing=None, history=None, shadow_errors=[])
 
 
 def gave_up(row):
@@ -1418,6 +1432,7 @@ def process(path, key, trace):
                                     ('S1', row['form'] in ('RESIDENT_ABSTRACT', 'RESIDENT_CERTIFICATE'),
                                      lambda: resident_sheet_shadow(trace, path, row, ocr)),
                                     ('D6', True, lambda: failure_detail(trace, path, row, ocr)),
+                                    ('D8', row['form'] == 'RESIDENT_ABSTRACT', lambda: history_check(trace, row)),
                                     ('QUALITY', True, lambda: quality_shadows(trace, path, row, ocr))):
         if not applies:
             continue
@@ -1441,7 +1456,7 @@ def validate_row(row):
     keys = {'schema_version', 'key', 'code', 'form', 'tier', 'decision', 'reasons', 'exit', 'reclass',
             'exceptions', 'ocr_chars', 'cause', 'struct', 'scan', 'scan_code', 'text_all', 'g1', 'g1_decision',
             'consent', 'c1', 'payment', 'p1', 'c2', 'a2', 'a4', 'recovery', 's1', 's2', 's3', 's4',
-            'early', 'billing', 'shadow_errors'}
+            'early', 'billing', 'history', 'shadow_errors'}
     req(isinstance(row, dict) and set(row) == keys and row['schema_version'] == VERSION)
     req(isinstance(row['key'], str) and timing.KEY_RE.fullmatch(row['key']) is not None)
     req(row['code'] in ROW_CODES and row['form'] in KINDS and row['tier'] in TIERS and row['decision'] in DECISIONS)
@@ -1465,9 +1480,13 @@ def validate_row(row):
     req(set(row['g1_decision']) == set(CANDIDATES)
         and all(_code_in(v, DECISIONS, True) for v in row['g1_decision'].values()))
     req(isinstance(row['shadow_errors'], list)
-        and set(row['shadow_errors']) <= {'G1', 'CONSENT', 'PAYMENT', 'A4', 'QUALITY', 'S1', 'S2', 'S3', 'S4', 'D6'})
+        and set(row['shadow_errors']) <= {'G1', 'CONSENT', 'PAYMENT', 'A4', 'QUALITY', 'S1', 'S2', 'S3', 'S4', 'D6',
+                                          'D8'})
     req(row['early'] is None or (isinstance(row['early'], dict) and set(row['early']) == {'source', 'gap'}
                                  and row['early']['source'] in EARLY_SOURCES and row['early']['gap'] in EARLY_GAPS))
+    req(row['history'] is None or (isinstance(row['history'], dict) and set(row['history']) == {'numbers', 'empty_page'}
+                                   and row['history']['numbers'] in HISTORY_NUMBERS
+                                   and row['history']['empty_page'] in ('O', 'X', 'NA')))
     req(row['billing'] is None or (isinstance(row['billing'], dict) and set(row['billing']) == {'months'}
                                    and row['billing']['months'] in BILLING_BINS))
     req(row['s2'] is None or (isinstance(row['s2'], dict)
@@ -1752,6 +1771,13 @@ def _stage_summary(done):
     lines.append('D6_BILLING missing_billing_fail_docs')
     lines.append(_line('D6_BILLING', len(billing)))
     _counted(lines, 'D6_BILLING months n', ((r['billing']['months'],) for r in billing))
+    history = [r for r in done if r['history'] is not None]
+    lines.append('D8 abstract_docs contiguous gap unreadable empty_page')
+    lines.append(_line('D8', len(history), *(sum(r['history']['numbers'] == state for r in history)
+                                             for state in ('CONTIGUOUS', 'GAP', 'UNREADABLE')),
+                       sum(r['history']['empty_page'] == 'O' for r in history)))
+    _counted(lines, 'D8_DECISION numbers empty_page decision n',
+             ((r['history']['numbers'], r['history']['empty_page'], r['decision']) for r in history))
     _counted(lines, 'P1_DECISION margin before after n',
              ((key, r['decision'], r['p1'][key]['decision']) for r in payment for key in P1_KEYS
               if r['p1'] is not None and r['p1'][key]['decision'] != r['decision']))

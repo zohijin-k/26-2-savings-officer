@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 import math
+import os
+import threading
 
 from ...tools.fetch_own_models import MODEL_DIR, verify_models
 from . import OcrWord
@@ -35,13 +37,20 @@ def polygon_bbox(points, source_size, map_size):
     return tuple(float(v) for v in (*pts.min(axis=0), *pts.max(axis=0)))
 
 
-@lru_cache(maxsize=1)
-def sessions():
+#: onnxruntime threads per session. Page workers are bounded so that
+#: workers x INTRA_OP_THREADS never exceeds the logical CPU count.
+INTRA_OP_THREADS = 2
+#: Upper bound on concurrent page sessions (memory: one det+rec pair each).
+MAX_PAGE_WORKERS = 4
+_worker = threading.local()
+
+
+def _load_sessions():
     verify_models(MODEL_DIR)
     import onnxruntime as ort
     ort.disable_telemetry_events()
     options = ort.SessionOptions()
-    options.intra_op_num_threads = 2
+    options.intra_op_num_threads = INTRA_OP_THREADS
     options.inter_op_num_threads = 1
     det, rec = [ort.InferenceSession(str(MODEL_DIR / name), sess_options=options,
                                     providers=['CPUExecutionProvider']) for name in ('det.onnx', 'rec.onnx')]
@@ -52,6 +61,38 @@ def sessions():
     if rec.get_outputs()[0].shape[-1] != len(chars) + 1:
         raise ValueError('own recognition class count does not match dictionary')
     return det, rec, chars
+
+
+@lru_cache(maxsize=1)
+def sessions():
+    return _load_sessions()
+
+
+@lru_cache(maxsize=None)
+def page_sessions(slot: int):
+    """Sessions owned by one concurrent page worker; slot 0 is the shared sessions()."""
+    return sessions() if slot == 0 else _load_sessions()
+
+
+def page_workers(pages: int) -> int:
+    """Concurrent page readers for a document, within the CPU budget."""
+    return max(1, min(pages, MAX_PAGE_WORKERS, (os.cpu_count() or 1) // INTRA_OP_THREADS))
+
+
+def prepare_page_workers(pages: int) -> int:
+    """Load every worker slot in the calling thread; 1 (sequential) when any load fails."""
+    workers = page_workers(pages)
+    try:
+        for slot in range(workers):
+            page_sessions(slot)
+    except Exception:  # noqa: BLE001 - the sequential path reports the same error per page
+        return 1
+    return workers
+
+
+def bind_page_worker(slot: int) -> None:
+    """Thread initializer: recognize() in this thread uses page_sessions(slot)."""
+    _worker.slot = slot
 
 
 def _ordered_box(points):
@@ -112,7 +153,9 @@ def _crop(image, box):
 
 
 def recognize(png: bytes, size: tuple[int, int]) -> list[OcrWord]:
-    det, rec, chars = sessions()  # clear missing-model error even without optional image libraries
+    slot = getattr(_worker, 'slot', 0)
+    # Clear missing-model error even without optional image libraries.
+    det, rec, chars = sessions() if slot == 0 else page_sessions(slot)
     import cv2
     import numpy as np
     image = cv2.imdecode(np.frombuffer(png, dtype=np.uint8), cv2.IMREAD_COLOR)

@@ -123,6 +123,12 @@ def _import_v2():
     return resident_abstract, nhis_payment, nhis_acquisition_loss, run_ocr, PageSource, preprocess, V2DocType, DocumentInput, _load_pages, insurance_4
 
 
+def _read_pages(run_ocr, engine: str, page_images):
+    """쪽마다 읽기 함수를 쪽 순서대로 낸다. 여러 쪽 own은 동시에 읽는다(engine_v2 run_ocr_pages)."""
+    from engine_v2.pipeline.ocr import run_ocr_pages
+    return run_ocr_pages(engine, [(p.png, p.pixel_size) for p in page_images], run=run_ocr)
+
+
 def _quality(pages) -> float:
     """해상도로 화질을 근사한다 (엔진 IMAGE_QUALITY_THRESHOLD 0.6과 비교)."""
     raster = [p for p in pages if getattr(p, "source", None) != "text_layer"]
@@ -812,8 +818,8 @@ class LocalOcr:
             return self._render_retry(path, engine, "IMAGE_TEXT_PAGE")
 
         pages = []
-        for p in page_images:
-            r = run_ocr(engine, p.png, p.pixel_size)
+        for p, read in zip(page_images, _read_pages(run_ocr, engine, page_images)):
+            r = read()
             if r.error:
                 return None  # 엔진 미설치 등 → 다음 계층
             pages.append((p, r))
@@ -832,8 +838,8 @@ class LocalOcr:
         if not page_images:
             return None
         pages = []
-        for page in page_images:
-            read = run_ocr(engine, page.png, page.pixel_size)
+        for page, reader in zip(page_images, _read_pages(run_ocr, engine, page_images)):
+            read = reader()
             if read.error:
                 return None
             pages.append((page, read))

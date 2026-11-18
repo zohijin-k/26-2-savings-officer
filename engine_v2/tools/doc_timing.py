@@ -33,6 +33,7 @@ import random
 import re
 import statistics
 import subprocess
+import threading
 import time
 from unittest.mock import patch
 
@@ -124,10 +125,17 @@ def document_key(relative):
 
 
 class StageTimer:
-    """Exclusive stage times: a nested stage's time is removed from its parent."""
+    """Exclusive stage times: a nested stage's time is removed from its parent.
+
+    Stages are kept for the thread that created the timer. Concurrent page readers
+    (own page workers) only count calls; the creating thread times its wait for each
+    page result as the ``ocr`` stage (see ``_wrap_run_ocr_pages``).
+    """
 
     def __init__(self, clock=time.perf_counter):
         self.clock = clock
+        self.owner = threading.get_ident()
+        self.lock = threading.Lock()
         self.active = False
         self.phase = 'NONE'
         self.cold_model_load = None
@@ -142,9 +150,12 @@ class StageTimer:
         self.ocr_calls = 0
         self.text_pages = 0
 
+    def owned(self):
+        return threading.get_ident() == self.owner
+
     @contextmanager
     def stage(self, name):
-        if not self.active:
+        if not self.active or not self.owned():
             yield
             return
         frame = [name, 0.0]
@@ -163,6 +174,10 @@ class StageTimer:
     def exclude(self, elapsed):
         """Remove time (model load) from the enclosing stage and the document total."""
         if not self.active:
+            return
+        if not self.owned():
+            with self.lock:
+                self.excluded += elapsed
             return
         if self.stack:
             self.stack[-1][1] += elapsed
@@ -207,11 +222,41 @@ def _wrap_ocr(timer, original):
                 return original(png, size)
         finally:
             if timer.active:
-                timer.ocr_calls += 1
+                with timer.lock:
+                    timer.ocr_calls += 1
             if first:
                 timer.first_ocr_call = timer.clock() - start
     recognize.__wrapped__ = original
     return recognize
+
+
+def _wrap_run_ocr_pages(timer, original):
+    """Time the caller's wait for each page reader as ``ocr`` (concurrent pages included)."""
+    def run_ocr_pages(*args, **kwargs):
+        for read in original(*args, **kwargs):
+            def timed(read=read):
+                with timer.stage('ocr'):
+                    return read()
+            yield timed
+    run_ocr_pages.__wrapped__ = original
+    return run_ocr_pages
+
+
+def _wrap_page_sessions(timer, original):
+    """Extra page-worker sessions load like the first model: excluded as cold start."""
+    def page_sessions(slot):
+        before = original.cache_info().misses
+        start = timer.clock()
+        try:
+            return original(slot)
+        finally:
+            # Slot 0 is sessions(), already excluded by its own wrapper.
+            if slot != 0 and original.cache_info().misses > before:
+                timer.exclude(timer.clock() - start)
+    page_sessions.cache_info = original.cache_info
+    page_sessions.cache_clear = original.cache_clear
+    page_sessions.__wrapped__ = original
+    return page_sessions
 
 
 def _wrap_load_pages(timer, original):
@@ -255,6 +300,10 @@ def instrument(timer):
         wrap(file_evidence, 'normalize_image_quality', 'evidence')
         wrap(admin_consent_scan, 'inspect_admin_consent_scan', 'evidence')
         stack.enter_context(patch.object(own, 'sessions', _wrap_sessions(timer, own.sessions)))
+        stack.enter_context(patch.object(own, 'page_sessions', _wrap_page_sessions(timer, own.page_sessions)))
+        pages_wrapper = _wrap_run_ocr_pages(timer, v2ocr.run_ocr_pages)
+        stack.enter_context(patch.object(v2ocr, 'run_ocr_pages', pages_wrapper))
+        stack.enter_context(patch.object(v2engine, 'run_ocr_pages', pages_wrapper))
         stack.enter_context(patch.dict(v2ocr.ENGINES, {'own': _wrap_ocr(timer, v2ocr.ENGINES['own'])}))
         stack.enter_context(patch.object(v2engine, '_load_pages', _wrap_load_pages(timer, v2engine._load_pages)))
         yield timer

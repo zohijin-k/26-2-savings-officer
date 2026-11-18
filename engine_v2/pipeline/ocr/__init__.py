@@ -166,3 +166,46 @@ def run_ocr(engine: str, png: bytes, size: tuple[int, int]) -> OcrResult:
         return OcrResult(engine, error=f"미설치: {e.name}")
     except Exception as e:  # noqa: BLE001 — 비교 도구이므로 엔진 오류는 기록만
         return OcrResult(engine, elapsed_sec=time.perf_counter() - t0, error=f"{type(e).__name__}: {e}")
+
+
+_RUN_OCR = run_ocr
+
+
+def run_ocr_pages(engine: str, images, run=None):
+    """여러 쪽을 읽는다. 쪽 순서대로 '인자 없는 읽기 함수'를 하나씩 내준다.
+
+    호출하는 쪽은 ``read = next(reads); result = read()``처럼 쪽마다 불러 결과를 받는다.
+    - own 엔진, 2쪽 이상, 감싸지 않은 run_ocr일 때만 쪽들을 동시에 읽는다(쪽마다 별도
+      onnxruntime 세션, 작업 수 × intra 스레드 ≤ 논리 코어). 결과는 쪽 순서 그대로이고
+      쪽 하나의 결과는 순차로 읽을 때와 같다.
+    - 그 밖(1쪽, 다른 엔진, 시험·측정 도구가 바꿔 끼운 run)은 지금처럼 순차로,
+      읽기 함수를 부를 때 그 쪽을 읽는다. 호출 순서·중간 종료·예외 위치가 그대로다.
+    ``run``: 호출하는 쪽이 쓰던 한 쪽 함수(기본: 이 모듈의 run_ocr).
+    """
+    run = run_ocr if run is None else run
+    images = list(images)
+    workers = 1
+    if engine == "own" and len(images) > 1 and run is _RUN_OCR:
+        from . import own
+        workers = own.prepare_page_workers(len(images))
+    if workers == 1:
+        for png, size in images:
+            yield lambda png=png, size=size: run(engine, png, size)
+        return
+
+    from concurrent.futures import ThreadPoolExecutor
+    from queue import SimpleQueue
+    from . import own
+
+    slots = SimpleQueue()
+    for slot in range(workers):
+        slots.put(slot)
+    pool = ThreadPoolExecutor(workers, thread_name_prefix="own-page",
+                              initializer=lambda: own.bind_page_worker(slots.get()))
+    try:
+        futures = [pool.submit(run, engine, png, size) for png, size in images]
+        for future in futures:
+            yield future.result
+    finally:
+        # 호출하는 쪽이 중간에 그만두면 아직 시작하지 않은 쪽은 읽지 않는다.
+        pool.shutdown(wait=True, cancel_futures=True)

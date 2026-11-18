@@ -21,7 +21,7 @@ from .extractors import exam_docs, interview_confirmation, receipt, nhis_qualifi
 from .extractors import business_registration, daily_work_record
 from .extractors import jbai_text
 from .extractors.resident_abstract import kst_today
-from .pipeline.ocr import OcrResult, OcrWord, run_ocr
+from .pipeline.ocr import OcrResult, OcrWord, run_ocr, run_ocr_pages
 from .pipeline.field_safety import remove_header_only_fields
 from .pipeline.preprocess import PageImage, PageSource, preprocess
 from .rules.registry import RULES, RuleContext
@@ -175,7 +175,10 @@ def _load_pages(doc: DocumentInput, ocr_engine: str, *, allow_page_errors: bool 
         pages = []
         pdf = None
         try:
-            for p in preprocess(doc.file_path):
+            images = preprocess(doc.file_path)
+            reads = run_ocr_pages(ocr_engine, [(p.png, p.pixel_size) for p in images
+                                               if p.source != PageSource.TEXT_LAYER], run=run_ocr)
+            for p in images:
                 if p.source == PageSource.TEXT_LAYER:
                     if pdf is None:
                         import pymupdf
@@ -193,7 +196,7 @@ def _load_pages(doc: DocumentInput, ocr_engine: str, *, allow_page_errors: bool 
                     pages.append((p, OcrResult("text_layer", words)))
                     continue
                 try:
-                    r = run_ocr(ocr_engine, p.png, p.pixel_size)
+                    r = next(reads)()
                 except ValueError:
                     if not allow_page_errors:
                         raise

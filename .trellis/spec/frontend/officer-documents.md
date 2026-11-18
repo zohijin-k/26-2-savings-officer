@@ -26,7 +26,7 @@ Sorting is client-side within the shown tab. `importance` (default, 중요도순
 
 Bulk selection exists only when `role.can_bulk` and a bulk handler are present; the town role renders the checkbox column empty so column positions do not shift. The bulk bar replaces the filter row in place. Reason rows load the detail API on demand and render only stored values: non-PASS documents with their `findings`, required documents with `document_id === null` as 미제출, and application-wide `ai.reasons`. Do not invent explanations or recompute eligibility.
 
-Detail must verify `program_code` before displaying a direct URL. The right panel order is 최종 판정 (AI 제안 vs 담당자 판단, fixed no-supplement warning, application-wide reasons) → 심사표 (total, tiebreak values, 서식6 with income marked 데모 추정치) → 판독 결과 for the selected document → 담당자 처리. Eligibility and exclusion panels stay out until the detail API returns those values.
+Detail must verify `program_code` before displaying a direct URL. The right panel order is 최종 판정 (AI 종합의견 card, AI 제안 vs 담당자 판단, fixed no-supplement warning, application-wide reasons) → 심사표 (total, tiebreak values, 서식6 with income marked 데모 추정치) → 판독 결과 for the selected document → 담당자 처리. Eligibility and exclusion panels stay out until the detail API returns those values.
 
 Design tokens live in `src/index.css` (`--color-*`, status `-5/-10/-50/-60`, `--fs-*`, 4px `--space-*`). Logo accents (`--accent-*`) are decoration only. Pretendard GOV is bundled locally; `.form-sheet` keeps Malgun Gothic to mirror the paper form.
 

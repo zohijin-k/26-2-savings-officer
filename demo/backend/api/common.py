@@ -192,7 +192,10 @@ APPLICANT_VISIBLE_FIELDS = ("발급일", "성명", "응시일", "결제금액", 
 
 def applicant_findings(findings: list[Any] | None) -> list[dict[str, Any]]:
     """Hide review guidance for rejected documents; retain FAIL and reference findings."""
-    source = [finding for finding in (findings or []) if isinstance(finding, dict)]
+    from ..rules.doc_check import OFFICER_ONLY_CODES
+
+    source = [finding for finding in (findings or [])
+              if isinstance(finding, dict) and finding.get("code") not in OFFICER_ONLY_CODES]
     has_failure = any(finding.get("severity", "FAIL") == "FAIL" for finding in source)
     return [
         {

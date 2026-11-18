@@ -57,6 +57,9 @@ CODE_PAGES_INCOMPLETE = "PAGES_INCOMPLETE"
 CODE_PAGES_UNREADABLE = "PAGES_UNREADABLE"
 CODE_PAGES_DUPLICATED = "PAGES_DUPLICATED"
 CODE_ISSUE_DATE_MISSING = "ISSUE_DATE_MISSING"
+CODE_VIEW_ONLY_DOCUMENT = "VIEW_ONLY_DOCUMENT"
+#: Findings shown on the officer screen only; applicant responses drop them (11-18 열람용).
+OFFICER_ONLY_CODES = frozenset({CODE_VIEW_ONLY_DOCUMENT})
 CODE_PAYMENT_PAGING_UNCERTAIN = "NHIS_PAYMENT_PAGING_UNCERTAIN"
 CODE_IMAGE_RESOLUTION_TOO_LOW = "IMAGE_RESOLUTION_TOO_LOW"
 CODE_MISSING_ADDRESS_DATES = "MISSING_ADDRESS_DATES"
@@ -1012,6 +1015,15 @@ def check_document(
         if not any(f.code == finding.code and f.severity == finding.severity for f in result.findings):
             result.findings.append(finding)
     _review_uncertain_absence(result)
+    if (not ocr.is_encrypted and req.accepts(ocr.detected_doc_type)
+            and ocr.fields.get("열람용표시") == "있음"):
+        # 11-18: a printed '열람용' (viewing copy) mark is never accepted automatically. Officer-only reason.
+        result.findings.append(CheckFinding(
+            CODE_VIEW_ONLY_DOCUMENT, "열람용 문서입니다. 발급일과 원본 여부를 담당자가 확인합니다.",
+            severity="NEEDS_REVIEW", detail="서류에 '열람용' 문구가 인쇄되어 있습니다.",
+        ))
+        if result.status == "PASS":
+            result.status = "NEEDS_REVIEW"
     return finalize_image_quality(req, ocr, result, file_format)
 
 

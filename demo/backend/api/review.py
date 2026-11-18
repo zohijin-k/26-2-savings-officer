@@ -53,6 +53,7 @@ from ..rules.required_docs import DocRequirement, upload_slots
 from ..rules.scoring import ScoreSheet, score_application
 from ..rules.subsidy import get_limit
 from .common import (
+    applicant_findings,
     checklist_for,
     document_dict,
     document_fact,
@@ -412,7 +413,7 @@ def _supplement(
         if doc is None and req.required:
             targets.append({"label": req.label, "reason": "아직 올리지 않았습니다."})
         elif doc is not None and doc.stage1_status != "PASS":
-            reason = (doc.findings_json or [{}])[0].get("message", "확인이 필요합니다.")
+            reason = (applicant_findings(doc.findings_json) or [{}])[0].get("message", "확인이 필요합니다.")
             targets.append({"label": req.label, "reason": reason})
 
     return {

@@ -259,6 +259,8 @@ def read_page_text(text: str, page, page_index: int) -> OcrResult:
     transfer_in = extract_transfer_in(text)
     if transfer_in:
         fields["전입일"] = transfer_in.isoformat()
+    if "열람용" in _squeeze(text or ""):
+        fields[VIEWING_COPY_FIELD] = "있음"
 
     size = extract_household_size(text)
     if size:
@@ -335,8 +337,10 @@ def read_page_text(text: str, page, page_index: int) -> OcrResult:
     )
 
 
-#: Officer-only memo for viewing copies (11-18 S3). The verdict never reads it.
+#: Officer-only memo for viewing copies (11-18 S3).
 VIEWING_COPY_NOTE = "열람용 문서입니다(VIEWING_COPY). 발급일과 원본 여부를 담당자가 확인합니다."
+#: Field set when the printed '열람용' mark is read (11-18); doc_check reviews it as VIEW_ONLY_DOCUMENT.
+VIEWING_COPY_FIELD = "열람용표시"
 
 
 def viewing_copy_note(text: str, current: str = "") -> str:
@@ -344,6 +348,14 @@ def viewing_copy_note(text: str, current: str = "") -> str:
     if "열람용" not in _squeeze(text or "") or VIEWING_COPY_NOTE in current:
         return current
     return f"{current} / {VIEWING_COPY_NOTE}" if current else VIEWING_COPY_NOTE
+
+
+def mark_viewing_copy(result: OcrResult, text: str) -> OcrResult:
+    """Officer memo and the review flag for a printed '열람용' mark (OCR paths)."""
+    if "열람용" in _squeeze(text or ""):
+        result.fields[VIEWING_COPY_FIELD] = "있음"
+    result.quality_note = viewing_copy_note(text, result.quality_note)
+    return result
 
 
 def _read_pdf(path: Path) -> OcrResult | None:

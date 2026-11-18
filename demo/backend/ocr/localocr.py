@@ -216,7 +216,8 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
         confidence = min(confidence, .4)
         fields["판독경고"] = "주소 이력의 순번 또는 날짜를 완전히 확인하지 못했습니다."
 
-    return OcrResult(
+    from .pdftext import mark_viewing_copy
+    return mark_viewing_copy(OcrResult(
         detected_doc_type=detected,
         confidence=round(confidence, 2),
         image_quality=_quality([p for p, _ in pages]),
@@ -227,7 +228,7 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
         tier=NAME,
         classification_confidence=ex.type_confidence,
         classification_evidence=ex.classification_evidence,
-    )
+    ), "\n".join(r.text for _, r in pages))
 
 
 def ensure_nhis_required_fields(result: OcrResult) -> OcrResult:
@@ -571,9 +572,8 @@ def _from_supported_form(extractor, pages, v2types, evidence, detected):
                   else _from_nhis(ex, scoped, v2types, evidence, detected))
     result.page_count = len(pages)
     result.engine = _pages_engine(scoped)
-    from .pdftext import viewing_copy_note
-    result.quality_note = viewing_copy_note("\n".join(r.text for _, r in pages), result.quality_note)
-    return result
+    from .pdftext import mark_viewing_copy
+    return mark_viewing_copy(result, "\n".join(r.text for _, r in pages))
 
 
 #: 취업지원패키지 추가서류 → (engine_v2 추출기 모듈, engine_v2 서류 종류 값)

@@ -57,6 +57,20 @@ verdict, on the own engine. Never change operating code to make it measurable.
   qualifies). A reader swapped in by a test (e.g. a fake handing out page results in
   call order) is called sequentially on the caller's thread, whatever
   `OWN_OCR_PAGE_WORKERS` says; to test concurrency, patch `own.recognize` instead.
+- Automatic thread choice (11-19, `own.AUTO_THREADS`): when neither `OWN_OCR_*` variable is set
+  (unset or empty), a document read one page at a time (one OCR page, one page worker, a swapped
+  reader, any thread that is not a page worker) uses `sessions()` with `single_intra_threads()` =
+  min(4, cpu_count) threads; 2+ pages read concurrently use `page_sessions(slot)` with
+  `INTRA_OP_THREADS` (2) each, every slot its own session (slot 0 is not the single session), so
+  page_workers x 2 <= cpu_count. `prepare_page_workers` loads no page session when it returns 1.
+  Setting either variable turns auto off: every session uses `INTRA_OP_THREADS` and page slot 0
+  shares `sessions()`, exactly as before. Server preload loads the single and every page session.
+  Row format 3 and the `OCR_THREADS` line are unchanged (they carry the page-session values);
+  run.json `options.ocr_thread_mode` and the summary `OCR_THREADS_MODE` line give the mode
+  (`auto`/`fixed`), single and page threads and the worker cap; `OCR_THREADS_USED intra workers n`
+  (run.json `ocr_threads_used`) counts measured documents by the threads and page workers they
+  were actually read with (documents without own OCR are not counted). doc_timing excludes every
+  page-session load as cold start in auto mode (slot 0 included).
   Every reader of doc_timing rows (`load_strata`, `classify_recovery_diag`
   crosstab/compare/run --timing, label_review on its branch) goes through `validate_row`, which
   accepts formats 1-3; a format bump must keep older formats readable.

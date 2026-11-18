@@ -57,8 +57,16 @@ def _env_count(name: str, default: int) -> int:
     return default
 
 
-#: onnxruntime threads per session (env OWN_OCR_INTRA_THREADS, read at import).
-#: Page workers are bounded so that workers x INTRA_OP_THREADS never exceeds the
+THREAD_ENV = ('OWN_OCR_INTRA_THREADS', 'OWN_OCR_PAGE_WORKERS')
+#: Automatic thread choice by page count (11-19): on when neither variable is set (unset or empty).
+#: A document read one page at a time (one OCR page, or any sequential read) uses one session with
+#: ``single_intra_threads()`` threads; 2+ pages read concurrently use page sessions with
+#: INTRA_OP_THREADS threads each. Setting either variable fixes the values as before (auto off).
+AUTO_THREADS = not any(os.environ.get(name, '').strip() for name in THREAD_ENV)
+#: Auto: onnxruntime threads of the single (sequential) session, capped at the logical CPU count.
+SINGLE_INTRA_THREADS = 4
+#: onnxruntime threads per page session (env OWN_OCR_INTRA_THREADS, read at import; fixed mode:
+#: every session). Page workers are bounded so that workers x INTRA_OP_THREADS never exceeds the
 #: logical CPU count.
 INTRA_OP_THREADS = _env_count('OWN_OCR_INTRA_THREADS', 2)
 #: Upper bound on concurrent page sessions (memory: one det+rec pair each);
@@ -67,12 +75,19 @@ MAX_PAGE_WORKERS = _env_count('OWN_OCR_PAGE_WORKERS', 4)
 _worker = threading.local()
 
 
-def _load_sessions():
+def single_intra_threads() -> int:
+    """Threads of the single (sequential) session: auto 4 within the CPU count, fixed INTRA_OP_THREADS."""
+    if not AUTO_THREADS:
+        return INTRA_OP_THREADS
+    return max(1, min(SINGLE_INTRA_THREADS, os.cpu_count() or 1))
+
+
+def _load_sessions(intra_threads: int | None = None):
     verify_models(MODEL_DIR)
     import onnxruntime as ort
     ort.disable_telemetry_events()
     options = ort.SessionOptions()
-    options.intra_op_num_threads = INTRA_OP_THREADS
+    options.intra_op_num_threads = INTRA_OP_THREADS if intra_threads is None else intra_threads
     options.inter_op_num_threads = 1
     det, rec = [ort.InferenceSession(str(MODEL_DIR / name), sess_options=options,
                                     providers=['CPUExecutionProvider']) for name in ('det.onnx', 'rec.onnx')]
@@ -87,13 +102,18 @@ def _load_sessions():
 
 @lru_cache(maxsize=1)
 def sessions():
-    return _load_sessions()
+    """The single (sequential) sessions: one OCR page, or pages read one at a time."""
+    return _load_sessions(single_intra_threads())
 
 
 @lru_cache(maxsize=None)
 def page_sessions(slot: int):
-    """Sessions owned by one concurrent page worker; slot 0 is the shared sessions()."""
-    return sessions() if slot == 0 else _load_sessions()
+    """Sessions owned by one concurrent page worker (INTRA_OP_THREADS each).
+
+    Fixed mode: slot 0 is the shared sessions(), as before. Auto: every slot has its own
+    page session, so the single session keeps its own thread count.
+    """
+    return sessions() if slot == 0 and not AUTO_THREADS else _load_sessions(INTRA_OP_THREADS)
 
 
 def page_workers(pages: int) -> int:
@@ -102,8 +122,13 @@ def page_workers(pages: int) -> int:
 
 
 def prepare_page_workers(pages: int) -> int:
-    """Load every worker slot in the calling thread; 1 (sequential) when any load fails."""
+    """Load every worker slot in the calling thread; 1 (sequential) when any load fails.
+
+    One worker reads pages one at a time on the single sessions(): no page session is loaded.
+    """
     workers = page_workers(pages)
+    if workers == 1:
+        return 1
     try:
         for slot in range(workers):
             page_sessions(slot)
@@ -175,9 +200,10 @@ def _crop(image, box):
 
 
 def recognize(png: bytes, size: tuple[int, int]) -> list[OcrWord]:
-    slot = getattr(_worker, 'slot', 0)
+    # None: not a page-worker thread (one page, or pages read one at a time) -> the single sessions.
+    slot = getattr(_worker, 'slot', None)
     # Clear missing-model error even without optional image libraries.
-    det, rec, chars = sessions() if slot == 0 else page_sessions(slot)
+    det, rec, chars = sessions() if slot is None else page_sessions(slot)
     import cv2
     import numpy as np
     image = cv2.imdecode(np.frombuffer(png, dtype=np.uint8), cv2.IMREAD_COLOR)

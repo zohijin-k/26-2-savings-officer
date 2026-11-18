@@ -152,6 +152,7 @@ class StageTimer:
         self.excluded = 0.0
         self.ocr_calls = 0
         self.text_pages = 0
+        self.page_workers_used = 1   # largest concurrent page workers chosen for this document
 
     def owned(self):
         return threading.get_ident() == self.owner
@@ -253,13 +254,35 @@ def _wrap_page_sessions(timer, original):
         try:
             return original(slot)
         finally:
-            # Slot 0 is sessions(), already excluded by its own wrapper.
-            if slot != 0 and original.cache_info().misses > before:
+            # Fixed mode: slot 0 is sessions(), already excluded by its own wrapper. Auto: every
+            # slot is its own page session.
+            from engine_v2.pipeline.ocr import own
+            if (slot != 0 or own.AUTO_THREADS) and original.cache_info().misses > before:
                 timer.exclude(timer.clock() - start)
     page_sessions.cache_info = original.cache_info
     page_sessions.cache_clear = original.cache_clear
     page_sessions.__wrapped__ = original
     return page_sessions
+
+
+def _wrap_prepare_page_workers(timer, original):
+    """Record the page workers chosen for the document (1: pages read one at a time)."""
+    def prepare_page_workers(pages):
+        workers = original(pages)
+        if timer.active and timer.owned():
+            timer.page_workers_used = max(timer.page_workers_used, workers)
+        return workers
+    prepare_page_workers.__wrapped__ = original
+    return prepare_page_workers
+
+
+def ocr_used(timer):
+    """(intra threads, page workers) the document was actually read with; None without own OCR."""
+    from engine_v2.pipeline.ocr import own
+    if not timer.ocr_calls:
+        return None
+    workers = timer.page_workers_used
+    return (own.INTRA_OP_THREADS, workers) if workers > 1 else (own.single_intra_threads(), 1)
 
 
 def _wrap_load_pages(timer, original):
@@ -304,6 +327,8 @@ def instrument(timer):
         wrap(admin_consent_scan, 'inspect_admin_consent_scan', 'evidence')
         stack.enter_context(patch.object(own, 'sessions', _wrap_sessions(timer, own.sessions)))
         stack.enter_context(patch.object(own, 'page_sessions', _wrap_page_sessions(timer, own.page_sessions)))
+        stack.enter_context(patch.object(own, 'prepare_page_workers',
+                                         _wrap_prepare_page_workers(timer, own.prepare_page_workers)))
         pages_wrapper = _wrap_run_ocr_pages(timer, v2ocr.run_ocr_pages)
         stack.enter_context(patch.object(v2ocr, 'run_ocr_pages', pages_wrapper))
         stack.enter_context(patch.object(v2engine, 'run_ocr_pages', pages_wrapper))
@@ -553,6 +578,13 @@ def summarize(rows, meta):
     lines.append('OCR_THREADS engine intra_threads page_workers page_workers_cap')
     lines.append(_line('OCR_THREADS', 'own', threads.get('intra_threads'), threads.get('page_workers'),
                        threads.get('page_workers_cap')))
+    mode = options.get('ocr_thread_mode') or {}
+    lines.append('OCR_THREADS_MODE mode single_intra page_intra page_workers_cap')
+    lines.append(_line('OCR_THREADS_MODE', mode.get('mode'), mode.get('single_intra'), mode.get('page_intra'),
+                       mode.get('page_workers_cap')))
+    lines.append('OCR_THREADS_USED intra workers measurements')
+    for intra, workers, n in meta.get('ocr_threads_used') or []:
+        lines.append(_line('OCR_THREADS_USED', intra, workers, n))
     skipped = Counter(r['code'] for r in rows if r['phase'] == 'skipped')
     errors = Counter(r['code'] for r in rows if r['phase'] == 'measure' and r['code'] != 'NONE')
     lines.append('SKIP code documents')
@@ -723,6 +755,13 @@ def own_threads():
         return dict(intra=None, inter=None, loaded='X')
 
 
+def ocr_thread_mode():
+    """auto (neither OWN_OCR_* variable set) or fixed, with the single and page session threads."""
+    from engine_v2.pipeline.ocr import own
+    return dict(mode='auto' if own.AUTO_THREADS else 'fixed', single_intra=own.single_intra_threads(),
+                page_intra=own.INTRA_OP_THREADS, page_workers_cap=own.page_workers(own.MAX_PAGE_WORKERS))
+
+
 def ocr_settings():
     """Own OCR settings in force: validated env values and the CPU-bounded worker cap."""
     from engine_v2.pipeline.ocr import own
@@ -772,7 +811,8 @@ def run(root, out, *, engines=('own',), repeat=1, warmup=3, sample=None, seed=20
                 options=dict(engines=list(engines), repeat=repeat, warmup=warmup, sample=sample, seed=seed,
                              limit=limit, strata_basis='NONE' if sample is None else
                              'FORM' if strata_forms is not None else 'PAGES_TEXT',
-                             external_ocr_disabled='O', ocr_threads=settings),
+                             external_ocr_disabled='O', ocr_threads=settings,
+                             ocr_thread_mode=ocr_thread_mode()),
                 counts={}, cold_start=None, own_threads=None)
     env = meta['environment']
     if env['load_start'][0] > (env['cores']['logical'] or 1) / 2:
@@ -826,6 +866,7 @@ def run(root, out, *, engines=('own',), repeat=1, warmup=3, sample=None, seed=20
                 emit(_blank_row(doc, 'own', 'skipped', 0, doc['code'], settings))
         processable = [doc for doc in selected if doc['code'] == 'NONE']
         timer = StageTimer()
+        used = Counter()
         started = time.perf_counter()
         with batch.guarded():
             installed = instrument(timer)
@@ -843,6 +884,8 @@ def run(root, out, *, engines=('own',), repeat=1, warmup=3, sample=None, seed=20
                     except batch.BatchError:
                         row['code'] = 'GUARD_BLOCKED'
                         row['seconds'] = row['seconds'] or {name: 0.0 for name in (*STAGES, 'total')}
+                    if phase == 'measure' and row['code'] == 'NONE' and (pair := ocr_used(timer)):
+                        used[pair] += 1
                     emit(row)
                     if index % PROGRESS_EVERY == 0 or index == len(batch_docs):
                         _print(f'progress own {phase} {number} done {index} total {len(batch_docs)} '
@@ -855,6 +898,7 @@ def run(root, out, *, engines=('own',), repeat=1, warmup=3, sample=None, seed=20
     meta['cold_start'] = dict(model_load_s=timer.cold_model_load, first_ocr_call_s=timer.first_ocr_call,
                               phase=timer.cold_phase)
     meta['own_threads'] = own_threads()
+    meta['ocr_threads_used'] = [[intra, workers, n] for (intra, workers), n in sorted(used.items())]
     env['load_end'] = [round(v, 2) for v in os.getloadavg()]
     env['finished'] = datetime.now().astimezone().isoformat(timespec='seconds')
     batch._atomic(batch._target(out / 'run.json'), meta)

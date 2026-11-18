@@ -386,7 +386,17 @@ def _check_resident_pages(ocr: OcrResult, req: DocRequirement) -> list[CheckFind
         blank_pages = data.get("blank_pages", 0)
         if type(blank_pages) is not int or blank_pages < 0:
             return [unreadable]
-        if (not markers or len(markers) + blank_pages != ocr.page_count
+        sheets = data.get("sheets")
+        if sheets is not None:
+            # S1 (held): every header marker of a 2-up sheet counts as a page; sheets, not
+            # markers, are compared with the uploaded page count.
+            if (not isinstance(sheets, list) or not sheets or len(sheets) + blank_pages != ocr.page_count
+                    or any(not isinstance(sheet, list) or not sheet for sheet in sheets)):
+                return [unreadable]
+            markers = [marker for sheet in sheets for marker in sheet]
+            if not confidence >= engine_config.OCR_CONFIDENCE_THRESHOLD:
+                return [unreadable]
+        elif (not markers or len(markers) + blank_pages != ocr.page_count
                 or not confidence >= engine_config.OCR_CONFIDENCE_THRESHOLD):
             return [unreadable]
         if any(not isinstance(m, list) or len(m) != 2

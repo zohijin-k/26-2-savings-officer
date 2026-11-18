@@ -48,6 +48,8 @@ ISSUER = re.compile(r"(시장|군수|구청장)")
 
 # --- 영역 (페이지 대비 %) — 실측값. 양식이 바뀌면 여기만 고친다 ------------
 HEADER_MAX_Y = 16.0
+#: Minimum horizontal distance (page-width %) between two header markers of one 2-up sheet.
+SHEET_SPREAD = 25.0
 #: 쪽마다 되풀이되는 머리 상자(제목·쪽표기·성명·주민등록번호 줄) 아래부터 본문으로 본다.
 BODY_TOP_Y = 26.0
 #: 본문 영역 글자가 이 수 이하이면 내용 없는 쪽(스캔 잡티 허용).
@@ -126,6 +128,8 @@ class ResidentAbstractResult:
     # 미판독(None)과 읽힌 누락을 분리한다. 중복 쪽·서로 다른 총수도 보존한다.
     page_markers: list[tuple[int, int] | None] = field(default_factory=list)
     page_marker_confidence: float = 0.0
+    #: Header-band markers per sheet when several pages are printed side by side (S1, held).
+    sheet_markers: list[list[tuple[int, int]]] | None = None
     classification_evidence: str = ""
     #: 쪽 수 확인에서 뺀 내용 없는 쪽 수 (page_markers에 들어 있지 않다).
     blank_pages: int = 0
@@ -181,7 +185,7 @@ def _birth_from_rrn(front6: str, g: str) -> date | None:
 # --- 페이지 단위 파싱 -----------------------------------------------------
 def _parse_header(lines: list[list[Word]]) -> dict:
     out: dict = {"title": "", "issue": None, "issue_words": [], "doc_no": None,
-                 "page_no": None, "page_confidence": 0.0, "issuer": None, "name": None, "name_words": [],
+                 "page_no": None, "page_confidence": 0.0, "header_markers": [], "doc_nos": set(), "issuer": None, "name": None, "name_words": [],
                  "birth": None, "gender": None, "birth_words": []}
     title_parts = []
     for line in lines:
@@ -191,6 +195,10 @@ def _parse_header(lines: list[list[Word]]) -> dict:
             title_parts.append(t)
             if (m := DOC_NO.search(normalize_format_text(t))) and out["doc_no"] is None:
                 out["doc_no"] = m.group(0)
+            out["doc_nos"].update(DOC_NO.findall(normalize_format_text(t)))
+            for w in line:
+                if (hm := PAGE_NO.match(w.text)):
+                    out["header_markers"].append((w.x0, (int(hm.group(1)), int(hm.group(2))), w.conf))
             for w in line:
                 if w.x0 > 70 and (m := PAGE_NO.match(w.text)):
                     out["page_no"] = (int(m.group(1)), int(m.group(2)))
@@ -537,8 +545,21 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
     kept.sort()
     if not kept:
         kept = list(range(len(headers)))
+    # S1 (held): a sheet with two or more header markers at least SHEET_SPREAD apart and one document
+    # number holds several printed pages (2-up). Body text never counts (header band only).
+    sheets, multi = [], False
+    for i in kept:
+        found = sorted(headers[i]["header_markers"])
+        xs = [x for x, _, _ in found]
+        if len(found) >= 2 and max(xs) - min(xs) >= SHEET_SPREAD and len(headers[i]["doc_nos"]) <= 1:
+            sheets.append([marker for _, marker, _ in found])
+            headers[i]["page_confidence"] = min(conf for _, _, conf in found)
+            multi = True
+        else:
+            sheets.append([headers[i]["page_no"]])
     return ResidentAbstractResult(
         detected, tconf, fields, entries, validations, warnings,
+        sheet_markers=sheets if multi else None,
         page_markers=[headers[i]["page_no"] for i in kept],
         classification_evidence=classification_evidence,
         page_marker_confidence=min((headers[i]["page_confidence"] for i in kept), default=0.0),

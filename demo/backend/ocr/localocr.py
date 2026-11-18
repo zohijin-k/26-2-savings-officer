@@ -163,6 +163,8 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
     page_data = {"markers": ex.page_markers, "confidence": ex.page_marker_confidence}
     if getattr(ex, "blank_pages", 0):
         page_data["blank_pages"] = ex.blank_pages  # 쪽 수 확인에서 뺀 내용 없는 쪽
+    if getattr(ex, "sheet_markers", None):
+        page_data["sheets"] = ex.sheet_markers  # 한 장에 여러 쪽(모아찍기)의 쪽표기
     fields["쪽표기자료"] = json.dumps(page_data)
     from engine_v2.extractors.address_dates import assess
     if ex.detected_type == v2types.RESIDENT_ABSTRACT:

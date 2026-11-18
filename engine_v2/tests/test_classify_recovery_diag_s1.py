@@ -86,7 +86,8 @@ def test_shadow_turns_the_two_up_incomplete_fail_into_a_page_complete_verdict(tm
     row = tool.blank_row('0' * 16)
     row['form'] = 'RESIDENT_ABSTRACT'
     row['decision'], row['reasons'] = tool._assess(path, 'RESIDENT_ABSTRACT', ocr)
-    assert row['decision'] == 'FAIL' and ['PAGES_INCOMPLETE', 'FAIL'] in row['reasons']
+    # 11-18 S1 in production: the 2-up sheet already counts both markers (was FAIL PAGES_INCOMPLETE).
+    assert row['decision'] == 'NEEDS_REVIEW' and not any(code == 'PAGES_INCOMPLETE' for code, _ in row['reasons'])
     tool.resident_sheet_shadow(SimpleNamespace(resident=pages), path, row, ocr)
     assert row['s1']['sheets'] == 'M1' and row['s1']['result'] == 'COMPLETE'
     # The synthetic sheet lacks an applicant line and repeated header values, so it stays under review.

@@ -142,3 +142,16 @@ candidate rules would change, without changing production behaviour.
   also reads a date immediately followed by HH:MM ("2026-03-0310:20"). Before this, a 4대보험
   발급일시 value was reported as OTHER although the extractor took it from the 발급일시 label
   cell (synthetic originals 5/5 OTHER, now LABEL).
+- Row format 7 adds `d10` for documents whose verdict carries PAGES_DUPLICATED: the production
+  per-page blank rule of `resident_abstract.extract` is replayed with the same calls on the pages
+  the extractor read (`consistent` X when the replay's left-out count differs from the
+  extractor's `blank_pages`). Per page: OCR boxes, Hangul/Latin/digit counts, marker read (O/X),
+  header-band n/m count (`nm`), marker repeated on another page, `content` (TABLE_ROWS,
+  TABLE_CHARS, TABLE_ONLY, BODY_CHARS, NO_CONTENT), body characters, counted (O/X) and `keep`
+  (CONTENT, BLANK_/TABLE_ONLY_ × NEW_MARKER/NO_MARKER/DUP_MARKER, ALL_BLANK), ink share of the OCR
+  input image and of a 72 dpi render of the page as displayed (grey < 128; -1 none), image pixel
+  size and dpi, page source (TEXT_LAYER, EMBEDDED, RENDER, UPLOAD), text-layer characters, image
+  placements, main image xref shared with another page, and the first earlier page with the same
+  image bytes / same reading text (-1 none). Document `path`: MARKER_DUP (the only production
+  PAGES_DUPLICATED route: repeated counted markers), IMAGE_SAME, OTHER. Summary lines `D10`,
+  `D10_DOC` and `D10_PAGE` (document ordinal and page number, never a key).

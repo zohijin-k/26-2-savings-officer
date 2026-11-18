@@ -33,7 +33,7 @@ from unittest.mock import patch
 from . import batch_assess as batch
 from . import doc_timing as timing
 
-VERSION = 6
+VERSION = 7
 #: Format 1 (commit 2) had no consent/payment/p1/c1 keys. Format 2 had no ``recovery`` key.
 KINDS = batch.KINDS
 TIERS = timing.TIERS
@@ -648,6 +648,17 @@ BILLING_BINS = ('M0', 'M1_2', 'M3_5', 'M6_11', 'M12P', 'NA')
 G4_LAYOUTS = ('GOV', 'COMBINED', 'NO_CHARGE_HEADER', 'NA') + tuple(
     f'{g}_{s}' for g in ('SINGLE', 'GROUP') for s in ('HEALTH', 'SHORT', 'FUSED', 'MISSING'))
 G4_HEADER = ('CARE', 'UNCERTAIN', 'BOTH', 'X')
+#: D10 (11-19): PAGES_DUPLICATED resident documents, page by page (numbers and codes only).
+#: content: what the page body holds for the production blank-page rule (resident_abstract.extract);
+#: keep: why the page is counted or left out of the page-marker check.
+D10_CONTENT = ('TABLE_ROWS', 'TABLE_CHARS', 'TABLE_ONLY', 'BODY_CHARS', 'NO_CONTENT')
+D10_KEEP = ('CONTENT', 'BLANK_NEW_MARKER', 'BLANK_NO_MARKER', 'BLANK_DUP_MARKER', 'TABLE_ONLY_NEW_MARKER',
+            'TABLE_ONLY_NO_MARKER', 'TABLE_ONLY_DUP_MARKER', 'ALL_BLANK')
+D10_PATHS = ('MARKER_DUP', 'IMAGE_SAME', 'OTHER')
+D10_SOURCES = ('TEXT_LAYER', 'EMBEDDED', 'RENDER', 'UPLOAD', 'NA')
+D10_INK_THRESHOLD = 128   # grey level below which a pixel counts as ink
+D10_RENDER_DPI = 72       # low-resolution render of the page as displayed, for its ink ratio
+D10_MAX_PAGES = 200
 #: D8: address-history ordinal state of resident abstracts read by LocalOcr (production 11-18 rule).
 HISTORY_NUMBERS = ('CONTIGUOUS', 'GAP', 'UNREADABLE', 'NA')
 #: S2: sheets read poorly (few Hangul characters) or of unclassified documents are re-read rotated.
@@ -1424,13 +1435,140 @@ def amount_guard_check(trace, row, ocr):
                      larger='O' if 'LARGER_HEALTH' in codes else 'X')
 
 
+def _ink(png):
+    """Share of ink pixels in one page image (-1 when there is no image or it cannot be decoded)."""
+    if not png:
+        return -1
+    try:
+        import io
+        import numpy as np
+        from PIL import Image
+        with Image.open(io.BytesIO(png)) as image:
+            grey = np.asarray(image.convert('L'))
+    except Exception:
+        return -1
+    return round(float((grey < D10_INK_THRESHOLD).mean()), 4) if grey.size else -1
+
+
+def _pdf_page_facts(path, count):
+    """Per PDF page: text-layer characters, image placements, main image shared with another page, render ink."""
+    facts = [dict(layer_chars=-1, images=-1, xref_shared='NA', render_ink=-1) for _ in range(count)]
+    if Path(path).suffix.lower() != '.pdf':
+        return facts
+    import numpy as np
+    import pymupdf
+    with pymupdf.open(path) as document:
+        xrefs = []
+        for index in range(min(count, len(document))):
+            page = document[index]
+            infos = [info for info in page.get_image_info(xrefs=True) if info.get('xref')]
+            main = max(infos, key=lambda info: info['width'] * info['height'], default=None)
+            xrefs.append(main['xref'] if main else None)
+            pix = page.get_pixmap(dpi=D10_RENDER_DPI, colorspace=pymupdf.csGRAY, alpha=False)
+            grey = np.frombuffer(pix.samples, dtype=np.uint8)
+            facts[index].update(layer_chars=len(re.sub(r'\s+', '', page.get_text('text'))), images=len(infos),
+                                render_ink=round(float((grey < D10_INK_THRESHOLD).mean()), 4) if grey.size else -1)
+        for index, xref in enumerate(xrefs):
+            facts[index]['xref_shared'] = 'NA' if xref is None else 'O' if xrefs.count(xref) > 1 else 'X'
+    return facts
+
+
+def resident_page_states(pages):
+    """Replay the production per-page blank rule of resident_abstract.extract (same calls, same order)."""
+    from engine_v2.extractors import resident_abstract as ra
+    from engine_v2.pipeline.layout import group_lines, normalize
+    entries, pending, notes, observed, states = [], [], [], [], []
+    for page, result in pages:
+        lines = group_lines(normalize(result.words, page.page, page.pixel_size))
+        header = ra._parse_header(lines)
+        bounds = ra._table_bounds(lines)
+        body = ra._content_chars(lines, ra.BODY_TOP_Y)
+        contentless = bounds is None and body <= ra.BLANK_BODY_MAX_CHARS
+        before = len(entries)
+        if bounds:
+            ra._parse_rows(lines, *bounds, page.page, entries, pending, notes, observed)
+        rows = len(entries) - before
+        table_only = bool(bounds) and rows == 0 and ra._content_chars(lines, bounds[0]) <= ra.BLANK_BODY_MAX_CHARS
+        content = ('NO_CONTENT' if contentless else 'BODY_CHARS' if bounds is None else
+                   'TABLE_ROWS' if rows else 'TABLE_ONLY' if table_only else 'TABLE_CHARS')
+        states.append(dict(marker=header['page_no'], nm=len(header['header_markers']), contentless=contentless,
+                           blank=contentless or table_only, content=content, body=body))
+    kept = {i for i, state in enumerate(states) if not state['blank']}
+    reasons = {i: 'CONTENT' for i in kept}
+    markers = {states[i]['marker'] for i in kept}
+    for i, state in enumerate(states):
+        if not state['blank']:
+            continue
+        prefix = 'BLANK' if state['contentless'] else 'TABLE_ONLY'
+        marker = state['marker']
+        if marker is not None and marker not in markers:
+            kept.add(i)
+            markers.add(marker)
+            reasons[i] = prefix + '_NEW_MARKER'
+        elif not state['contentless'] and marker is None:
+            kept.add(i)
+            markers.add(marker)
+            reasons[i] = 'TABLE_ONLY_NO_MARKER'
+        else:
+            reasons[i] = prefix + ('_NO_MARKER' if marker is None else '_DUP_MARKER')
+    if not kept:
+        kept, reasons = set(range(len(states))), dict.fromkeys(range(len(states)), 'ALL_BLANK')
+    for i, state in enumerate(states):
+        state.update(counted=i in kept, keep=reasons[i])
+    return states
+
+
+def _first_same(values, index):
+    value = values[index]
+    return next((i for i in range(index) if value is not None and values[i] == value), -1)
+
+
+def pages_duplicated_check(trace, path, row):
+    """D10: why a resident document is PAGES_DUPLICATED, page by page; numbers and codes only."""
+    from engine_v2.extractors import resident_abstract as ra
+    pages = list(trace.resident or [])[:D10_MAX_PAGES]
+    states = resident_page_states(pages) if pages else []
+    consistent = 'NA'
+    marker_dup = 'X'
+    if pages:
+        ex = ra.extract(pages)
+        consistent = 'O' if sum(not s['counted'] for s in states) == ex.blank_pages else 'X'
+        flat = ([m for sheet in ex.sheet_markers for m in sheet] if ex.sheet_markers else list(ex.page_markers))
+        numbers = [m[0] for m in flat if m is not None]
+        marker_dup = 'O' if len(numbers) != len(set(numbers)) else 'X'
+    images = [hashlib.sha256(page.png).hexdigest() if page.png else None for page, _ in pages]
+    texts = [re.sub(r'\s+', '', result.text) or None for _, result in pages]
+    pdf = _pdf_page_facts(path, len(pages))
+    marker_list = [s['marker'] for s in states]
+    rows = []
+    for index, ((page, result), state) in enumerate(zip(pages, states)):
+        text = ''.join(word.text for word in result.words)
+        size = page.pixel_size or (-1, -1)
+        source = getattr(page.source, 'value', str(page.source)).upper()
+        rows.append(dict(
+            boxes=len(result.words), hangul=len(re.findall(r'[가-힣]', text)),
+            latin=len(re.findall(r'[A-Za-z]', text)), digit=len(re.findall(r'[0-9]', text)),
+            marker='O' if state['marker'] is not None else 'X', nm=state['nm'],
+            repeat='O' if state['marker'] is not None and marker_list.count(state['marker']) > 1 else 'X',
+            content=state['content'], body_chars=state['body'],
+            counted='O' if state['counted'] else 'X', keep=state['keep'],
+            ink=_ink(page.png), width=int(size[0]), height=int(size[1]),
+            dpi=int(round(page.dpi)) if page.dpi else -1, source=source if source in D10_SOURCES else 'NA',
+            same_image_as=_first_same(images, index), same_text_as=_first_same(texts, index), **pdf[index]))
+    image_same = 'O' if any(r['same_image_as'] >= 0 for r in rows) else 'X'
+    row['d10'] = dict(path='MARKER_DUP' if marker_dup == 'O' else 'IMAGE_SAME' if image_same == 'O' else 'OTHER',
+                      marker_dup=marker_dup, image_same=image_same,
+                      text_same='O' if any(r['same_text_as'] >= 0 for r in rows) else 'X',
+                      consistent=consistent, pages=rows)
+
+
 def blank_row(key, code='NONE'):
     return dict(schema_version=VERSION, key=key, code=code, form='X', tier='none', decision='NOT_ASSESSED',
                 reasons=[], exit=None, reclass=None, exceptions={}, ocr_chars='NA', cause=None,
                 struct=None, scan=None, scan_code=None, text_all=None,
                 g1={name: None for name in CANDIDATES}, g1_decision={name: None for name in CANDIDATES},
                 consent=None, c1=None, payment=None, p1=None, c2=None, a2=None, a4=None, recovery=None,
-                s1=None, s2=None, s3=None, s4=None, early=None, billing=None, history=None, g4=None, shadow_errors=[])
+                s1=None, s2=None, s3=None, s4=None, early=None, billing=None, history=None, g4=None, d10=None, shadow_errors=[])
 
 
 def gave_up(row):
@@ -1474,6 +1612,8 @@ def process(path, key, trace):
                                     ('D6', True, lambda: failure_detail(trace, path, row, ocr)),
                                     ('D8', row['form'] == 'RESIDENT_ABSTRACT', lambda: history_check(trace, row)),
                                     ('G4', row['form'] == 'NHIS_PAYMENT', lambda: amount_guard_check(trace, row, ocr)),
+                                    ('D10', any(code == 'PAGES_DUPLICATED' for code, _ in row['reasons']),
+                                     lambda: pages_duplicated_check(trace, path, row)),
                                     ('QUALITY', True, lambda: quality_shadows(trace, path, row, ocr))):
         if not applies:
             continue
@@ -1492,12 +1632,37 @@ def _code_in(value, allowed, optional=False):
     return (optional and value is None) or value in allowed
 
 
+D10_PAGE_KEYS = ('boxes', 'hangul', 'latin', 'digit', 'marker', 'nm', 'repeat', 'content', 'body_chars', 'counted',
+                 'keep', 'ink', 'render_ink', 'width', 'height', 'dpi', 'source', 'layer_chars', 'images',
+                 'xref_shared', 'same_image_as', 'same_text_as')
+
+
+def _valid_d10(d):
+    def count(v):
+        return type(v) is int and v >= -1
+
+    def ratio(v):
+        return (type(v) is int and v == -1) or (type(v) is float and 0 <= v <= 1)
+    return (isinstance(d, dict) and set(d) == {'path', 'marker_dup', 'image_same', 'text_same', 'consistent', 'pages'}
+            and d['path'] in D10_PATHS and all(d[k] in ('O', 'X') for k in ('marker_dup', 'image_same', 'text_same'))
+            and d['consistent'] in ('O', 'X', 'NA') and isinstance(d['pages'], list)
+            and len(d['pages']) <= D10_MAX_PAGES and all(
+                isinstance(p, dict) and set(p) == set(D10_PAGE_KEYS)
+                and all(count(p[k]) for k in ('boxes', 'hangul', 'latin', 'digit', 'nm', 'body_chars', 'width',
+                                              'height', 'dpi', 'layer_chars', 'images', 'same_image_as',
+                                              'same_text_as'))
+                and ratio(p['ink']) and ratio(p['render_ink'])
+                and all(p[k] in ('O', 'X') for k in ('marker', 'repeat', 'counted'))
+                and p['content'] in D10_CONTENT and p['keep'] in D10_KEEP and p['source'] in D10_SOURCES
+                and p['xref_shared'] in ('O', 'X', 'NA') for p in d['pages']))
+
+
 def validate_row(row):
     req = batch._require
     keys = {'schema_version', 'key', 'code', 'form', 'tier', 'decision', 'reasons', 'exit', 'reclass',
             'exceptions', 'ocr_chars', 'cause', 'struct', 'scan', 'scan_code', 'text_all', 'g1', 'g1_decision',
             'consent', 'c1', 'payment', 'p1', 'c2', 'a2', 'a4', 'recovery', 's1', 's2', 's3', 's4',
-            'early', 'billing', 'history', 'g4', 'shadow_errors'}
+            'early', 'billing', 'history', 'g4', 'd10', 'shadow_errors'}
     req(isinstance(row, dict) and set(row) == keys and row['schema_version'] == VERSION)
     req(isinstance(row['key'], str) and timing.KEY_RE.fullmatch(row['key']) is not None)
     req(row['code'] in ROW_CODES and row['form'] in KINDS and row['tier'] in TIERS and row['decision'] in DECISIONS)
@@ -1522,13 +1687,14 @@ def validate_row(row):
         and all(_code_in(v, DECISIONS, True) for v in row['g1_decision'].values()))
     req(isinstance(row['shadow_errors'], list)
         and set(row['shadow_errors']) <= {'G1', 'CONSENT', 'PAYMENT', 'A4', 'QUALITY', 'S1', 'S2', 'S3', 'S4', 'D6',
-                                          'D8', 'G4'})
+                                          'D8', 'G4', 'D10'})
     req(row['early'] is None or (isinstance(row['early'], dict) and set(row['early']) == {'source', 'gap'}
                                  and row['early']['source'] in EARLY_SOURCES and row['early']['gap'] in EARLY_GAPS))
     req(row['g4'] is None or (isinstance(row['g4'], dict) and set(row['g4']) == {'layout', 'zero', 'ratio', 'header',
                                                                                  'larger'}
                               and row['g4']['layout'] in G4_LAYOUTS and row['g4']['header'] in G4_HEADER
                               and all(row['g4'][k] in ('O', 'X') for k in ('zero', 'ratio', 'larger'))))
+    req(row['d10'] is None or _valid_d10(row['d10']))
     req(row['history'] is None or (isinstance(row['history'], dict) and set(row['history']) == {'numbers', 'empty_page'}
                                    and row['history']['numbers'] in HISTORY_NUMBERS
                                    and row['history']['empty_page'] in ('O', 'X', 'NA')))
@@ -1834,6 +2000,17 @@ def _stage_summary(done):
                        sum(r['history']['empty_page'] == 'O' for r in history)))
     _counted(lines, 'D8_DECISION numbers empty_page decision n',
              ((r['history']['numbers'], r['history']['empty_page'], r['decision']) for r in history))
+    d10 = [r for r in done if r['d10'] is not None]
+    lines.append('D10 dup_docs marker_dup image_same text_same other replay_mismatch')
+    lines.append(_line('D10', len(d10), *(sum(r['d10'][k] == 'O' for r in d10)
+                                          for k in ('marker_dup', 'image_same', 'text_same')),
+                       sum(r['d10']['path'] == 'OTHER' for r in d10), sum(r['d10']['consistent'] == 'X' for r in d10)))
+    _counted(lines, 'D10_DOC path pages decision n', ((r['d10']['path'], len(r['d10']['pages']), r['decision'])
+                                                       for r in d10))
+    lines.append('D10_PAGE doc page ' + ' '.join(D10_PAGE_KEYS))
+    for number, r in enumerate(d10, 1):
+        for index, page in enumerate(r['d10']['pages'], 1):
+            lines.append(_line('D10_PAGE', number, index, *(page[k] for k in D10_PAGE_KEYS)))
     _counted(lines, 'P1_DECISION margin before after n',
              ((key, r['decision'], r['p1'][key]['decision']) for r in payment for key in P1_KEYS
               if r['p1'] is not None and r['p1'][key]['decision'] != r['decision']))

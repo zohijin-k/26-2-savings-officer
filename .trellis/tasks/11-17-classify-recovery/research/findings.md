@@ -290,3 +290,9 @@ own OCR의 묶음 머리글 상자 아래쪽이 글자층보다 조금 아래(�
   `note_numbers`에 남긴다(dbe70bd). 쪽마다 표 머리글(`_table_bounds`)을 찾은 쪽만 줄을 읽어 쪽 순서대로 한 목록에 이어 붙인다. 주소이력건수는 그 목록 길이,
   전입일은 `trailing_residence_start`(마지막 건부터 전북 연속 거주 시작). 기존 `history_numbers_sequential`은 첫 번호부터 연속인지만 봐서 1로 시작하지 않거나
   마지막 쪽 줄이 통째로 빠지면 통과했다.
+
+## 알려진 사항
+
+- 기준 편집에서 발급일 기준을 `mode: none`으로 두면(또는 그 칸의 기준 날짜 종류를 발급일 외로 바꾸면) 발급일 확인이 꺼진다. 그 칸은 발급일을 못 읽어도
+  ISSUE_DATE_MISSING·REQUIRED_FIELD_UNREADABLE이 붙지 않아 PASS가 될 수 있다(합성: 자격확인서·4대보험 칸). 정책 설정으로 보고 코드는 바꾸지 않는다.
+  기본 기준값에서는 여섯 서식 모두 발급일 없이 PASS 불가(`demo/backend/tests/test_issue_date_never_optional.py`).

@@ -50,10 +50,11 @@ def payment_cells(member='지역가입자', *, notice=True, total=None, settleme
 # ---------------------------------------------------------------- A4
 
 
-def test_footer_notice_makes_production_member_type_work_and_the_candidate_ignores_it():
+def test_footer_notice_is_ignored_by_production_and_the_candidate():
     from engine_v2.extractors import nhis_payment
     pages = _pages(payment_cells('지역가입자'))
-    assert nhis_payment.extract(pages).fields['가입구분'].value == '직장'  # production reads the notice
+    # 11-18 A4 in production: the footer notice no longer makes a local member 직장 (was '직장').
+    assert nhis_payment.extract(pages).fields['가입구분'].value == '지역'
     assert tool.member_type_candidate(pages) == '지역'
     assert tool.member_type_candidate(_pages(payment_cells(None))) == 'X'          # no evidence: empty
     assert tool.member_type_candidate(_pages(payment_cells('직장가입자'))) == '직장'

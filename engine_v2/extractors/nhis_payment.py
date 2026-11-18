@@ -337,6 +337,33 @@ def _average(values: dict[tuple[int, int], tuple[int, list[common.Word]]]):
     return average, [word for _, words in rows for word in words]
 
 
+#: Label that may precede a 사업장명칭 value; another label right after it is not a value.
+_WORKPLACE = re.compile(r"사업장\s*명칭\s*[:：]?\s*(?![^\s|]*(?:납부자|성명|생년월일|가입|번호))[^\s|:：]+")
+
+
+def _member_type(pages):
+    """가입구분 from the personal-information area only (11-18 A4).
+
+    Lines from the monthly table header (or the confirmation sentence) downward and notice
+    lines starting with ※ are never evidence: every form prints "※ 직장가입자의 보수월액보험료
+    납부의무자는 …" at the bottom. Both marks or none leave the value empty (no guessing).
+    """
+    kept = []
+    for page, result in pages:
+        lines = common.page_lines(page, result)
+        headers = _month_header(lines)
+        for line in lines[:min(headers) if headers else len(lines)]:
+            flat = squash(line_text(line))
+            if "확인합니다" in flat:
+                break
+            if not flat.startswith("※"):
+                kept.append(line_text(line))
+    flat = squash(" ".join(kept))
+    work = "직장가입" in flat or any(_WORKPLACE.search(text) for text in kept)
+    local = "지역가입" in flat
+    return "직장" if work and not local else "지역" if local and not work else None
+
+
 def _body_issue_date(pages):
     """확인 문장 아래·공단명 위의 무라벨 발급일만 읽는다."""
     for page, result in pages:
@@ -400,10 +427,7 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
     if not names_same:
         warnings.append("쪽마다 성명이 같지 않거나 일부 쪽에서 찾지 못했습니다.")
 
-    text = squash(" ".join(result.text for _, result in pages))
-    workplace_value = re.search(r"사업장\s*명칭\s*[:：]?\s*([^\s|]+)", " ".join(result.text for _, result in pages))
-    insurance_type = ("직장" if "직장가입자" in text or "직장가입" in text or workplace_value
-                      else "지역" if "지역가입자" in text or "지역가입" in text else None)
+    insurance_type = _member_type(pages)
     if insurance_type:
         fields["가입구분"] = common.make_field(insurance_type, insurance_type, None, page_map, 0.9, sources)
     else:

@@ -8,7 +8,7 @@ changes operating code; values are recomputed through the service path only for 
 ## Signatures
 
 ```text
-python -B -m engine_v2.tools.label_review serve --rows FAKE-rows.jsonl --root FAKE-input --out FAKE-labels [--sample 150] [--seed 20261117] [--port 8765] [--revalue-forms NHIS_PAYMENT,...] [--base-rows FAKE-round1-rows.jsonl]
+python -B -m engine_v2.tools.label_review serve --rows FAKE-rows.jsonl --root FAKE-input --out FAKE-labels [--sample 150] [--seed 20261117] [--port 8765] [--revalue-forms NHIS_PAYMENT,...] [--base-rows FAKE-round1-rows.jsonl] [--holdout N --holdout-seed S]
 python -B -m engine_v2.tools.label_review summary --out FAKE-labels [--round N]
 python -B -m engine_v2.tools.label_review mismatch --out FAKE-labels [--round N]
 ```
@@ -20,7 +20,8 @@ python -B -m engine_v2.tools.label_review mismatch --out FAKE-labels [--round N]
   Origin or a non-JSON body, and every method other than GET/POST. Responses carry a strict CSP
   (`default-src 'none'`, self scripts/styles/images), `no-store` and `nosniff`. The screen loads only the
   three repository static files; no CDN, font or external script.
-- Rows: doc_timing format 2+, validated by `doc_timing.validate_row`; a document's decision is its first
+- Rows: doc_timing format 2 or 3 (`ROW_VERSIONS`), validated by `doc_timing.validate_row` (format 3's
+  `intra_threads`/`page_workers` are checked here, ints ≥ 1, while doc_timing on this branch reads only up to 2); a document's decision is its first
   measured repeat. Keys are only those in rows. The key → file map comes from `batch_assess.inventory` over
   `--root` (no symlinks, no hidden files); before each use the file is re-checked (not a symlink, resolved
   path equals root/relative, `O_NOFOLLOW`, regular file) and read into memory. Paths never leave the server.
@@ -45,6 +46,15 @@ python -B -m engine_v2.tools.label_review mismatch --out FAKE-labels [--round N]
   every C document of the new round needs O/X again. Given again for the same rows the list replaces the stored
   one; omitted it keeps it. Plans and rounds without these fields stay valid. Value hashes are never stored:
   the labeler chooses the forms whose extraction changed.
+- Holdout round H (`--holdout N --holdout-seed S`, both or neither, no `--revalue-forms`): after the code freeze,
+  rows from the frozen code. H = PASS keys of the rows that are in no set (B, C, N, H) of any earlier round —
+  labels exist only for such keys, so H is never-labeled by construction — allocated by form with
+  `doc_timing.allocate` over the eligible counts, smallest `sha256(S:h:key)` per form. The round stores
+  `holdout {size, seed}`, `h`, `h_alloc`, `h_strata` (eligible per form) and empty B, C, N; it labels H only
+  (stage one, then engine verdict, then O/X; nothing carried, `revalue` null). Re-opened with the same rows, with
+  or without the options, it is re-derived and compared (different N or S → PLAN_MISMATCH). The rows may equal an
+  earlier development round's. A holdout cannot be round 1 and needs an eligible document (HOLDOUT_INVALID); no
+  development round opens after one (HOLDOUT_FINAL); `validate_plan` rejects an H overlapping an earlier set.
 - Screen: a carried stage-one label shows "N회차 정답 이어받음" (`label.inherited`), carried O/X shows
   "N회차 이어받음" (`values.inherited`); saving again records a label of the current round.
 - Blind order: `GET /api/doc/{key}` returns ordinal, page count, form, issue-date bounds from
@@ -84,6 +94,13 @@ N (census, no sampling bound): `N_TOTAL` (documents, blind, values, pending), `N
 FAIL_OR_VALUE_X = the C1 definition for comparison, VALUES_INHERITED), and N rows in `BY_FORM`, `R_CODE`, `VALUE_ITEM_N`, `INHERITED`,
 `SAMPLE` and the mismatch listing (set `N`, same rule as C).
 
+H (holdout, separate lines, never merged into C, N, PASS_COMBINED, BY_FORM, R_CODE or VALUE_ITEM):
+`HOLDOUT size seed eligible` (NA outside a holdout round), `H_ALLOC form eligible documents`, `H_TOTAL`
+(documents, blind, values, pending), `H` per HOLD treatment (wrong, labeled, rate, one-sided 95% Clopper-Pearson
+upper) with the strict definition (truth not PASS or any item X), `H_DETAIL` (truth per state, VALUE_X,
+FAIL_OR_VALUE_X), `H_BY_FORM` (eligible, sampled, labeled, truth per state, wrong, rate, upper; HOLD excluded) and
+`VALUE_ITEM_H`. The mismatch listing shows H with the C/N rule (set `H`). `REVALUE` prints NA in a holdout round.
+
 `PASS_COMBINED` (per HOLD treatment) uses the strict wrong-pass definition in both strata: truth not PASS
 (FAIL or NEEDS_REVIEW) or any item X. An engine PASS is not looked at by staff, so a truth NEEDS_REVIEW is
 missed as well. C1-C3 keep their definition (truth FAIL or any item X); `C_DETAIL PASS_NOT_TRUTH_OR_VALUE_X`
@@ -117,5 +134,6 @@ sentinel values/paths in labels, plan, console or logs, traversal/symlink refusa
 host and request checks, no external resources, Clopper-Pearson (0, 1, many; scipy cross-check when
 installed), both HOLD treatments, round merge, cross-check agreement, round-two carry-over (only new documents and revalued forms are asked; transition
 table; output free of paths, names, values and dates), the N set (fixed C sample, N = new PASS only,
-`--base-rows` fill, PASS_COMBINED), and the real service path on a
+`--base-rows` fill, PASS_COMBINED), the holdout set H (earlier sets excluded, same seed same sample,
+proportional allocation, separate reporting, format-3 rows, codes-only output), and the real service path on a
 synthetic text PDF.

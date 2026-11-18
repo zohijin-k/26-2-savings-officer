@@ -4,10 +4,18 @@ Serve the labeling screen (127.0.0.1 only)::
 
     python -B -m engine_v2.tools.label_review serve --rows ROWS --root ROOT --out OUT [--revalue-forms F1,F2]
 
+Open the holdout round H after the code freeze (rows from the frozen code)::
+
+    python -B -m engine_v2.tools.label_review serve --rows ROWS --root ROOT --out OUT --holdout N --holdout-seed S
+
 A later rows file opens the next round: B = every FAIL, C = the round-1 sample still PASS (never drawn again),
 N = every PASS document that was not PASS in round 1 (labeled in full). Stage-one labels carry over by document key; C key-value O/X carry
 over from the previous round for every form not named in ``--revalue-forms`` (without the option every C
 document of the new round is checked again).
+
+H (holdout) = N PASS documents of the rows that no earlier round ever sampled in any set (B, C, N or H), drawn
+by form in proportion with a fixed seed and frozen in plan.json. A holdout round labels H only (stage one and
+O/X, nothing carried); it is reported apart from C, N and PASS_COMBINED. No development round opens after it.
 
 Print the summary (numbers and codes only)::
 
@@ -17,7 +25,7 @@ List labeled disagreements (ordinal and codes only)::
 
     python -B -m engine_v2.tools.label_review mismatch --out OUT [--round N]
 
-Inputs are a doc_timing ``rows.jsonl`` (row format 2 or later) and the PDF folder its 16-hex document keys
+Inputs are a doc_timing ``rows.jsonl`` (row format 2 or 3) and the PDF folder its 16-hex document keys
 were computed from. Samples: B = every FAIL document, C = PASS documents stratified by form (fixed seed).
 The label file keeps keys, stage, state/reason codes, item O/X, time and criteria version only. Values the
 engine reads are recomputed on the service path for the screen and never written anywhere. The measurement
@@ -72,7 +80,8 @@ _RESIDENT_ITEMS = ('성명', '생년월일', '발급일', '초본신청인성명
                    '전입일', '현주소시도', '주소변동내역')
 ERROR_CODES = ('ARGUMENT_ERROR', 'INPUT_UNAVAILABLE', 'ROWS_INVALID', 'LOCATION_REJECTED',
                'INPUT_OUTPUT_OVERLAP', 'OUT_LOCKED', 'PLAN_INVALID', 'PLAN_MISMATCH', 'LABELS_INVALID',
-               'ENGINE_UNAVAILABLE', 'BASE_ROWS_REQUIRED', 'UNEXPECTED_ERROR')
+               'ENGINE_UNAVAILABLE', 'BASE_ROWS_REQUIRED', 'HOLDOUT_INVALID', 'HOLDOUT_FINAL',
+               'UNEXPECTED_ERROR')
 SECURITY_HEADERS = {
     'Content-Security-Policy': ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; "
                                 "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
@@ -227,6 +236,22 @@ def checks(form):
 # ---------------------------------------------------------------- rows and samples
 
 
+#: doc_timing row formats this tool reads. Format 3 adds the own OCR thread settings (``intra_threads``,
+#: ``page_workers``), which do not change a decision; they are checked here when doc_timing reads only up to 2.
+ROW_VERSIONS = (2, 3)
+ROW_V3_FIELDS = ('intra_threads', 'page_workers')
+
+
+def validate_row(row):
+    """A doc_timing row of format 2 or 3 (closed field set), validated by ``doc_timing.validate_row``."""
+    batch._require(isinstance(row, dict) and row.get('schema_version') in ROW_VERSIONS)
+    if row['schema_version'] == 3 and 3 not in timing.READABLE_VERSIONS:
+        batch._require(all(type(row.get(name)) is int and row[name] >= 1 for name in ROW_V3_FIELDS))
+        timing.validate_row(dict({k: v for k, v in row.items() if k not in ROW_V3_FIELDS}, schema_version=2))
+        return row
+    return timing.validate_row(row)
+
+
 def load_rows(path):
     """Return (sha256, {key: {form, decision, reasons}}) from the first measured repeat of each document."""
     try:
@@ -241,8 +266,7 @@ def load_rows(path):
         for line in data.splitlines():
             if not line.strip():
                 continue
-            row = timing.validate_row(batch._load(line))
-            batch._require(row['schema_version'] >= 2)
+            row = validate_row(batch._load(line))
             if row['phase'] == 'measure' and row['repeat'] == 1 and row['code'] == 'NONE':
                 batch._require(row['key'] not in docs)
                 docs[row['key']] = dict(form=row['form'], decision=row['decision'],
@@ -279,16 +303,23 @@ ABSENT = 'ABSENT'
 #: Round fields added for later rounds; plans written before them stay valid.
 ROUND_FIELDS = {'round', 'rows_sha256', 'created', 'counts', 'b', 'c', 'c_alloc', 'docs'}
 ROUND_EXTRA = {'revalue', 'label_base', 'carried', 'n', 'pass_keys'}
+#: Fields of a holdout round only.
+HOLDOUT_FIELDS = {'holdout', 'h', 'h_alloc', 'h_strata'}
 
 
 def members(item):
-    """Keys of a round's sets B, C and N (N is empty in round 1 and in plans written before it)."""
-    return item['b'] + item['c'] + item.get('n', [])
+    """Keys of a round's sets B, C, N and H (N is empty in round 1 and in plans written before it; H exists only
+    in a holdout round)."""
+    return item['b'] + item['c'] + item.get('n', []) + item.get('h', [])
 
 
 def valued(item):
-    """Keys of a round that need key-value O/X: C and N."""
-    return set(item['c']) | set(item.get('n', []))
+    """Keys of a round that need key-value O/X: C, N and H."""
+    return set(item['c']) | set(item.get('n', [])) | set(item.get('h', []))
+
+
+def is_holdout(item):
+    return 'holdout' in item
 
 
 def _carried(previous, docs):
@@ -315,21 +346,64 @@ def sets(docs, size, seed, previous=()):
                 c_alloc={form: forms[form] for form in sorted(forms)}, n=sorted(now - set(base['pass_keys'])))
 
 
-def _round(number, digest, docs, size, seed, previous=(), revalue=None, label_base=0):
-    sample = sets(docs, size, seed, previous)
+def holdout_sets(docs, size, seed, previous):
+    """H: PASS keys never sampled in any set (B, C, N, H) of an earlier round, allocated by form in proportion
+    (``doc_timing.allocate``), smallest ``sha256(seed:h:key)`` inside each form. Labels can exist only for keys of
+    earlier sets, so this also excludes every labeled document; it depends on the plan alone, never on labels."""
+    seen = {key for item in previous for key in members(item)}
+    strata = defaultdict(list)
+    for key, doc in docs.items():
+        if doc['decision'] == 'PASS' and key not in seen:
+            strata[doc['form']].append(key)
+    _require(strata, 'HOLDOUT_INVALID')
+    alloc = timing.allocate({form: len(keys) for form, keys in strata.items()}, size)
+    h = []
+    for form in sorted(strata):
+        h.extend(sorted(strata[form], key=lambda key: rank(seed, 'h', key))[:alloc[form]])
+    return dict(h=sorted(h), h_alloc={form: alloc[form] for form in sorted(strata)},
+                h_strata={form: len(strata[form]) for form in sorted(strata)})
+
+
+def _round(number, digest, docs, size, seed, previous=(), revalue=None, label_base=0, holdout=None):
+    if holdout is None:
+        sample, extra = sets(docs, size, seed, previous), {}
+    else:
+        sample = dict(b=[], c=[], c_alloc={}, n=[])
+        extra = dict(holdout_sets(docs, holdout['size'], holdout['seed'], previous), holdout=dict(holdout))
     counts = Counter(doc['decision'] for doc in docs.values())
-    chosen = sample['b'] + sample['c'] + sample['n']
+    chosen = sample['b'] + sample['c'] + sample['n'] + extra.get('h', [])
     return dict(round=number, rows_sha256=digest, created=_now(),
                 counts=dict(documents=len(docs), **{d: counts[d] for d in timing.DECISIONS}),
                 b=sample['b'], c=sample['c'], c_alloc=sample['c_alloc'], n=sample['n'],
                 pass_keys=sorted(key for key, doc in docs.items() if doc['decision'] == 'PASS'),
                 docs={key: docs[key] for key in sorted(chosen)},
-                revalue=revalue, label_base=label_base, carried=_carried(previous, docs))
+                revalue=revalue, label_base=label_base, carried=_carried(previous, docs), **extra)
 
 
 def _keys(value):
     return isinstance(value, list) and all(isinstance(k, str) and KEY_RE.fullmatch(k) for k in value) and \
         len(set(value)) == len(value)
+
+
+def _counts(value):
+    return isinstance(value, dict) and all(form in batch.KINDS and type(count) is int and count >= 0
+                                           for form, count in value.items())
+
+
+def _validate_holdout(item, number, earlier):
+    """A holdout round: H only, never round 1, H disjoint from every earlier set, allocation within strata."""
+    holdout, h = item['holdout'], item['h']
+    batch._require(number > 1 and isinstance(holdout, dict) and set(holdout) == {'size', 'seed'})
+    batch._require(type(holdout['size']) is int and holdout['size'] >= 1)
+    batch._require(type(holdout['seed']) is int and holdout['seed'] >= 0)
+    batch._require(not item['b'] and not item['c'] and not item['n'] and item['c_alloc'] == {})
+    batch._require(_keys(h) and h and item.get('revalue') is None)
+    batch._require(not set(h) & {key for previous in earlier for key in members(previous)})
+    alloc, strata = item['h_alloc'], item['h_strata']
+    batch._require(_counts(alloc) and _counts(strata) and set(alloc) == set(strata))
+    batch._require(all(alloc[form] <= strata[form] for form in alloc) and sum(alloc.values()) == len(h))
+    batch._require(Counter(item['docs'][key]['form'] for key in h) == Counter({f: c for f, c in alloc.items() if c}))
+    batch._require(all(item['docs'][key]['decision'] == 'PASS' for key in h))
 
 
 def validate_plan(plan):
@@ -340,8 +414,13 @@ def validate_plan(plan):
         batch._require(all(type(plan[k]) is int and plan[k] >= 0 for k in ('seed', 'sample', 'cross_size')))
         batch._require(isinstance(plan['rounds'], list) and plan['rounds'])
         base = 0
+        holdout_seen = False
         for number, item in enumerate(plan['rounds'], 1):
-            batch._require(isinstance(item, dict) and ROUND_FIELDS <= set(item) <= ROUND_FIELDS | ROUND_EXTRA)
+            batch._require(isinstance(item, dict) and ROUND_FIELDS <= set(item) <= ROUND_FIELDS | ROUND_EXTRA |
+                           HOLDOUT_FIELDS)
+            batch._require(not set(item) & HOLDOUT_FIELDS or HOLDOUT_FIELDS <= set(item))
+            batch._require(is_holdout(item) or not holdout_seen)  # no development round after a holdout
+            holdout_seen = holdout_seen or is_holdout(item)
             batch._require(item['round'] == number and SHA_RE.fullmatch(item['rows_sha256']))
             n = item.get('n', [])
             batch._require(_keys(item['b']) and _keys(item['c']) and _keys(n) and _keys(item.get('pass_keys', [])))
@@ -359,10 +438,12 @@ def validate_plan(plan):
             carried = item.get('carried', {})
             batch._require(isinstance(carried, dict) and _keys(list(carried)) and
                            all(value in timing.DECISIONS + (ABSENT,) for value in carried.values()))
+            if is_holdout(item):
+                _validate_holdout(item, number, plan['rounds'][:number - 1])
         cross = plan['cross']
         batch._require(cross is None or (isinstance(cross, dict) and set(cross) == {'round', 'keys', 'created'}
                                          and _keys(cross['keys'])))
-    except batch.BatchError:
+    except (batch.BatchError, KeyError, TypeError):
         _fail('PLAN_INVALID')
     return plan
 
@@ -386,27 +467,48 @@ def write_plan(out, plan):
     batch._atomic(batch._target(Path(out) / 'plan.json'), plan)
 
 
-def update_plan(plan, digest, docs, size, seed, revalue=None, label_base=0):
+#: Round fields re-derived from the rows and compared when a round is opened again.
+DERIVED = ('b', 'c', 'c_alloc', 'docs', 'carried', 'n', 'pass_keys', 'holdout', 'h', 'h_alloc', 'h_strata')
+
+
+def update_plan(plan, digest, docs, size, seed, revalue=None, label_base=0, holdout=None):
     """Same rows → same round (re-derived and compared); new rows → a new round. Returns (plan, round).
 
     ``revalue`` (sorted form codes, or None for every form) is stored on the round; given again for an existing
     round it replaces the stored list, omitted it keeps it. ``label_base`` is the number of label records that
     existed when the round was opened: records before it are carried over from earlier rounds.
+
+    ``holdout`` (``{'size', 'seed'}``) opens the holdout round of these rows (the rows may equal an earlier
+    development round's); given again it must match. Without it the latest round of these rows opens. After a
+    holdout round no development round opens (HOLDOUT_FINAL).
     """
     if plan is None:
         plan = dict(schema_version=VERSION, criteria=CRITERIA, seed=seed, sample=size, cross_size=CROSS_SIZE,
                     rounds=[], cross=None)
     _require(plan['seed'] == seed and plan['sample'] == size, 'PLAN_MISMATCH')
-    for item in plan['rounds']:
-        if item['rows_sha256'] == digest:
-            fresh = _round(item['round'], digest, docs, size, seed, plan['rounds'][:item['round'] - 1])
-            _require(all(fresh[k] == item[k] for k in ('b', 'c', 'c_alloc', 'docs', 'carried', 'n', 'pass_keys')
-                         if k in item), 'PLAN_MISMATCH')
-            item.setdefault('pass_keys', fresh['pass_keys'])  # plans written before N: filled from the same rows
-            if revalue is not None:
-                item['revalue'] = revalue
-            return plan, item
-    item = _round(len(plan['rounds']) + 1, digest, docs, size, seed, plan['rounds'], revalue, label_base)
+    _require(holdout is None or revalue is None, 'ARGUMENT_ERROR')
+    same = [item for item in plan['rounds'] if item['rows_sha256'] == digest]
+    if holdout is not None:
+        if any(is_holdout(item) for item in same):
+            same = [item for item in same if is_holdout(item)]
+            _require(same[-1]['holdout'] == holdout, 'PLAN_MISMATCH')
+        else:
+            same = []
+    if same:
+        item = same[-1]
+        _require(revalue is None or not is_holdout(item), 'ARGUMENT_ERROR')
+        fresh = _round(item['round'], digest, docs, size, seed, plan['rounds'][:item['round'] - 1],
+                       holdout=item.get('holdout'))
+        _require(all(fresh[k] == item[k] for k in DERIVED if k in item), 'PLAN_MISMATCH')
+        item.setdefault('pass_keys', fresh['pass_keys'])  # plans written before N: filled from the same rows
+        if revalue is not None:
+            item['revalue'] = revalue
+        return plan, item
+    if holdout is None:
+        _require(not any(is_holdout(item) for item in plan['rounds']), 'HOLDOUT_FINAL')
+    else:
+        _require(plan['rounds'], 'HOLDOUT_INVALID')  # H needs development rounds to stay apart from
+    item = _round(len(plan['rounds']) + 1, digest, docs, size, seed, plan['rounds'], revalue, label_base, holdout)
     plan['rounds'].append(item)
     return plan, item
 
@@ -516,7 +618,7 @@ def values_record(plan, best, number, key):
             return record
         item = rounds[number - 1]
         revalue = item.get('revalue')
-        if number == 1 or revalue is None or key not in valued(item):
+        if number == 1 or revalue is None or key not in valued(item) or is_holdout(item):
             return None
         form, previous = item['docs'][key]['form'], rounds[number - 2]
         if form in revalue or key not in valued(previous) or previous['docs'][key]['form'] != form:
@@ -578,7 +680,7 @@ class Session:
         present = [k for k in members(current) if k in keymap]
         self.queue = sorted(present, key=lambda key: rank(seed, 'order', key))
         self.missing = len(members(current)) - len(present)
-        self.c_keys = valued(current)  # C and N: both need key-value O/X
+        self.c_keys = valued(current)  # C, N and H: all need key-value O/X
 
     # -- keys and files
 
@@ -947,8 +1049,8 @@ def create_app(session):
 # ---------------------------------------------------------------- serve
 
 
-def prepare(rows, root, out, *, sample=None, seed=None, revalue=None, base_rows=None, port=DEFAULT_PORT,
-            compute=None, render=None):
+def prepare(rows, root, out, *, sample=None, seed=None, revalue=None, base_rows=None, holdout=None,
+            port=DEFAULT_PORT, compute=None, render=None):
     """Validate inputs, fix the sample in plan.json and return a Session (prints counts only)."""
     for name in timing.DISABLED_ENV:
         os.environ.pop(name, None)
@@ -972,7 +1074,7 @@ def prepare(rows, root, out, *, sample=None, seed=None, revalue=None, base_rows=
         _require(plan is not None and any(item['rows_sha256'] == base_digest for item in plan['rounds']),
                  'PLAN_MISMATCH')
         update_plan(plan, base_digest, base_docs, sample, seed)
-    plan, current = update_plan(plan, digest, docs, sample, seed, revalue, len(read_labels(out)))
+    plan, current = update_plan(plan, digest, docs, sample, seed, revalue, len(read_labels(out)), holdout)
     write_plan(out, plan)
     wanted = set(members(current))
     if plan['cross'] is not None:
@@ -984,7 +1086,7 @@ def prepare(rows, root, out, *, sample=None, seed=None, revalue=None, base_rows=
     carried_values = sum(session.values_done(key) and session.values_of(key)['round'] != current['round']
                          for key in session.queue if key in session.c_keys)
     print(f'round {current["round"]} rounds {len(plan["rounds"])} b {len(current["b"])} c {len(current["c"])} '
-          f'n {len(current.get("n", []))} '
+          f'n {len(current.get("n", []))} h {len(current.get("h", []))} '
           f'queue {len(session.queue)} labeled {labeled} inherited {carried} values_inherited {carried_values} '
           f'revalue {_revalue_text(current)} missing {session.missing}', flush=True)
     if session.missing:
@@ -1002,10 +1104,12 @@ def _lock(out):
     return fd
 
 
-def serve(rows, root, out, *, sample=None, seed=None, revalue=None, base_rows=None, port=DEFAULT_PORT):
+def serve(rows, root, out, *, sample=None, seed=None, revalue=None, base_rows=None, holdout=None,
+          port=DEFAULT_PORT):
     import logging
     import uvicorn
-    session = prepare(rows, root, out, sample=sample, seed=seed, revalue=revalue, base_rows=base_rows, port=port)
+    session = prepare(rows, root, out, sample=sample, seed=seed, revalue=revalue, base_rows=base_rows,
+                      holdout=holdout, port=port)
     fd = _lock(session.out)
     try:
         app = create_app(session)
@@ -1034,14 +1138,17 @@ def _line(*values):
 
 
 def _revalue_text(item):
-    """ALL (no option: every C document again), NONE (empty list) or the form codes."""
+    """ALL (no option: every C document again), NONE (empty list) or the form codes; NA in a holdout round
+    (nothing carries over)."""
+    if is_holdout(item):
+        return 'NA'
     revalue = item.get('revalue')
     return 'ALL' if revalue is None else ' '.join(revalue) or 'NONE'
 
 
 def _set_name(item, key):
     return ('B' if key in item['b'] else 'C' if key in item['c'] else 'N' if key in item.get('n', ())
-            else 'OUT')
+            else 'H' if key in item.get('h', ()) else 'OUT')
 
 
 def summarize(plan, records, round_number=None):
@@ -1053,7 +1160,8 @@ def summarize(plan, records, round_number=None):
     best = latest(records)
     blind = {key: best[('blind', key)] for key in current['docs'] if ('blind', key) in best}
     n_keys = current.get('n', [])
-    values = {key: values_record(plan, best, round_number, key) for key in current['c'] + n_keys}
+    h_keys = current.get('h', [])
+    values = {key: values_record(plan, best, round_number, key) for key in current['c'] + n_keys + h_keys}
     values = {key: record for key, record in values.items() if record is not None}
     origins = blind_rounds(plan, records)
     carried = {key for key in blind if origins[key] < round_number}
@@ -1175,6 +1283,41 @@ def summarize(plan, records, round_number=None):
         lines.append(_line('PASS_COMBINED', name, old_population, m_old, k_old, new_population, m_new, k_new,
                            estimate, upper))
 
+    # H (holdout): never labeled before, drawn after the code freeze; reported on its own, never merged into
+    # C, N or PASS_COMBINED. Wrong = strict (truth not PASS, or any key value X); documents count with stage
+    # one and O/X; one-sided 95% Clopper-Pearson upper bound.
+    holdout = current.get('holdout')
+    h_done = [key for key in h_keys if key in blind and key in values]
+    h_hold = [k for k in h_done if blind[k]['status'] == 'HOLD']
+    h_wrong = [k for k in h_done if blind[k]['status'] != 'HOLD' and strict(k)]
+    lines.append('HOLDOUT size seed eligible')
+    lines.append(_line('HOLDOUT', *((holdout['size'], holdout['seed'], sum(current['h_strata'].values()))
+                                    if holdout else (None, None, None))))
+    lines.append('H_ALLOC form eligible documents')
+    for form, count in sorted(current.get('h_alloc', {}).items()):
+        lines.append(_line('H_ALLOC', form, current['h_strata'][form], count))
+    lines.append('H_TOTAL documents blind_labeled values_labeled values_pending')
+    lines.append(_line('H_TOTAL', len(h_keys), sum(k in blind for k in h_keys), sum(k in values for k in h_keys),
+                       sum(k in blind and k not in values for k in h_keys)))
+    lines.append('H treatment wrong labeled rate upper')
+    for name, k, m in (('EXCL_HOLD', len(h_wrong), len(h_done) - len(h_hold)),
+                       ('HOLD_AS_WRONG', len(h_wrong) + len(h_hold), len(h_done))):
+        lines.append(_line('H', name, k, m, k / m if m else None, cp_upper(k, m)))
+    lines.append('H_DETAIL item documents')
+    for state in STATES:
+        lines.append(_line('H_DETAIL', 'TRUTH_' + state, sum(blind[k]['status'] == state for k in h_done)))
+    lines.append(_line('H_DETAIL', 'VALUE_X', sum(x_marked(k) for k in h_done)))
+    lines.append(_line('H_DETAIL', 'FAIL_OR_VALUE_X', sum(blind[k]['status'] != 'HOLD' and wrong(k) for k in h_done)))
+    lines.append('H_BY_FORM form eligible documents labeled PASS NEEDS_REVIEW FAIL HOLD wrong rate upper')
+    for form in sorted(current.get('h_alloc', {})):
+        group = [k for k in h_done if current['docs'][k]['form'] == form]
+        states = Counter(blind[k]['status'] for k in group)
+        bad = sum(blind[k]['status'] != 'HOLD' and strict(k) for k in group)
+        usable = len(group) - states['HOLD']
+        lines.append(_line('H_BY_FORM', form, current['h_strata'][form], current['h_alloc'][form], len(group),
+                           *(states[s] for s in STATES), bad, bad / usable if usable else None,
+                           cp_upper(bad, usable)))
+
     lines.append('BY_FORM set form labeled PASS NEEDS_REVIEW FAIL HOLD wrong')
     for name, keys in (('B', b_docs), ('C', c_done), ('N', n_done)):
         forms = defaultdict(list)
@@ -1218,6 +1361,13 @@ def summarize(plan, records, round_number=None):
             items[(current['docs'][key]['form'], name)][mark] += 1
     for (form, name), marks in sorted(items.items()):
         lines.append(_line('VALUE_ITEM_N', form, name, marks['O'], marks['X']))
+    lines.append('VALUE_ITEM_H form item O X')
+    items = defaultdict(Counter)
+    for key in h_done:
+        for name, mark in values[key]['fields']:
+            items[(current['docs'][key]['form'], name)][mark] += 1
+    for (form, name), marks in sorted(items.items()):
+        lines.append(_line('VALUE_ITEM_H', form, name, marks['O'], marks['X']))
 
     lines.append('LABEL_VERSION stage version documents')
     cross_keys = plan['cross']['keys'] if plan['cross'] else []
@@ -1265,8 +1415,8 @@ def summarize(plan, records, round_number=None):
 def mismatches(plan, records, round_number=None):
     """One line per labeled disagreement: ordinal and fixed codes only (no keys, paths or values).
 
-    B: truth is not FAIL. C and N: truth is not PASS, or an item was marked X in this round's values.
-    The ordinal is the screen order (seeded rank over B ∪ C ∪ N of the round); it matches the screen when no
+    B: truth is not FAIL. C, N and H: truth is not PASS, or an item was marked X in this round's values.
+    The ordinal is the screen order (seeded rank over B ∪ C ∪ N ∪ H of the round); it matches the screen when no
     document of the round is missing from the root.
     """
     rounds = {item['round']: item for item in plan['rounds']}
@@ -1338,6 +1488,8 @@ def parser():
     run.add_argument('--port', type=int, default=DEFAULT_PORT)
     run.add_argument('--revalue-forms', dest='revalue_forms')
     run.add_argument('--base-rows', dest='base_rows')
+    run.add_argument('--holdout', type=int)
+    run.add_argument('--holdout-seed', dest='holdout_seed', type=int)
     report = commands.add_parser('summary')
     report.add_argument('--out', required=True)
     report.add_argument('--round', type=int)
@@ -1356,6 +1508,15 @@ def parse_forms(text):
     return sorted(set(forms))
 
 
+def parse_holdout(size, seed, revalue_forms=None):
+    """``--holdout N --holdout-seed S``: both or neither, N 1..100000, S >= 0, no ``--revalue-forms``."""
+    if size is None and seed is None:
+        return None
+    _require(size is not None and seed is not None and 1 <= size <= 100000 and seed >= 0
+             and revalue_forms is None, 'ARGUMENT_ERROR')
+    return dict(size=size, seed=seed)
+
+
 def main(argv=None):
     try:
         args = parser().parse_args(argv)
@@ -1364,7 +1525,8 @@ def main(argv=None):
                     (args.seed is not None and args.seed < 0) or not 1024 <= args.port <= 65535):
                 _fail('ARGUMENT_ERROR')
             return serve(args.rows, args.root, args.out, sample=args.sample, seed=args.seed,
-                         revalue=parse_forms(args.revalue_forms), base_rows=args.base_rows, port=args.port)
+                         revalue=parse_forms(args.revalue_forms), base_rows=args.base_rows,
+                         holdout=parse_holdout(args.holdout, args.holdout_seed, args.revalue_forms), port=args.port)
         if args.round is not None and args.round < 1:
             _fail('ARGUMENT_ERROR')
         return (mismatch if args.command == 'mismatch' else summary)(args.out, args.round)

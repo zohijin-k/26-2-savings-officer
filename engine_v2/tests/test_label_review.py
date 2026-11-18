@@ -940,3 +940,227 @@ def test_round_two_keeps_the_c_sample_and_labels_every_new_pass(tmp_path, env, c
     assert not re.search(r'\d{4}\s*[-./년]\s*\d{1,2}', text)
     assert not re.search(r'\d{1,2}\s*[./]\s*\d{1,2}\s*[./]\s*\d{2,4}', text)
     assert not any(key in text for key in keys.values())
+
+
+# ---------------------------------------------------------------- holdout set H
+
+
+def test_rows_of_format_three_are_read_and_checked(tmp_path):
+    def three(key, decision='PASS', **extra):
+        return dict(row(key, decision), schema_version=3, intra_threads=2, page_workers=4, **extra)
+
+    keys = ['1' * 16, '2' * 16]
+    _, docs = tool.load_rows(write_rows(tmp_path / 'three.jsonl', [three(keys[0]), three(keys[1], 'FAIL')]))
+    assert docs[keys[0]]['decision'] == 'PASS' and docs[keys[1]]['reasons'] == FAIL_REASON
+    mixed = write_rows(tmp_path / 'mixed.jsonl', [row(keys[0]), three(keys[1])])
+    assert set(tool.load_rows(mixed)[1]) == set(keys)
+    for name, bad in (('missing', dict(row(keys[0]), schema_version=3)),
+                      ('zero', dict(three(keys[0]), page_workers=0)),
+                      ('text', dict(three(keys[0]), intra_threads='2')),
+                      ('two-with-three-fields', dict(three(keys[0]), schema_version=2)),
+                      ('four', dict(three(keys[0]), schema_version=4)),
+                      ('extra', dict(three(keys[0]), path='/x/secret.pdf'))):
+        with pytest.raises(tool.ToolError, match='ROWS_INVALID'):
+            tool.load_rows(write_rows(tmp_path / f'{name}.jsonl', [bad]))
+
+
+def _holdout_world(tmp_path):
+    """Round 1: 12 NHIS + 6 INSURANCE_4 PASS, two NEEDS_REVIEW, one FAIL; C = 4. Round 2: one C key turns
+    NEEDS_REVIEW, the two NEEDS_REVIEW turn PASS (N). Holdout rows (format 3): every document PASS."""
+    root = tmp_path / f'FAKE-input-{SENTINEL}'
+    root.mkdir()
+    source = text_pdf(tmp_path / 'source.pdf')
+    forms = {**{f'nhis-{i:02d}': 'NHIS_PAYMENT' for i in range(12)},
+             **{f'ins-{i:02d}': 'INSURANCE_4' for i in range(6)},
+             'review-0': 'NHIS_PAYMENT', 'review-1': 'NHIS_PAYMENT', 'fail-0': 'NHIS_PAYMENT'}
+    keys = {}
+    for name in forms:
+        relative = f'person-{SENTINEL}-{name}/secret-{name}.pdf'
+        (root / relative).parent.mkdir()
+        shutil.copyfile(source, root / relative)
+        keys[name] = timing.document_key(relative)
+    review = [['LOW_OCR_CONFIDENCE', 'NEEDS_REVIEW']]
+
+    def rows_for(decisions, version=2):
+        result = []
+        for name, form in forms.items():
+            decision = decisions.get(name, 'PASS')
+            item = row(keys[name], decision, form, reasons=review if decision == 'NEEDS_REVIEW' else None)
+            if version == 3:
+                item.update(schema_version=3, intra_threads=2, page_workers=4)
+            result.append(item)
+        return result
+
+    out = tmp_path / 'labels-out'
+    one = tool.prepare(write_rows(tmp_path / 'rows-1.jsonl', rows_for(
+        {'review-0': 'NEEDS_REVIEW', 'review-1': 'NEEDS_REVIEW', 'fail-0': 'FAIL'})),
+        root, out, port=PORT, compute=fake_compute, sample=4)
+    label_everything(client(one), one, status='PASS')
+    flipped = one.current['c'][0]
+    flipped_name = next(name for name, key in keys.items() if key == flipped)
+    two = tool.prepare(write_rows(tmp_path / 'rows-2.jsonl', rows_for(
+        {flipped_name: 'NEEDS_REVIEW', 'fail-0': 'FAIL'})), root, out, port=PORT, compute=fake_compute)
+    label_everything(client(two), two, status='PASS')
+    rows_h = write_rows(tmp_path / 'rows-h.jsonl', rows_for({}, version=3))
+    return dict(root=root, out=out, keys=keys, one=one, two=two, rows_h=rows_h, rows_for=rows_for, tmp=tmp_path)
+
+
+def test_holdout_takes_only_never_labeled_pass_documents_by_form_with_a_fixed_seed(tmp_path, env, capsys):
+    world = _holdout_world(tmp_path)
+    root, out, keys, rows_h = world['root'], world['out'], world['keys'], world['rows_h']
+    earlier = {key for item in world['two'].plan['rounds'] for key in tool.members(item)}
+    labeled = {record['key'] for record in tool.read_labels(out)}
+    # Earlier sets: round-1 B (fail-0) and C (4, one flipped to NEEDS_REVIEW in round 2), round-2 N (review-*).
+    assert keys['fail-0'] in earlier and {keys['review-0'], keys['review-1']} <= earlier and labeled == earlier
+
+    capsys.readouterr()
+    sess = tool.prepare(rows_h, root, out, port=PORT, compute=fake_compute, holdout=dict(size=7, seed=99))
+    console = capsys.readouterr().out
+    item = sess.current
+    assert item['round'] == 3 and item['holdout'] == {'size': 7, 'seed': 99}
+    assert item['b'] == [] and item['c'] == [] and item['n'] == [] and len(item['h']) == 7
+    # Every document is PASS in the holdout rows, yet nothing sampled (and so labeled) before is drawn again.
+    assert not set(item['h']) & earlier and not set(item['h']) & labeled
+    assert all(item['docs'][key]['decision'] == 'PASS' for key in item['h'])
+    # Eligible: NHIS 12 - 3 (C) = 9, INSURANCE_4 6 - 1 (C) = 5 → 7 allocated in proportion (4.5 / 2.5).
+    assert item['h_strata'] == {'INSURANCE_4': 5, 'NHIS_PAYMENT': 9}
+    assert item['h_alloc'] == timing.allocate(item['h_strata'], 7) == {'INSURANCE_4': 2, 'NHIS_PAYMENT': 5}
+    forms = {key: item['docs'][key]['form'] for key in item['h']}
+    assert sorted(forms.values()).count('NHIS_PAYMENT') == 5 and sorted(forms.values()).count('INSURANCE_4') == 2
+    assert set(sess.queue) == set(item['h']) and sess.c_keys == set(item['h'])
+    assert ' h 7 ' in console and 'round 3 ' in console and 'revalue NA ' in console
+
+    # Same seed → same sample: re-derived from rows, reopened with or without the options, frozen in plan.json.
+    _, docs = tool.load_rows(rows_h)
+    previous = sess.plan['rounds'][:2]
+    assert tool.holdout_sets(docs, 7, 99, previous)['h'] == item['h']
+    assert tool.holdout_sets(docs, 7, 100, previous)['h'] != item['h']
+    plan_bytes = (out / 'plan.json').read_bytes()
+    again = tool.prepare(rows_h, root, out, port=PORT, compute=fake_compute, holdout=dict(size=7, seed=99))
+    assert again.current['h'] == item['h'] and again.queue == sess.queue
+    plain = tool.prepare(rows_h, root, out, port=PORT, compute=fake_compute)
+    assert plain.current['round'] == 3 and plain.current['h'] == item['h']
+    assert len(json.loads((out / 'plan.json').read_bytes())['rounds']) == 3
+    assert json.loads((out / 'plan.json').read_bytes())['rounds'][2]['h'] == json.loads(plan_bytes)['rounds'][2]['h']
+    for holdout in (dict(size=7, seed=100), dict(size=6, seed=99)):
+        with pytest.raises(tool.ToolError, match='PLAN_MISMATCH'):
+            tool.prepare(rows_h, root, out, port=PORT, compute=fake_compute, holdout=holdout)
+    with pytest.raises(tool.ToolError, match='ARGUMENT_ERROR'):
+        tool.prepare(rows_h, root, out, port=PORT, compute=fake_compute, holdout=dict(size=7, seed=99),
+                     revalue=['NHIS_PAYMENT'])
+
+    # No development round after H; H never opens first; a tampered H (an earlier key) is refused.
+    rows_four = write_rows(world['tmp'] / 'rows-4.jsonl', world['rows_for']({'fail-0': 'FAIL'}, version=3))
+    with pytest.raises(tool.ToolError, match='HOLDOUT_FINAL'):
+        tool.prepare(rows_four, root, out, port=PORT, compute=fake_compute)
+    with pytest.raises(tool.ToolError, match='HOLDOUT_INVALID'):
+        tool.prepare(rows_h, root, world['tmp'] / 'fresh-out', port=PORT, compute=fake_compute,
+                     holdout=dict(size=7, seed=99))
+    plan = json.loads(plan_bytes)
+    swapped = sorted(plan['rounds'][2]['h'][1:] + [keys['review-0']])
+    plan['rounds'][2]['h'] = swapped
+    plan['rounds'][2]['docs'] = {k: dict(form='NHIS_PAYMENT', decision='PASS', reasons=[]) for k in swapped}
+    (out / 'plan.json').write_text(json.dumps(plan))
+    with pytest.raises(tool.ToolError, match='PLAN_INVALID'):
+        tool.read_plan(out)
+    (out / 'plan.json').write_bytes(plan_bytes)
+
+    # CLI: both options or neither; bad values are argument errors (codes only).
+    capsys.readouterr()
+    for extra in (['--holdout', '7'], ['--holdout-seed', '99'], ['--holdout', '0', '--holdout-seed', '99'],
+                  ['--holdout', '7', '--holdout-seed', '-1'],
+                  ['--holdout', '7', '--holdout-seed', '99', '--revalue-forms', 'NHIS_PAYMENT']):
+        assert tool.main(['serve', '--rows', str(rows_h), '--root', str(root), '--out', str(out), *extra]) == 2
+        assert capsys.readouterr().out == 'ERROR ARGUMENT_ERROR\n'
+
+
+def test_holdout_labels_stand_alone_and_are_reported_apart_from_c_and_n(tmp_path, env, capsys):
+    import re
+    world = _holdout_world(tmp_path)
+    root, out, keys = world['root'], world['out'], world['keys']
+    sess = tool.prepare(world['rows_h'], root, out, port=PORT, compute=fake_compute, holdout=dict(size=7, seed=99))
+    http = client(sess)
+    before_two = tool.summarize(sess.plan, sess.records, 2)
+
+    # Nothing is carried and the verdict stays hidden until stage one is saved.
+    assert all(entry['state'] == 'todo' for entry in http.get('/api/session').json()['queue'])
+    first = sess.queue[0]
+    assert http.get(f'/api/doc/{first}').json()['label'] is None
+    assert http.get(f'/api/doc/{first}/engine').json() == {'error': 'BLIND_FIRST'}
+    assert http.get(f'/api/doc/{first}/values').json() == {'error': 'BLIND_FIRST'}
+
+    def marks(key, x=()):
+        shown = [item['name'] for item in http.get(f'/api/doc/{key}/values').json()['items']]
+        assert post(http, sess, f'/api/doc/{key}/values',
+                    {'fields': {name: 'X' if name in x else 'O' for name in shown}}).status_code == 200
+
+    h = sess.current['h']
+    form = {key: sess.current['docs'][key]['form'] for key in h}
+    nhis = [k for k in h if form[k] == 'NHIS_PAYMENT']
+    ins = [k for k in h if form[k] == 'INSURANCE_4']
+    truth = {key: 'PASS' for key in h}
+    truth[nhis[0]] = 'NEEDS_REVIEW'   # wrong (strict)
+    truth[ins[0]] = 'HOLD'
+    for key in h:
+        assert post(http, sess, f'/api/doc/{key}/blind',
+                    {'status': truth[key], 'reasons': []}).status_code == 200
+        engine = http.get(f'/api/doc/{key}/engine').json()
+        assert engine['decision'] == 'PASS' and engine['needs_values'] is True
+        assert http.get(f'/api/doc/{key}/values').json()['inherited'] is None
+        marks(key, x=('성명',) if key == nhis[1] else ())   # nhis[1]: truth PASS but a value X → wrong
+    assert sess.main_complete()
+
+    lines = summary_lines(tool.summarize(sess.plan, sess.records))
+    assert [line for line in lines if line[0] == 'HOLDOUT'][1][1:] == ['7', '99', '14']
+    assert pick(lines, 'H_ALLOC', 'NHIS_PAYMENT')[2:] == ['9', '5']
+    assert [line for line in lines if line[0] == 'H_TOTAL'][1] == ['H_TOTAL', '7', '7', '7', '0']
+    excl = pick(lines, 'H', 'EXCL_HOLD')
+    assert excl[2:5] == ['2', '6', f'{2 / 6:.4f}'] and float(excl[5]) == pytest.approx(tool.cp_upper(2, 6), abs=1e-4)
+    held = pick(lines, 'H', 'HOLD_AS_WRONG')
+    assert held[2:4] == ['3', '7'] and float(held[5]) == pytest.approx(tool.cp_upper(3, 7), abs=1e-4)
+    assert pick(lines, 'H_DETAIL', 'TRUTH_NEEDS_REVIEW')[2] == '1' and pick(lines, 'H_DETAIL', 'VALUE_X')[2] == '1'
+    assert pick(lines, 'H_DETAIL', 'FAIL_OR_VALUE_X')[2] == '1'   # the C1 definition misses the NEEDS_REVIEW
+    by_form = pick(lines, 'H_BY_FORM', 'NHIS_PAYMENT')
+    assert by_form[2:10] == ['9', '5', '5', '4', '1', '0', '0', '2']
+    assert float(by_form[11]) == pytest.approx(tool.cp_upper(2, 5), abs=1e-4)
+    assert pick(lines, 'H_BY_FORM', 'INSURANCE_4')[2:10] == ['5', '2', '2', '1', '0', '0', '1', '0']
+    assert pick(lines, 'VALUE_ITEM_H', 'NHIS_PAYMENT', '성명')[3:] == ['4', '1']
+
+    # Not merged: C, N and PASS_COMBINED of the holdout round stay empty, and no H row joins their tables.
+    assert pick(lines, 'SAMPLE', 'C')[2:] == ['0', '0', '0'] and pick(lines, 'SAMPLE', 'N')[2:] == ['0', '0', '0']
+    assert pick(lines, 'C', 'EXCL_HOLD')[2:] == ['0', '0', 'NA']
+    assert [line for line in lines if line[0] == 'N_TOTAL'][1] == ['N_TOTAL', '0', '0', '0', '0']
+    assert pick(lines, 'PASS_COMBINED', 'EXCL_HOLD')[-2:] == ['NA', 'NA']
+    assert pick(lines, 'REVALUE', 'NA')
+    assert not [line for line in lines if line[0] in ('BY_FORM', 'VALUE_ITEM', 'VALUE_ITEM_N') and len(line) > 2
+                and line[1] not in ('set', 'form')]
+    assert not [line for line in lines if line[0] in ('BY_FORM', 'R_CODE') and line[1] == 'H']
+    # The development round's summary does not move when H is labeled, and it has no H rows.
+    assert tool.summarize(sess.plan, sess.records, 2) == before_two
+    two = summary_lines(before_two)
+    assert [line for line in two if line[0] == 'HOLDOUT'][1][1:] == ['NA', 'NA', 'NA']
+    assert pick(two, 'REVALUE', 'ALL')
+    assert [line for line in two if line[0] == 'H_TOTAL'][1] == ['H_TOTAL', '0', '0', '0', '0']
+    assert pick(two, 'H', 'EXCL_HOLD')[2:] == ['0', '0', 'NA', 'NA']
+
+    # Mismatch lists H with the C/N rule (truth not PASS, or a value X); HOLD counts as not PASS.
+    listing = tool.mismatches(sess.plan, sess.records)
+    listed = [line.split() for line in listing.splitlines() if line.startswith('MISMATCH ')][1:]
+    assert sorted(line[3] for line in listed) == ['H', 'H', 'H']
+    assert sorted(line[7] for line in listed) == ['HOLD', 'NEEDS_REVIEW', 'PASS']
+    assert next(line for line in listed if line[7] == 'PASS')[9] == '성명'
+
+    # Codes and counts only: no path, file name, read value, date or key in the output or stored files.
+    capsys.readouterr()
+    assert tool.main(['summary', '--out', str(out)]) == 0
+    assert tool.main(['mismatch', '--out', str(out)]) == 0
+    text = capsys.readouterr().out
+    assert 'H_TOTAL' in text and 'MISMATCH 3 ' in text
+    stored = (out / 'labels.jsonl').read_text() + (out / 'plan.json').read_text()
+    for marker in ('/', '\\', '.pdf', SENTINEL, 'secret', 'person', root.name, out.name, '2026-03-04'):
+        assert marker not in text, marker
+    for marker in ('.pdf', SENTINEL, 'secret', 'person', root.name, '2026-03-04'):
+        assert marker not in stored, marker
+    assert not re.search(r'\d{4}\s*[-./년]\s*\d{1,2}', text)
+    assert not re.search(r'\d{1,2}\s*[./]\s*\d{1,2}\s*[./]\s*\d{2,4}', text)
+    assert not any(key in text for key in keys.values())

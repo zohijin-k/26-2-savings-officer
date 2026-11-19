@@ -110,3 +110,12 @@ def test_summary_lines_by_form_and_decision_and_free_text_rejected(tmp_path):
                    dict(bins={'free': 2}), dict(note='x')):
         with pytest.raises(Exception):
             tool.validate_row(dict(rows[0], d11=dict(d11, **change)))
+
+
+def test_a_failed_d11_shadow_is_a_valid_row():
+    # A D11 exception keeps the baseline row and records only the stage name; the row must validate.
+    row = tool.blank_row('0' * 16)
+    row['form'], row['decision'], row['shadow_errors'] = 'NHIS_PAYMENT', 'NEEDS_REVIEW', ['D11']
+    tool.validate_row(row)
+    with pytest.raises(Exception):
+        tool.validate_row(dict(row, shadow_errors=['D12']))

@@ -1871,7 +1871,7 @@ def validate_row(row):
         and all(_code_in(v, DECISIONS, True) for v in row['g1_decision'].values()))
     req(isinstance(row['shadow_errors'], list)
         and set(row['shadow_errors']) <= {'G1', 'CONSENT', 'PAYMENT', 'A4', 'QUALITY', 'S1', 'S2', 'S3', 'S4', 'D6',
-                                          'D8', 'G4', 'D10', 'T3'})
+                                          'D8', 'G4', 'D10', 'T3', 'D11'})
     req(row['early'] is None or (isinstance(row['early'], dict) and set(row['early']) == {'source', 'gap'}
                                  and row['early']['source'] in EARLY_SOURCES and row['early']['gap'] in EARLY_GAPS))
     req(row['g4'] is None or (isinstance(row['g4'], dict) and set(row['g4']) == {'layout', 'zero', 'ratio', 'header',

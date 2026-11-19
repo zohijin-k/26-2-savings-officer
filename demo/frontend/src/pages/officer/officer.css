@@ -317,6 +317,32 @@
   box-shadow: 0 1px 6px rgb(0 0 0 / 40%);
 }
 
+/* PDF는 모든 쪽을 세로로 이어 붙여 스크롤로 넘긴다. */
+.viewer__doc {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.viewer__page {
+  position: relative;
+  flex: none;
+  background: #fff;
+  box-shadow: 0 1px 6px rgb(0 0 0 / 40%);
+}
+
+.viewer__page-canvas,
+.viewer__page-canvas .viewer__canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.viewer__bar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .viewer__canvas,
 .viewer__image {
   display: block;

@@ -155,6 +155,16 @@ candidate rules would change, without changing production behaviour.
   image bytes / same reading text (-1 none). Document `path`: MARKER_DUP (the only production
   PAGES_DUPLICATED route: repeated counted markers), IMAGE_SAME, OTHER. Summary lines `D10`,
   `D10_DOC` and `D10_PAGE` (document ordinal and page number, never a key).
+- Row format 9 adds `d11` for every processed document (11-19): page-image source of the pages of
+  the last production `preprocess`. `embedded` counts EMBEDDED pages (OCR input is the embedded main
+  image, not the page as displayed); per document O/X: `shared` (main image xref, production
+  `PageImage.image_xref`, is another page's too), `hidden` (72 dpi render ink < .002 while OCR-input
+  ink > .01: an image that does not show), `ratio` (OCR-input ink / render ink >= 3 or < 1/3); `bins`
+  counts EMBEDDED pages per ratio bin (R_LT033, R033_1, R1_3, R3P, NA = no image or render ink
+  < .002), summing to `embedded`. Ink is grey < 128, as D10. D10 now also runs for PAGE_IMAGE_SHARED
+  verdicts. Summary lines `D11` (documents, embedded documents, shared, hidden, ratio, any),
+  `D11_FORM_DECISION` (same counts per form x decision, embedded documents only) and `D11_RATIO`
+  (pages per bin). Cost: one 72 dpi grey render and one decode of the OCR input per EMBEDDED page.
 - Row format 8 adds `t3` for NHIS_PAYMENT rows (shadow, production unchanged): the held T3 change
   (the legacy 합계 row read from the 건강보험료 column the months come from, not the 고지금액 group
   centre) is applied in memory by exact source substitution of `nhis_payment._extract_monthly_detail`

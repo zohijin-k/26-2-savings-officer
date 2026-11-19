@@ -33,7 +33,7 @@ from unittest.mock import patch
 from . import batch_assess as batch
 from . import doc_timing as timing
 
-VERSION = 8
+VERSION = 9
 #: Format 1 (commit 2) had no consent/payment/p1/c1 keys. Format 2 had no ``recovery`` key.
 KINDS = batch.KINDS
 TIERS = timing.TIERS
@@ -659,6 +659,16 @@ D10_SOURCES = ('TEXT_LAYER', 'EMBEDDED', 'RENDER', 'UPLOAD', 'NA')
 D10_INK_THRESHOLD = 128   # grey level below which a pixel counts as ink
 D10_RENDER_DPI = 72       # low-resolution render of the page as displayed, for its ink ratio
 D10_MAX_PAGES = 200
+#: D11 (11-19): page-image source of every document. For EMBEDDED pages (the OCR input is the
+#: embedded main image, not the page as displayed): (i) the main image xref is another page's too,
+#: (ii) the 72 dpi render shows almost no ink while the OCR input has ink (an image that does not
+#: show), (iii) OCR-input ink / render ink is at least D11_RATIO or below 1 / D11_RATIO.
+D11_HIDDEN_RENDER = .002   # render ink below this counts as "nothing shown"
+D11_HIDDEN_INPUT = .01     # ... while OCR-input ink above this counts as "an image is read"
+D11_RATIO = 3.0
+#: OCR-input / render ink ratio bins per EMBEDDED page (NA: no image, or render ink < D11_HIDDEN_RENDER).
+D11_RATIO_BINS = ('R_LT033', 'R033_1', 'R1_3', 'R3P', 'NA')
+D11_KEYS = ('embedded', 'shared', 'hidden', 'ratio', 'bins')
 #: T3 (11-19): the legacy 합계 row read from the 건강보험료 column the months are read from, not the
 #: 고지금액 group centre (held patch HELD-T3). State of the 합계 check before and after.
 T3_TOTALS = ('MATCH', 'MISMATCH', 'NO_TOTAL', 'NA')
@@ -1580,6 +1590,51 @@ def _first_same(values, index):
     return next((i for i in range(index) if value is not None and values[i] == value), -1)
 
 
+def _render_inks(path, indices):
+    """72 dpi grey render ink of PDF pages as displayed, {page index: ink}; empty when not a PDF."""
+    if not indices or Path(path).suffix.lower() != '.pdf':
+        return {}
+    import numpy as np
+    import pymupdf
+    inks = {}
+    with pymupdf.open(path) as document:
+        for index in sorted(set(indices)):
+            if 0 <= index < len(document):
+                pix = document[index].get_pixmap(dpi=D10_RENDER_DPI, colorspace=pymupdf.csGRAY, alpha=False)
+                grey = np.frombuffer(pix.samples, dtype=np.uint8)
+                inks[index] = round(float((grey < D10_INK_THRESHOLD).mean()), 4) if grey.size else -1
+    return inks
+
+
+def d11_ratio_bin(input_ink, render_ink):
+    """Bin of OCR-input ink / render ink (NA without a readable image or with nothing rendered)."""
+    if input_ink is None or input_ink < 0 or render_ink is None or render_ink < D11_HIDDEN_RENDER:
+        return 'NA'
+    ratio = input_ink / render_ink
+    return ('R_LT033' if ratio < 1 / D11_RATIO else 'R033_1' if ratio < 1 else
+            'R1_3' if ratio < D11_RATIO else 'R3P')
+
+
+def page_source_check(trace, path, row):
+    """D11: EMBEDDED pages whose OCR input may not be the page as shown; codes and counts only."""
+    pages = list(trace.images or [])[:D10_MAX_PAGES]
+    embedded = [page for page in pages if getattr(page.source, 'value', page.source) == 'embedded' and page.png]
+    xrefs = [getattr(page, 'image_xref', None) for page in pages]
+    renders = _render_inks(path, [page.page for page in embedded])
+    shared = hidden = ratio = False
+    bins = dict.fromkeys(D11_RATIO_BINS, 0)
+    for page in embedded:
+        xref = getattr(page, 'image_xref', None)
+        shared |= xref is not None and xrefs.count(xref) > 1
+        input_ink, render_ink = _ink(page.png), renders.get(page.page, -1)
+        hidden |= 0 <= render_ink < D11_HIDDEN_RENDER and input_ink > D11_HIDDEN_INPUT
+        found = d11_ratio_bin(input_ink, render_ink)
+        bins[found] += 1
+        ratio |= found in ('R_LT033', 'R3P')
+    row['d11'] = dict(embedded=len(embedded), shared='O' if shared else 'X', hidden='O' if hidden else 'X',
+                      ratio='O' if ratio else 'X', bins=bins)
+
+
 def pages_duplicated_check(trace, path, row):
     """D10: why a resident document is PAGES_DUPLICATED, page by page; numbers and codes only."""
     from engine_v2.extractors import resident_abstract as ra
@@ -1642,7 +1697,8 @@ def blank_row(key, code='NONE'):
                 struct=None, scan=None, scan_code=None, text_all=None,
                 g1={name: None for name in CANDIDATES}, g1_decision={name: None for name in CANDIDATES},
                 consent=None, c1=None, payment=None, p1=None, c2=None, a2=None, a4=None, recovery=None,
-                s1=None, s2=None, s3=None, s4=None, early=None, billing=None, history=None, g4=None, d10=None, t3=None, shadow_errors=[])
+                s1=None, s2=None, s3=None, s4=None, early=None, billing=None, history=None, g4=None, d10=None, t3=None,
+                d11=None, shadow_errors=[])
 
 
 def gave_up(row):
@@ -1687,8 +1743,10 @@ def process(path, key, trace):
                                     ('D8', row['form'] == 'RESIDENT_ABSTRACT', lambda: history_check(trace, row)),
                                     ('G4', row['form'] == 'NHIS_PAYMENT', lambda: amount_guard_check(trace, row, ocr)),
                                     ('T3', row['form'] == 'NHIS_PAYMENT', lambda: total_row_shadow(trace, path, row)),
-                                    ('D10', any(code == 'PAGES_DUPLICATED' for code, _ in row['reasons']),
+                                    ('D10', any(code in ('PAGES_DUPLICATED', 'PAGE_IMAGE_SHARED')
+                                                for code, _ in row['reasons']),
                                      lambda: pages_duplicated_check(trace, path, row)),
+                                    ('D11', True, lambda: page_source_check(trace, path, row)),
                                     ('QUALITY', True, lambda: quality_shadows(trace, path, row, ocr))):
         if not applies:
             continue
@@ -1737,7 +1795,7 @@ def validate_row(row):
     keys = {'schema_version', 'key', 'code', 'form', 'tier', 'decision', 'reasons', 'exit', 'reclass',
             'exceptions', 'ocr_chars', 'cause', 'struct', 'scan', 'scan_code', 'text_all', 'g1', 'g1_decision',
             'consent', 'c1', 'payment', 'p1', 'c2', 'a2', 'a4', 'recovery', 's1', 's2', 's3', 's4',
-            'early', 'billing', 'history', 'g4', 'd10', 't3', 'shadow_errors'}
+            'early', 'billing', 'history', 'g4', 'd10', 't3', 'd11', 'shadow_errors'}
     req(isinstance(row, dict) and set(row) == keys and row['schema_version'] == VERSION)
     req(isinstance(row['key'], str) and timing.KEY_RE.fullmatch(row['key']) is not None)
     req(row['code'] in ROW_CODES and row['form'] in KINDS and row['tier'] in TIERS and row['decision'] in DECISIONS)
@@ -1770,6 +1828,12 @@ def validate_row(row):
                               and row['g4']['layout'] in G4_LAYOUTS and row['g4']['header'] in G4_HEADER
                               and all(row['g4'][k] in ('O', 'X') for k in ('zero', 'ratio', 'larger'))))
     req(row['d10'] is None or _valid_d10(row['d10']))
+    req(row['d11'] is None or (isinstance(row['d11'], dict) and set(row['d11']) == set(D11_KEYS)
+                               and type(row['d11']['embedded']) is int and row['d11']['embedded'] >= 0
+                               and all(row['d11'][k] in ('O', 'X') for k in ('shared', 'hidden', 'ratio'))
+                               and isinstance(row['d11']['bins'], dict) and set(row['d11']['bins']) == set(D11_RATIO_BINS)
+                               and all(type(v) is int and v >= 0 for v in row['d11']['bins'].values())
+                               and sum(row['d11']['bins'].values()) == row['d11']['embedded']))
     req(row['t3'] is None or (isinstance(row['t3'], dict) and set(row['t3']) == {'layout', 'before', 'after', 'decision'}
                               and row['t3']['layout'] in G4_LAYOUTS + ('GOV',) and row['t3']['before'] in T3_TOTALS
                               and row['t3']['after'] in T3_TOTALS and row['t3']['decision'] in DECISIONS))
@@ -2101,6 +2165,20 @@ def _stage_summary(done):
     for number, r in enumerate(d10, 1):
         for index, page in enumerate(r['d10']['pages'], 1):
             lines.append(_line('D10_PAGE', number, index, *(page[k] for k in D10_PAGE_KEYS)))
+    d11 = [r for r in done if r['d11'] is not None and r['d11']['embedded']]
+
+    def d11_counts(group):
+        flags = [sum(r['d11'][k] == 'O' for r in group) for k in ('shared', 'hidden', 'ratio')]
+        return (len(group), *flags, sum('O' in (r['d11']['shared'], r['d11']['hidden'], r['d11']['ratio'])
+                                        for r in group))
+    lines.append('D11 docs embedded_docs shared hidden ratio any')
+    lines.append(_line('D11', len(done), *d11_counts(d11)))
+    lines.append('D11_FORM_DECISION form decision embedded_docs shared hidden ratio any')
+    for form, decision in sorted({(r['form'], r['decision']) for r in d11}):
+        lines.append(_line('D11_FORM_DECISION', form, decision,
+                           *d11_counts([r for r in d11 if (r['form'], r['decision']) == (form, decision)])))
+    lines.append('D11_RATIO ' + ' '.join(D11_RATIO_BINS))
+    lines.append(_line('D11_RATIO', *(sum(r['d11']['bins'][b] for r in d11) for b in D11_RATIO_BINS)))
     _counted(lines, 'P1_DECISION margin before after n',
              ((key, r['decision'], r['p1'][key]['decision']) for r in payment for key in P1_KEYS
               if r['p1'] is not None and r['p1'][key]['decision'] != r['decision']))

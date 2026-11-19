@@ -1,10 +1,11 @@
 """데모 사이트 백엔드 엔트리.
 
 기동 (저장소 루트에서):
-    uvicorn demo.backend.main:app --reload --port 8000
+    python -m uvicorn demo.backend.main:app --env-file .env --reload --port 8000
 
 `demo.backend`는 패키지로 동작한다. 루트에서 띄워야 engine_adapter가 저장소
-루트를 sys.path에 올려 `engine/`을 import 할 수 있다.
+루트를 sys.path에 올려 `engine/`을 import 할 수 있다. 담당자 화면은 `.env`의
+`OFFICER_PASSWORD`, `OFFICER_SESSION_SECRET`이 있어야 쓸 수 있다.
 """
 
 from contextlib import asynccontextmanager
@@ -14,8 +15,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import applications, criteria, documents, files, forms, officer, review, subsidy
+from .applicant_access import ApplicantAccess
 from .engine_adapter import apply_runtime_overrides
 from .models import init_db
+from .officer_auth import OfficerAccess
+from .officer_auth import router as officer_auth_router
 from .officer_summary import SummaryWorker, worker_enabled
 from .rules.programs import PROGRAMS, get_program
 from .rules.self_check import item_numbers
@@ -52,6 +56,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# 라우터보다 먼저 신청자 본인 쿠키와 담당자 로그인을 확인한다. 나중에 붙인 것이
+# 바깥이라 담당자 검사가 가장 먼저 돈다(.trellis/spec/backend/access-control.md).
+app.add_middleware(ApplicantAccess)
+app.add_middleware(OfficerAccess)
 
 
 app.include_router(applications.router)
@@ -63,6 +71,8 @@ app.include_router(subsidy.router)
 app.include_router(review.router)
 # 작성 서식 PDF 내보내기(P7, 선택). 여기도 inline 으로만 나간다.
 app.include_router(forms.router)
+# 담당자 로그인·세션 확인·로그아웃. 나머지 /api/officer 경로는 로그인해야 열린다.
+app.include_router(officer_auth_router)
 # 담당자 심사 화면(P4). 원본은 files 라우터가 inline으로만 흘린다 — 다운로드 경로는 없다.
 app.include_router(officer.router)
 app.include_router(files.router)

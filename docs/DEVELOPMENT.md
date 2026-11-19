@@ -66,11 +66,13 @@ python -m demo.fixtures.make_samples
 
 샘플은 가상 값으로 만든 PDF이며 `demo/fixtures/samples/`에 생성됩니다. 시나리오 확인 스크립트는 폴더가 없을 때 샘플을 자동 생성합니다.
 
+처음 한 번 `.env.example`을 `.env`로 복사하고 `OFFICER_PASSWORD`(담당자 비밀번호)와 `OFFICER_SESSION_SECRET`(로그인 쿠키 서명값)을 채웁니다. 서명값은 `python -c "import secrets; print(secrets.token_hex(32))"`로 만듭니다. `.env`는 커밋하지 않습니다.
+
 백엔드와 프론트엔드를 별도 터미널에서 실행합니다.
 
 ```bash
 # 터미널 1 — 저장소 루트
-uvicorn demo.backend.main:app --reload --port 8000
+python -m uvicorn demo.backend.main:app --env-file .env --reload --port 8000
 ```
 
 ```bash
@@ -79,7 +81,7 @@ cd demo/frontend
 npm run dev
 ```
 
-브라우저에서 <http://localhost:5173>을 열면 두배적금 담당자 화면으로 바로 진입합니다. 신청 건을 확인 필요 · 적합 · 처리 완료 탭으로 나눈 표로 표시합니다. FastAPI 문서는 <http://localhost:8000/docs>입니다.
+브라우저에서 <http://localhost:5173>을 열면 담당자 로그인 칸이 나오고, 로그인하면 두배적금 담당자 화면으로 들어갑니다. 신청 건을 확인 필요 · 적합 · 처리 완료 탭으로 나눈 표로 표시합니다. FastAPI 문서는 <http://localhost:8000/docs>입니다.
 
 합성 시연 데이터를 넣거나 그 데이터만 정리할 때는 저장소 루트에서 실행합니다.
 
@@ -102,7 +104,7 @@ python -m demo.backend.tools.seed_officer_demo --clean
 
 ```bash
 # 터미널 1 — 이 저장소 루트
-uvicorn demo.backend.main:app --reload --port 8000
+python -m uvicorn demo.backend.main:app --env-file .env --reload --port 8000
 ```
 
 ```bash
@@ -119,11 +121,29 @@ npm run dev -- --port 5174
 
 - 두 프런트 모두 `/api` 요청을 `localhost:8000`으로 넘기므로 프런트 코드는 고치지 않습니다.
 - 신청은 이 저장소의 `demo/demo.db`와 `demo/storage/`에 쌓입니다. 신청자가 제출한 건은 담당자 목록에 바로 나타나고, 담당자가 내린 결정은 신청자 마이페이지에 보입니다.
-- 신청자 저장소의 백엔드는 띄우지 않습니다. 같은 8000번을 쓰므로 둘을 함께 띄울 수 없습니다. 신청자 저장소의 백엔드를 대신 띄우면 신청이 그쪽 DB에 쌓이고, 판정도 그 저장소의 코드로 됩니다.
+- 신청자 저장소의 백엔드는 띄우지 않습니다. 같은 8000번을 쓰므로 둘을 함께 띄울 수 없습니다. 신청자 저장소의 백엔드를 대신 띄우면 신청이 그쪽 DB에 쌓이고, 판정도 그 저장소의 코드로 됩니다. 접근 제어도 이 저장소의 백엔드에만 있습니다.
+- 담당자 화면(5174)은 로그인부터 합니다. 신청자 화면(5173)은 로그인 없이 쓰고, 신청을 만든 브라우저가 받은 소유자 쿠키로 이어 씁니다. 같은 브라우저에서 두 화면을 함께 열어도 됩니다. 쿠키는 포트를 가리지 않지만 신청자 검사와 담당자 검사가 각자 자기 쿠키만 봅니다.
+- 접근 제어를 넣기 전에 만든 작성 중 신청은 이어 쓸 수 없습니다(403). 새 탭에서 신청을 다시 시작합니다.
 
 이 저장소의 백엔드에는 신청자 API(`/api/applications`, `/api/programs`)와 담당자 API(`/api/officer`, `/api/files`)가 함께 있습니다. 신청자 API의 응답은 신청자 저장소와 같은 규칙을 따릅니다. 서류 상태는 `UPLOADED`와 `REUPLOAD_REQUIRED`만 내보내고, 내부 판정·판독 신뢰도·점수·자격 사유는 내보내지 않습니다. 저장되는 판정과 담당자 API의 응답은 그대로입니다.
 
 신청자 API 코드(`demo/backend/api/applications.py`, `documents.py`, `review.py`와 `common.py`의 신청자 응답 부분)는 신청자 저장소에도 같은 내용으로 있습니다. 한쪽에서 고치면 다른 쪽에도 반영합니다. 시험에서 신청자 API의 `status`로 내부 판정을 확인하지 않습니다. 판정은 저장된 값(`Document.stage1_status`)이나 담당자 API로 확인합니다(`test_portal_uploads.assert_upload_status`).
+
+## 담당자 로그인과 접근 제어
+
+요청이 라우터에 닿기 전에 미들웨어 두 개가 확인합니다(`demo/backend/officer_auth.py`, `demo/backend/applicant_access.py`). 계약은 [access-control 규격](../.trellis/spec/backend/access-control.md)에 있습니다.
+
+| 경로 | 열리는 조건 | 아니면 |
+|---|---|---|
+| `/api/health`, `/api/programs…`, `POST /api/applications` | 누구나 | — |
+| `/api/applications/{신청 번호}/…` | 그 신청을 만든 브라우저의 소유자 쿠키 | 403 |
+| `GET /api/files/{문서 번호}` | 그 서류의 신청자, 또는 로그인한 담당자 | 403 |
+| `/api/officer…` | 로그인한 담당자(`POST /api/officer/login`만 예외) | 401, 설정 없으면 503 |
+
+- 담당자 로그인: `.env`의 `OFFICER_PASSWORD`와 상수 시간으로 비교하고, `OFFICER_SESSION_SECRET`으로 서명한 `officer_session` 쿠키(HttpOnly, SameSite=Lax, 8시간)를 줍니다. 같은 주소에서 5번 틀리면 60초 동안 막힙니다. 로그아웃한 쿠키는 다시 쓸 수 없습니다. 실패 횟수와 로그아웃 목록은 서버 메모리에 있어 서버를 다시 띄우면 비워집니다.
+- 담당자 화면은 따로 로그인 주소가 없습니다. 보던 주소(목록, `/officer/review/{신청 번호}`)에서 로그인 칸이 나오고, 로그인하면 그 화면이 그대로 열립니다.
+- 소유자 쿠키: 신청을 만들 때 `applicant_access_{신청 번호}`(경로 `/api`, HttpOnly, 5년)를 주고 DB에는 해시만 둡니다. 담당자 세션으로는 원본 보기만 열리고 신청자 경로는 열리지 않습니다.
+- 시험에서 담당자 API를 부를 때는 `demo/backend/tests/security_support.py`의 `authenticate_officer(client, monkeypatch)`로 합성 비밀번호 로그인을 하고, DB에 직접 만든 신청을 HTTP로 부를 때는 `claim_synthetic_application(client, 신청 번호)`를 씁니다. 경계 시험은 `test_access_control.py`입니다.
 
 ## OCR 판독 설정
 

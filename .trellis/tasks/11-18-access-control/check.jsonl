@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend quality checklist"}
+{"file": ".trellis/spec/backend/unified-backend.md", "reason": "Applicant API files must remain identical to the applicant repository after the one-line cookie change"}
+{"file": ".trellis/spec/backend/applicant-submission.md", "reason": "Applicant responses must stay exactly as before for the owner"}
+{"file": ".trellis/spec/frontend/officer-documents.md", "reason": "Officer screens must behave as before once logged in, including ?mock=1"}
+{"file": ".trellis/tasks/11-18-access-control/prd.md", "reason": "Acceptance criteria AC1-AC4 and decisions D1-D3"}

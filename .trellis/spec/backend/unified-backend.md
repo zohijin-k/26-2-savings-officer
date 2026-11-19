@@ -16,10 +16,13 @@ changes need this depth.
 Run topology (development):
 
 ```bash
-uvicorn demo.backend.main:app --reload --port 8000        # this repository root
+python -m uvicorn demo.backend.main:app --env-file .env --reload --port 8000   # this repository root
 npm run dev                                               # ../26-2-savings-applicant/demo/frontend → 5173
 npm run dev -- --port 5174                                # demo/frontend of this repository
 ```
+
+`.env` must hold `OFFICER_PASSWORD` and `OFFICER_SESSION_SECRET` for the officer
+screen; see [Access control](./access-control.md).
 
 API by audience:
 
@@ -36,6 +39,7 @@ Functions:
 
 - One process and one database: this repository's `demo/demo.db` and `demo/storage/`. Nothing is copied between repositories.
 - Both frontends' Vite proxies send `/api` to `http://localhost:8000`. No frontend code changes for the linked run.
+- Access follows [Access control](./access-control.md): the applicant frontend carries the owner cookie (`Path=/api`) issued by `POST /api/applications`; the officer frontend logs in and carries `officer_session`. Browsers share localhost cookies across ports, so one browser may hold both; each guard reads only its own cookie.
 - Applicant responses follow [Applicant submission](./applicant-submission.md): document `status` is `UPLOADED` or `REUPLOAD_REQUIRED`; findings are the allowlisted FAIL entries only; no `ocr_confidence`, eligibility blockers, self-check detail or threshold notes.
 - Stored outcomes keep the engine's values: `Document.stage1_status`, `Document.findings_json` and `Review` rows follow [Confirmed failure filtering](./failure-filtering.md) and are never rewritten for the applicant projection.
 - Officer responses do not use applicant projections. `api/officer.py` reads `checklist_for`, `list_documents`, `list_documents_bulk`, `load_application`, `subsidy_estimate` and `form_links`.
@@ -52,6 +56,8 @@ Functions:
 | An applicant endpoint returns `document_fact` output or unfiltered stored findings | defect: internal judgment leaks to the applicant |
 | A new FAIL code must make the applicant upload again | add it to `REUPLOAD_CODES` in both repositories with tests; otherwise the applicant sees `UPLOADED` and only the officer sees the FAIL |
 | The applicant API is changed in one repository only | the linked run and the applicant repository's standalone run behave differently |
+| This backend is started without `--env-file .env` | the officer screen shows the 503 configuration message; the applicant screen works |
+| The applicant repository's backend is run alone | no owner or officer checks: access control exists only in this repository (task decision D1) |
 
 ### 5. Good / Base / Bad Cases
 
@@ -64,6 +70,7 @@ Functions:
 - `tests/test_applicant_submission_policy.py`, `tests/test_applicant_supplement_projection.py`, `tests/test_applicant_failure_findings.py`: the applicant boundary.
 - `tests/test_quality_assessment_parity.py`, `tests/test_payment_paging.py`, `tests/test_payment_paging_refinement.py`: stored verdicts through `assert_upload_status`, final-check blockers, submit status code and officer detail.
 - `tests/test_officer_frontend_integration.py` and the officer API tests: officer responses unchanged.
+- `tests/test_access_control.py`: owner and officer boundaries for every applicant and officer route.
 - A screen check with both frontends on an isolated temporary database: submit, officer list and detail, officer decision, applicant my page. Synthetic documents only.
 
 ### 7. Wrong vs Correct

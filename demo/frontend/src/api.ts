@@ -1,3 +1,4 @@
+import { officerSessionResponse } from './officer-session.ts'
 import { mockBulkDecision, mockDecision, mockOfficerList, mockOfficerSummary, mockReviewDetail, mockRoles } from './pages/officer/mock-data.ts'
 
 export type DocStatus = 'PASS' | 'FAIL' | 'NEEDS_REVIEW'
@@ -180,6 +181,7 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
+  officerSessionResponse(path, response)
   if (!response.ok) throw new Error(`요청을 처리하지 못했습니다 (${response.status})`)
   return response.json() as Promise<T>
 }

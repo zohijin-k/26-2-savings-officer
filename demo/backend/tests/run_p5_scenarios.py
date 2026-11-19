@@ -26,6 +26,7 @@ from pathlib import Path
 from sqlmodel import create_engine, select
 
 from .. import models
+from .security_support import authenticate_officer
 from ..rules.programs import DOUBLE_SAVINGS, JOB_PACKAGE, get_program
 from ..rules.required_docs import ApplicantDocInput, build_checklist
 from ..rules.roles import ROLE_PROVINCE
@@ -692,6 +693,7 @@ def main() -> int:
 
     try:
         with TestClient(app) as client:
+            authenticate_officer(client)
             test_program_branching(client)
             test_self_check(client)
             test_subsidy_math()

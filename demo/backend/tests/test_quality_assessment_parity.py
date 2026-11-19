@@ -23,6 +23,7 @@ from demo.backend.rules.subsidy import Selection, SubsidyType
 from demo.backend.tests.test_eligibility_blockers import ready
 from demo.backend.tests.test_income_review import make_application
 from demo.backend.tests.test_portal_uploads import client
+from demo.backend.tests.security_support import authenticate_officer, claim_synthetic_application
 from demo.backend.tools.verify_upload import _row
 from engine.models import Status
 from engine.stage1_document_check import IMAGE_QUALITY_REVIEW_MESSAGE, image_quality_status
@@ -269,6 +270,7 @@ def test_quality_finalization_retains_one_warning_and_independent_reading_eviden
 def test_actual_upload_final_check_submission_and_officer_quality_agree(client, tmp_path, monkeypatch, variant):
     from demo.backend.tests.test_portal_uploads import assert_upload_status
     app = ready(make_application(premium=0))
+    claim_synthetic_application(client, app.id)
     fields = {
         "성명": "가상신청", "생년월일": "1999-01-01", "발급일": ISSUED.isoformat(),
         "초본신청인성명": "가상신청", "초본신청인생년월일": "1999-01-01", "전입일": "2020-01-01",
@@ -308,6 +310,7 @@ def test_actual_upload_final_check_submission_and_officer_quality_agree(client, 
     submitted = client.post(f"/api/applications/{app.id}/submit")
     assert submitted.status_code == (200 if expected == "NEEDS_REVIEW" else 400)
     if expected == "NEEDS_REVIEW":
+        authenticate_officer(client, monkeypatch)
         detail = client.get(f"/api/officer/applications/{app.id}").json()
         assert detail["ai"]["stage1_status"] == detail["ai"]["final_status"] == "NEEDS_REVIEW"
         doc = next(row for row in detail["documents"] if row["document_id"] == body["document_id"])

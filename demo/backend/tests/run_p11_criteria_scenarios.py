@@ -7,6 +7,7 @@ from datetime import date
 from pathlib import Path
 
 from . import run_p4_scenarios as p4
+from .security_support import authenticate_officer
 from ..rules.criteria import CRITERIA_SCHEMA_VERSION, for_application, issue_bounds, read_criteria
 from ..rules.facts import build_facts
 from ..models import Application, ProgramCriteriaVersion, get_session
@@ -185,6 +186,7 @@ def main() -> int:
     p4._isolate(tmp)
     try:
         with TestClient(app) as client:
+            authenticate_officer(client)
             run(client)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

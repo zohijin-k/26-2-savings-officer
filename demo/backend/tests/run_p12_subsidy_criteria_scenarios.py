@@ -9,6 +9,7 @@ from unittest.mock import patch
 from sqlmodel import select
 
 from . import run_p4_scenarios as p4
+from .security_support import authenticate_officer
 from . import run_p5_scenarios as p5
 from .. import models
 from ..models import Application, ProgramCriteriaVersion, get_session
@@ -235,6 +236,7 @@ def main() -> int:
     p4._isolate(tmp)
     try:
         with TestClient(app) as client:
+            authenticate_officer(client)
             test_count_scopes(client)
             test_interview_linking(client)
             test_receipt_amounts(client)

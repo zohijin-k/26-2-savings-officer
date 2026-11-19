@@ -11,6 +11,7 @@ from demo.backend.rules.required_docs import WorkCategory
 from demo.backend.tests.test_eligibility_blockers import ready
 from demo.backend.tests.test_income_review import make_application
 from demo.backend.tests.test_portal_uploads import client
+from demo.backend.tests.security_support import claim_synthetic_application
 from engine_v2.tests import fail_case_samples as sample
 from engine_v2.extractors import daily_work_record,insurance_4
 from engine_v2.schemas.models import DocType as V2Type
@@ -19,6 +20,7 @@ from engine_v2.schemas.models import DocType as V2Type
 @pytest.mark.parametrize("case",["3a","3b"])
 def test_source_shaped_work_failure_reaches_all_consumers(client,case):
     app=ready(make_application(premium=1))
+    claim_synthetic_application(client,app.id)
     if case=="3a":
         pages=sample.daily()
         read=_from_nhis(daily_work_record.extract(pages),pages,V2Type,

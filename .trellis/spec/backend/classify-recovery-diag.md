@@ -16,6 +16,12 @@ candidate rules would change, without changing production behaviour.
   re-reads each PDF once through the unmodified `read_document` chain (own engine,
   external OCR disabled, `batch.guarded()` per document), then runs the doc_timing
   slot rule and `assess_upload` for the verdict. `--out` must not exist.
+  `--only G1,T3,...` (11-19) runs only the named `DIAGNOSTICS` after that production read
+  (G1, CONSENT, PAYMENT, A4, S3, S4, S2, S1, D6, D8, G4, T3, D10, D11, QUALITY; case-sensitive).
+  An unknown or empty name stops before the output folder is made (`ERROR UNKNOWN_DIAGNOSTIC`,
+  the name is never echoed). Skipped diagnostics leave their row keys at the blank value;
+  `run.json` options record `only` (null without the option) and `diagnostics` (what ran), and
+  every summary title a skipped diagnostic owns prints once as `<title> SKIPPED` instead of 0.
 
 ## Exit and cause codes
 

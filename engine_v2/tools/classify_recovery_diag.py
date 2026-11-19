@@ -40,7 +40,28 @@ TIERS = timing.TIERS
 DECISIONS = timing.DECISIONS
 ROW_CODES = ('NONE', 'PROCESSING_ERROR', 'GUARD_BLOCKED') + timing.SKIP_CODES
 ERROR_CODES = ('ARGUMENT_ERROR', 'OUT_EXISTS', 'INPUT_UNAVAILABLE', 'INPUT_INVALID', 'INPUT_OUTPUT_OVERLAP',
-               'LOCATION_REJECTED', 'ENGINE_UNAVAILABLE', 'UNEXPECTED_ERROR')
+               'LOCATION_REJECTED', 'ENGINE_UNAVAILABLE', 'UNKNOWN_DIAGNOSTIC', 'UNEXPECTED_ERROR')
+#: Diagnostics ``process`` runs after the production read, in order (``run --only`` picks some).
+#: Each maps to the summary line titles it alone feeds; a skipped one prints ``<title> SKIPPED``.
+DIAGNOSTICS = {
+    'G1': ('G1', 'G1_TRANSITION', 'G1_DECISION'),
+    'CONSENT': ('CONSENT_COUNT', 'CONSENT_VARIANT', 'CONSENT_MARK', 'CONSENT_FAILSTAGE', 'CONSENT_DECISION', 'C1',
+                'C1_FAIL_TO_REVIEW'),
+    'PAYMENT': ('PAYMENT_COUNT', 'PAYMENT', 'PAYMENT_REASON', 'PAYMENT_ARITH', 'PAYMENT_ARITH_REASON',
+                'PAYMENT_PAGING', 'PAYMENT_COMPLETE', 'PAYMENT_PERIOD', 'PAYMENT_COMPONENT', 'P1', 'P1_DECISION'),
+    'A4': ('A4', 'A4_CHANGE', 'A4_DECISION'),
+    'S3': ('S3', 'S3_SOURCE', 'S3_DECISION', 'S3_YEOLLAM'),
+    'S4': ('S4', 'S4_CODE', 'S4_DECISION'),
+    'S2': ('S2', 'S2_DECISION', 'S2_S1'),
+    'S1': ('S1', 'S1_SHEETS', 'S1_MULTI', 'S1_DECISION'),
+    'D6': ('D6_EARLY', 'D6_BILLING'),
+    'D8': ('D8', 'D8_DECISION'),
+    'G4': ('G4', 'G4_HEADER', 'G4_LAYOUT', 'G4_DECISION'),
+    'T3': ('T3', 'T3_DECISION', 'T3_TOTAL', 'T3_LAYOUT'),
+    'D10': ('D10', 'D10_DOC', 'D10_PAGE'),
+    'D11': ('D11', 'D11_FORM_DECISION', 'D11_RATIO'),
+    'QUALITY': ('C2', 'C2_FAIL_TO_REVIEW', 'A2', 'A2_DECISION'),
+}
 EXITS = ('L_RESULT', 'L_EXCEPTION', 'L_SKIPPED', 'T_READ_NONE', 'T_TIER2_FORM', 'T_QUAL_NOT_NOTICE',
          'T_LOAD_ERROR', 'T_RECLASS_NONE', 'T_RECLASS_DISCARD', 'I_PREPROCESS_ERROR', 'I_TEXT_PAGE',
          'I_OCR_ERROR', 'I_UNCLASSIFIED', 'I_UNCLASSIFIED_MARKERS', 'I_GENERIC_NONE', 'OTHER')
@@ -1735,7 +1756,8 @@ def gave_up(row):
     return row['form'] == 'X' or (row['recovery'] is not None and row['recovery']['outcome'] == 'RECOVERED')
 
 
-def process(path, key, trace):
+def process(path, key, trace, only=None):
+    """Production read plus the diagnostics in ``only`` (all of ``DIAGNOSTICS`` when None)."""
     from demo.backend import ocr as demo_ocr
     row = blank_row(key)
     trace.reset()
@@ -1777,7 +1799,7 @@ def process(path, key, trace):
                                      lambda: pages_duplicated_check(trace, path, row)),
                                     ('D11', True, lambda: page_source_check(trace, path, row)),
                                     ('QUALITY', True, lambda: quality_shadows(trace, path, row, ocr))):
-        if not applies:
+        if not applies or (only is not None and name not in only):
             continue
         try:
             function()
@@ -2017,7 +2039,23 @@ def summarize(rows, meta):
         for (a, b), n in sorted(pairs.items(), key=lambda item: tuple(map(str, item[0]))):
             lines.append(_line('G1_DECISION', name, a, b, n))
     lines.extend(_stage_summary(done))
-    return '\n'.join(lines) + '\n'
+    return '\n'.join(_skipped(lines, (meta.get('options') or {}).get('only'))) + '\n'
+
+
+def _skipped(lines, only):
+    """Lines of diagnostics left out by ``--only`` become one ``<title> SKIPPED`` line per title."""
+    if only is None:
+        return lines
+    titles = {title for name, owned in DIAGNOSTICS.items() if name not in only for title in owned}
+    kept, seen = [], set()
+    for line in lines:
+        title = line.split(' ', 1)[0]
+        if title not in titles:
+            kept.append(line)
+        elif title not in seen:
+            seen.add(title)
+            kept.append(_line(title, 'SKIPPED'))
+    return kept
 
 
 def _counted(lines, header, items):
@@ -2224,7 +2262,18 @@ def _stage_summary(done):
 # ---------------------------------------------------------------- run
 
 
-def run(root, out, *, timing_path=None, forms=None, limit=None):
+def parse_only(text):
+    """'D10,D11,T3' -> the named diagnostics in run order; an unknown or empty name stops the run."""
+    names = [name.strip() for name in str(text).split(',')]
+    if not names or any(name not in DIAGNOSTICS for name in names):
+        _fail('UNKNOWN_DIAGNOSTIC')
+    return [name for name in DIAGNOSTICS if name in names]
+
+
+def run(root, out, *, timing_path=None, forms=None, limit=None, only=None):
+    if only is not None and (not only or any(name not in DIAGNOSTICS for name in only)):
+        _fail('UNKNOWN_DIAGNOSTIC')
+    only = None if only is None else [name for name in DIAGNOSTICS if name in only]
     requested = Path(out).absolute()
     if requested.exists() or requested.is_symlink():
         _fail('OUT_EXISTS')
@@ -2260,7 +2309,8 @@ def run(root, out, *, timing_path=None, forms=None, limit=None):
     meta = dict(schema_version=VERSION, environment=timing.environment(),
                 options=dict(forms=sorted(forms) if forms else None, limit=limit,
                              timing_rows='O' if timing_path else 'X', candidates=list(CANDIDATES),
-                             external_ocr_disabled='O'),
+                             external_ocr_disabled='O', only=only,
+                             diagnostics=list(DIAGNOSTICS) if only is None else only),
                 counts=dict(inventory_pdf=len(keyed), selected=len(keys)))
     _print(f'inventory_pdf {len(keyed)} selected {len(keys)}')
 
@@ -2285,7 +2335,7 @@ def run(root, out, *, timing_path=None, forms=None, limit=None):
                 else:
                     try:
                         with batch.guarded():
-                            row = process(path, key, trace)
+                            row = process(path, key, trace, only)
                     except batch.BatchError:
                         row = blank_row(key, 'GUARD_BLOCKED')
                     except Exception:
@@ -2330,6 +2380,7 @@ def parser():
     rerun.add_argument('--timing')
     rerun.add_argument('--forms', nargs='+')
     rerun.add_argument('--limit', type=int)
+    rerun.add_argument('--only')
     return result
 
 
@@ -2346,7 +2397,8 @@ def main(argv=None):
         if ((forms and (args.timing is None or not forms <= set(KINDS))) or
                 (args.limit is not None and args.limit < 1)):
             _fail('ARGUMENT_ERROR')
-        return run(args.root, args.out, timing_path=args.timing, forms=forms, limit=args.limit)
+        only = parse_only(args.only) if args.only is not None else None
+        return run(args.root, args.out, timing_path=args.timing, forms=forms, limit=args.limit, only=only)
     except KeyboardInterrupt:
         return 130
     except ToolError as error:

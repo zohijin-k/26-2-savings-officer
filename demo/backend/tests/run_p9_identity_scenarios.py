@@ -30,6 +30,7 @@ from sqlmodel import select
 from .. import models
 
 from . import run_p4_scenarios as p4
+from .security_support import authenticate_officer
 from .scenario_support import complete_synthetic_work
 from .run_p8_localocr_scenarios import (
     fake_abstract_words,
@@ -465,6 +466,7 @@ def main() -> int:
     p4._isolate(tmp)
     try:
         with TestClient(app) as client:
+            authenticate_officer(client)
             test_identity_api(client)
             test_matching(client, tmp)
             test_samples_and_no_identity(client, tmp)

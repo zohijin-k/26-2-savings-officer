@@ -11,6 +11,7 @@ from demo.backend.rules.doc_types import DocType
 from demo.backend.rules.programs import DOUBLE_SAVINGS, PROGRAMS
 from demo.backend.tests.test_income_review import isolated_db, make_application
 from demo.backend.tests.test_portal_uploads import client
+from demo.backend.tests.security_support import authenticate_officer
 
 
 ACTIONS = {"PASS": "자동 승인", "FAIL": "반려/보완요청 안내", "NEEDS_REVIEW": "담당자 재검토 필요"}
@@ -98,7 +99,8 @@ def assert_officer_views(client, application_id, final, stage2):
 @pytest.mark.parametrize("previous_failure", ["none", "stage1", "stage2"])
 @pytest.mark.parametrize("current_failure", [False, True])
 def test_overlap_preserves_both_reviews_and_reopens_officer_decision(
-        client, previous_failure, current_failure):
+        client, monkeypatch, previous_failure, current_failure):
+    authenticate_officer(client, monkeypatch)
     previous = make_application(premium=0)
     old_review = _run_review(previous)
     if previous_failure != "none":
@@ -151,7 +153,8 @@ def test_overlap_preserves_both_reviews_and_reopens_officer_decision(
 
 
 @pytest.mark.parametrize("problem,expected", [(None, "PASS"), ("missing-month", "NEEDS_REVIEW")])
-def test_new_review_list_detail_and_payload_agree(client, problem, expected):
+def test_new_review_list_detail_and_payload_agree(client, monkeypatch, problem, expected):
+    authenticate_officer(client, monkeypatch)
     app = make_application(premium=0, payment_problem=problem)
     review = _run_review(app)
     assert_status(review, expected, expected)

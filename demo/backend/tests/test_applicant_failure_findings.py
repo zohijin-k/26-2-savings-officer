@@ -14,6 +14,7 @@ from demo.backend.rules.doc_types import DocType
 from demo.backend.rules.required_docs import DocRequirement
 from demo.backend.tests.test_followup3_daily_selection import assess
 from demo.backend.tests.test_portal_uploads import client, new_app, upload
+from demo.backend.tests.security_support import authenticate_officer
 from demo.backend.tests.test_verify_upload import (
     assert_safe, authored_image_pdf, authored_recognition, no_db, snapshot,
 )
@@ -141,6 +142,7 @@ def test_upload_list_final_and_officer_keep_reference_but_hide_only_review(
         application.status = models.STATUS_SUBMITTED
         session.add(application)
         session.commit()
+    authenticate_officer(client, monkeypatch)
     detail = client.get(f"/api/officer/applications/{aid}")
     assert detail.status_code == 200
     assert detail.json()["documents"][0]["findings"] == [f.as_dict() for f in source]

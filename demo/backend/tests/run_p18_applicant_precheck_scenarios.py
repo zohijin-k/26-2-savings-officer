@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ..engine_adapter import apply_runtime_overrides, engine_config
+from .security_support import authenticate_officer
 from ..ocr.base import OcrResult
 from ..ocr.localocr import ENGINE_ENV, LocalOcr
 from ..rules.doc_check import check_document
@@ -191,6 +192,7 @@ def test_api(tmp):
 
     p4._isolate(tmp)
     with TestClient(app) as client:
+        authenticate_officer(client)
         app_id = new_app(client)
         check("합성 본인 인증", identify(client, app_id, IDENTITY.name, IDENTITY.birth.isoformat()).status_code, 200)
         for marker, status in (("1/1", "PASS"), ("1/2", "FAIL"), ("미판독", "NEEDS_REVIEW")):

@@ -41,6 +41,7 @@ from sqlmodel import create_engine
 
 from .. import models
 from ..forms import coords as form_coords
+from .security_support import authenticate_officer
 from ..rules.programs import DOUBLE_SAVINGS, JOB_PACKAGE
 from ..rules.roles import ROLE_PROVINCE
 
@@ -1357,6 +1358,7 @@ def main(clock_day: date | None = None) -> int:
     try:
         test_coordinate_maps()
         with TestClient(app) as client:
+            authenticate_officer(client)
             ds_id, jp_id = seed(client, tmp)
             test_export_headers(client, ds_id, jp_id)
             test_form_files_and_paper_flow(client, tmp)

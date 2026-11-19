@@ -12,6 +12,7 @@ from demo.backend.rules.programs import PROGRAMS, DOUBLE_SAVINGS, JOB_PACKAGE
 from demo.backend.rules.scoring import MEDIAN_INCOME_140
 from demo.backend.tests.test_income_review import make_application
 from demo.backend.tests.test_portal_uploads import client
+from demo.backend.tests.security_support import claim_synthetic_application
 
 
 def ready(app):
@@ -41,6 +42,7 @@ def blockers(app):
 
 def test_confirmed_regional_excess_includes_numeric_evidence_without_scores(client):
     app=ready(make_application(premium=MEDIAN_INCOME_140[1]["지역"]+1))
+    claim_synthetic_application(client,app.id)
     data=client.get(f"/api/applications/{app.id}/final-check").json()
     item=next(item for item in blockers(app) if item["target"]=="income")
     assert data["can_submit"]
@@ -60,6 +62,7 @@ def test_confirmed_regional_excess_includes_numeric_evidence_without_scores(clie
 
 def test_submit_rechecks_income_after_a_previously_clear_final_check(client):
     app=ready(make_application(premium=1))
+    claim_synthetic_application(client,app.id)
     assert client.get(f"/api/applications/{app.id}/final-check").json()["can_submit"] is True
     with models.get_session() as session:
         payment=session.exec(select(models.Document).where(models.Document.application_id==app.id,
@@ -101,6 +104,7 @@ def test_age_outside_range_has_same_early_reason_and_final_blocker(client):
 
 def test_work_not_met_blocks_final_and_direct_submit(client):
     app=ready(make_application(premium=1))
+    claim_synthetic_application(client,app.id)
     with models.get_session() as session:
         doc=session.exec(select(models.Document).where(models.Document.application_id==app.id,
                         models.Document.slot_key=="work_proof")).one()
@@ -131,6 +135,7 @@ def test_work_not_met_blocks_final_and_direct_submit(client):
 @pytest.mark.parametrize("problem",["untrusted","missing-month","no-household"])
 def test_undetermined_income_remains_submittable_for_officer_review(client,problem):
     app=ready(make_application(premium=1,payment_problem=problem))
+    claim_synthetic_application(client,app.id)
     assert blockers(app)==[]
     assert client.get(f"/api/applications/{app.id}/final-check").json()["can_submit"] is True
     assert client.post(f"/api/applications/{app.id}/submit").status_code==200
@@ -143,6 +148,7 @@ def test_no_work_or_income_requirement_has_no_savings_blockers(client):
 
 def test_unknown_work_remains_submittable_and_final_review_is_consistent(client):
     app=ready(make_application(premium=1))
+    claim_synthetic_application(client,app.id)
     with models.get_session() as session:
         doc=session.exec(select(models.Document).where(models.Document.application_id==app.id,
                         models.Document.slot_key=="work_proof")).one()
@@ -164,6 +170,7 @@ def test_unknown_work_remains_submittable_and_final_review_is_consistent(client)
 @pytest.mark.parametrize("kind",["age","work"])
 def test_submit_rechecks_other_eligibility_after_clear_final_check(client,kind):
     app=ready(make_application(premium=1))
+    claim_synthetic_application(client,app.id)
     assert client.get(f"/api/applications/{app.id}/final-check").json()["can_submit"] is True
     with models.get_session() as session:
         if kind=="age":

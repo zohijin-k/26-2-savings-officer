@@ -37,6 +37,7 @@ from sqlmodel import create_engine, select
 
 from .. import models
 from .scenario_support import complete_synthetic_work
+from .security_support import authenticate_officer
 from ..reset import ResetReport, reset as reset_demo
 from ..rules.programs import DOUBLE_SAVINGS, JOB_PACKAGE
 from ..rules.roles import ROLE_CITY, ROLE_PROVINCE
@@ -799,6 +800,7 @@ def main(argv: list[str] | None = None) -> int:
             if index > 1:
                 _reset(root)
             with TestClient(app) as client:
+                authenticate_officer(client)
                 check(f"{index}회차 시작 시 신청 건", count_rows()["application"], 0)
                 results = run_round(client)
                 rows = count_rows()

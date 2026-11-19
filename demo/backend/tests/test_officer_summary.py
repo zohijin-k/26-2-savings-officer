@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from demo.backend import officer_summary as summary
 from demo.backend.llm_client import JbaiProvider, NoneProvider, configured_provider
 from demo.backend.main import app
+from demo.backend.tests.security_support import authenticate_officer
 from demo.backend.tests.test_seed_officer_demo import isolated_demo  # noqa: F401 (fixture)
 from demo.backend.tools import seed_officer_demo as tool
 
@@ -338,6 +339,7 @@ def test_summary_api(isolated_demo, capsys, monkeypatch):
     for key in ENV:
         monkeypatch.delenv(key, raising=False)
     with TestClient(app) as client:
+        authenticate_officer(client, monkeypatch)
         response = client.get(f"/api/officer/applications/{aid}/summary", params={"role": "province"})
         assert response.status_code == 200
         body = response.json()

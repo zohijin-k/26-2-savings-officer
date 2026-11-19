@@ -10,6 +10,7 @@ from demo.backend.api.review import _run_review
 from demo.backend.tests.test_eligibility_blockers import ready
 from demo.backend.tests.test_income_review import make_application
 from demo.backend.tests.test_portal_uploads import client
+from demo.backend.tests.security_support import authenticate_officer, claim_synthetic_application
 
 
 @pytest.mark.parametrize("code", sorted(REUPLOAD_CODES))
@@ -57,6 +58,7 @@ def _mutate_document(app_id, *, code, severity="FAIL", status="FAIL"):
 @pytest.mark.parametrize("code", sorted(REUPLOAD_CODES))
 def test_direct_submit_rechecks_each_reupload_reason_after_clear_preparation(client, code):
     app = ready(make_application(premium=1))
+    claim_synthetic_application(client, app.id)
     assert client.get(f"/api/applications/{app.id}/final-check").json()["can_submit"]
     document_id, original = _mutate_document(app.id, code=code, status="PASS")
     prepared = client.get(f"/api/applications/{app.id}/final-check").json()
@@ -76,8 +78,9 @@ def test_direct_submit_rechecks_each_reupload_reason_after_clear_preparation(cli
     ("PAGES_DUPLICATED", "FAIL"), ("UNKNOWN_DOCUMENT_TYPE", "FAIL"),
     ("MISSING_ADDRESS_HISTORY", "FAIL"), ("MISSING_SIGNATURE", "FAIL"),
     *[(code, "NEEDS_REVIEW") for code in sorted(REUPLOAD_CODES)]])
-def test_hidden_outcomes_submit_and_preserve_stored_and_officer_decisions(client, code, severity):
+def test_hidden_outcomes_submit_and_preserve_stored_and_officer_decisions(client, monkeypatch, code, severity):
     app = ready(make_application(premium=999999999))
+    claim_synthetic_application(client, app.id)
     document_id, original = _mutate_document(app.id, code=code, severity=severity,
                                             status="FAIL" if severity == "FAIL" else "NEEDS_REVIEW")
     before = _run_review(app)
@@ -96,6 +99,7 @@ def test_hidden_outcomes_submit_and_preserve_stored_and_officer_decisions(client
         assert saved.stage2_status == before.stage2_status
         assert saved.score_json == before.score_json
         assert saved.review_payload_json["reasons"] == before.review_payload_json["reasons"]
+    authenticate_officer(client, monkeypatch)
     detail = client.get(f"/api/officer/applications/{app.id}").json()
     found = next(document for document in detail["documents"] if document["document_id"] == document_id)
     assert found["findings"] == original
@@ -109,6 +113,7 @@ def test_hidden_outcomes_submit_and_preserve_stored_and_officer_decisions(client
     "unknown-work-category", "partial-emergency", "invalid-emergency", "prior-details", "large-household"])
 def test_direct_submit_rechecks_all_input_guards_after_clear_preparation(client, missing):
     app = ready(make_application(premium=1))
+    claim_synthetic_application(client, app.id)
     assert client.get(f"/api/applications/{app.id}/final-check").json()["can_submit"]
     with models.get_session() as session:
         row = session.get(models.Application, app.id)
@@ -173,6 +178,7 @@ def test_direct_submit_rechecks_all_input_guards_after_clear_preparation(client,
 
 def test_negative_self_check_answers_remain_saved_without_applicant_verdict(client):
     app = ready(make_application(premium=1))
+    claim_synthetic_application(client, app.id)
     answers = dict.fromkeys(map(str, range(1, 9)), "아니오")
     response = client.post(f"/api/applications/{app.id}/self-check", json={"answers": answers})
     assert response.status_code == 200 and response.json() == {"completed": True, "total_items": 8}

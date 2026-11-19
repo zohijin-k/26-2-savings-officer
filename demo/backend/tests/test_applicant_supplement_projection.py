@@ -12,6 +12,7 @@ from demo.backend.rules.programs import DOUBLE_SAVINGS, JOB_PACKAGE, get_program
 from demo.backend.rules.required_docs import DocRequirement
 from demo.backend.tests.test_income_review import make_application
 from demo.backend.tests.test_portal_uploads import client
+from demo.backend.tests.security_support import claim_synthetic_application
 
 
 @pytest.mark.parametrize("program_code", [DOUBLE_SAVINGS, JOB_PACKAGE])
@@ -48,6 +49,7 @@ def test_supplement_projects_only_public_repair_targets(monkeypatch, program_cod
 
 def test_applicant_status_hides_empty_internal_deadline_but_keeps_stored_review(client, monkeypatch):
     app = make_application(premium=1)
+    claim_synthetic_application(client, app.id)
     deadline = datetime.now() + timedelta(days=7)
     with models.get_session() as session:
         row = session.get(models.Application, app.id)

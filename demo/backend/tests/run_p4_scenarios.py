@@ -26,6 +26,7 @@ from sqlmodel import create_engine, select
 
 from .. import models
 from .scenario_support import complete_synthetic_work
+from .security_support import authenticate_officer
 from ..rules.programs import DOUBLE_SAVINGS
 from ..rules.roles import ROLE_CITY, ROLE_PROVINCE, ROLE_TOWN
 
@@ -905,6 +906,7 @@ def main() -> int:
 
     try:
         with TestClient(app) as client:
+            authenticate_officer(client)
             ids = seed(client)
             test_list_and_filters(client, ids)
             test_quota(client)

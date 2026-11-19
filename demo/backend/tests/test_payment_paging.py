@@ -9,6 +9,7 @@ from demo.backend.ocr.localocr import _from_nhis
 from demo.backend.rules.doc_check import check_document
 from demo.backend.tests.test_payment_failure_certainty import requirement
 from demo.backend.tests.test_portal_uploads import client
+from demo.backend.tests.security_support import claim_synthetic_application
 from engine_v2.extractors import nhis_payment
 from engine_v2.pipeline.preprocess import PageSource
 from engine_v2.schemas.models import DocType as V2DocType
@@ -233,6 +234,7 @@ def test_api_list_and_final_check_keep_paging_severity(client, tmp_path, monkeyp
     from demo.backend.api import documents
     from PIL import Image
     application = ready(make_application(premium=0))
+    claim_synthetic_application(client, application.id)
     ocr, _ = assess(pages(marker))
     # Isolate the page decision from the fixture application's identity/date.
     ocr.fields.update({"성명": "가상신청", "생년월일": "1999-01-01", "발급일": "2026-04-07"})

@@ -153,6 +153,7 @@ class StageTimer:
         self.ocr_calls = 0
         self.text_pages = 0
         self.page_workers_used = 1   # largest concurrent page workers chosen for this document
+        self.page_intra_used = None  # threads of those page sessions (auto: 4 for two pages)
 
     def owned(self):
         return threading.get_ident() == self.owner
@@ -248,16 +249,16 @@ def _wrap_run_ocr_pages(timer, original):
 
 def _wrap_page_sessions(timer, original):
     """Extra page-worker sessions load like the first model: excluded as cold start."""
-    def page_sessions(slot):
+    def page_sessions(slot, intra_threads):
         before = original.cache_info().misses
         start = timer.clock()
         try:
-            return original(slot)
+            return original(slot, intra_threads)
         finally:
-            # Fixed mode: slot 0 is sessions(), already excluded by its own wrapper. Auto: every
-            # slot is its own page session.
+            # A shared slot 0 (fixed mode; auto two-page) is sessions(), already excluded by its
+            # own wrapper. Every other slot is its own page session.
             from engine_v2.pipeline.ocr import own
-            if (slot != 0 or own.AUTO_THREADS) and original.cache_info().misses > before:
+            if not own.shares_single_session(slot, intra_threads) and original.cache_info().misses > before:
                 timer.exclude(timer.clock() - start)
     page_sessions.cache_info = original.cache_info
     page_sessions.cache_clear = original.cache_clear
@@ -269,8 +270,10 @@ def _wrap_prepare_page_workers(timer, original):
     """Record the page workers chosen for the document (1: pages read one at a time)."""
     def prepare_page_workers(pages):
         workers = original(pages)
-        if timer.active and timer.owned():
-            timer.page_workers_used = max(timer.page_workers_used, workers)
+        if timer.active and timer.owned() and workers > 1 and workers >= timer.page_workers_used:
+            from engine_v2.pipeline.ocr import own
+            timer.page_workers_used = workers
+            timer.page_intra_used = own.page_intra_threads(pages)
         return workers
     prepare_page_workers.__wrapped__ = original
     return prepare_page_workers
@@ -282,7 +285,9 @@ def ocr_used(timer):
     if not timer.ocr_calls:
         return None
     workers = timer.page_workers_used
-    return (own.INTRA_OP_THREADS, workers) if workers > 1 else (own.single_intra_threads(), 1)
+    if workers > 1:
+        return (timer.page_intra_used or own.INTRA_OP_THREADS, workers)
+    return (own.single_intra_threads(), 1)
 
 
 def _wrap_load_pages(timer, original):

@@ -215,8 +215,10 @@ def run_ocr_pages(engine: str, images, run=None):
     slots = SimpleQueue()
     for slot in range(workers):
         slots.put(slot)
+    # 2쪽(자동)은 intra 4 세션 2개, 그 밖은 INTRA_OP_THREADS 세션(prepare_page_workers와 같은 값).
+    intra = own.page_intra_threads(len(images))
     pool = ThreadPoolExecutor(workers, thread_name_prefix="own-page",
-                              initializer=lambda: own.bind_page_worker(slots.get()))
+                              initializer=lambda: own.bind_page_worker(slots.get(), intra))
     try:
         futures = [pool.submit(run, engine, png, size) for png, size in images]
         for future in futures:

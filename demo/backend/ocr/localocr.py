@@ -112,7 +112,7 @@ def preload_own() -> str:
     """서버 시작 때 own 모델(쪽 작업 세션 포함)을 미리 불러 첫 요청 지연을 없앤다.
 
     자동 스레드(OWN_OCR_* 미설정)일 때는 한 쪽씩 읽는 세션(intra 4)과 쪽 동시 읽기 세션
-    (intra 2, 작업 수만큼)을 함께 불러온다.
+    (3쪽 이상: intra 2, 작업 수만큼; 2쪽: intra 4 두 개, 코어가 허락할 때)을 함께 불러온다.
 
     결과 코드만 돌려준다: LOADED / SKIPPED(own이 아님) / FAILED.
     실패해도 아무것도 바꾸지 않는다. 그때는 지금처럼 첫 OCR 호출이 불러오고
@@ -128,6 +128,7 @@ def preload_own() -> str:
 
         own.sessions()
         own.prepare_page_workers(own.MAX_PAGE_WORKERS)
+        own.prepare_page_workers(2)  # 2쪽 문서용 세션(자동·코어 8개 이상: intra 4 두 개, 그 밖은 이미 불러온 것)
         # 빈 그림 한 장으로 판독 경로의 지연 import(cv2·pyclipper)와 첫 실행 준비를 끝낸다.
         blank = io.BytesIO()
         Image.new("RGB", (32, 32), "white").save(blank, format="PNG")

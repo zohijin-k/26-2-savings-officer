@@ -34,4 +34,4 @@ def test_success_loads_every_page_worker_and_warms_the_reader(monkeypatch):
     monkeypatch.setattr(own, "prepare_page_workers", lambda n: calls.append(("workers", n)) or n)
     monkeypatch.setattr(own, "recognize", lambda png, size: calls.append(("recognize", size)) or [])
     assert localocr.preload_own() == "LOADED"
-    assert calls == ["sessions", ("workers", own.MAX_PAGE_WORKERS), ("recognize", (32, 32))]
+    assert calls == ["sessions", ("workers", own.MAX_PAGE_WORKERS), ("workers", 2), ("recognize", (32, 32))]

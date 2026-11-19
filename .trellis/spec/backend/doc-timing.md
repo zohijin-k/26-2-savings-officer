@@ -63,13 +63,24 @@ verdict, on the own engine. Never change operating code to make it measurable.
   min(4, cpu_count) threads; 2+ pages read concurrently use `page_sessions(slot)` with
   `INTRA_OP_THREADS` (2) each, every slot its own session (slot 0 is not the single session), so
   page_workers x 2 <= cpu_count. `prepare_page_workers` loads no page session when it returns 1.
+  Two-page documents (T4b, 11-19, auto only): `page_intra_threads(2)` = `TWO_PAGE_INTRA_THREADS`
+  (4) when 2 x 4 <= cpu_count (and `MAX_PAGE_WORKERS` >= 2), so both pages are read at once on two
+  intra-4 page sessions; with fewer cores they keep the intra-2 rule. Page sessions are cached per
+  `(slot, intra_threads)` (`page_sessions(slot, intra_threads)`, both always passed), so the
+  two-page sessions never share with 3+-page ones; one page and 3+ pages are unchanged. Slot 0
+  reuses the single `sessions()` when `shares_single_session(slot, intra)` (fixed mode as before;
+  auto only when the page threads equal `single_intra_threads()`, i.e. two pages), so auto preload
+  holds 6 sessions on 8+ cores (single intra 4, four intra 2, one more intra 4); doc_timing does
+  not exclude a shared slot 0 twice.
   Setting either variable turns auto off: every session uses `INTRA_OP_THREADS` and page slot 0
-  shares `sessions()`, exactly as before. Server preload loads the single and every page session.
+  shares `sessions()`, exactly as before. Server preload loads the single and every page session, including the two-page ones
+  (`prepare_page_workers(MAX_PAGE_WORKERS)` then `prepare_page_workers(2)`).
   Row format 3 and the `OCR_THREADS` line are unchanged (they carry the page-session values);
   run.json `options.ocr_thread_mode` and the summary `OCR_THREADS_MODE` line give the mode
   (`auto`/`fixed`), single and page threads and the worker cap; `OCR_THREADS_USED intra workers n`
   (run.json `ocr_threads_used`) counts measured documents by the threads and page workers they
-  were actually read with (documents without own OCR are not counted). doc_timing excludes every
+  were actually read with (documents without own OCR are not counted; a two-page document in
+  auto counts as `4 2`). doc_timing excludes every
   page-session load as cold start in auto mode (slot 0 included).
   Every reader of doc_timing rows (`load_strata`, `classify_recovery_diag`
   crosstab/compare/run --timing, label_review on its branch) goes through `validate_row`, which

@@ -97,10 +97,14 @@ def test_short_month_boxes_can_select_legacy_but_no_billing_finding_is_not_pass(
     extraction = nhis_payment.extract(pages)
     assert extraction.form_kind is None
     # 11-18 L2: the title period (2025-10~2025-12) bounds the billing months of the 1~12 calendar.
-    assert sorted(json.loads(extraction.fields["월별고지금액"].value)) == ["2025-10", "2025-11", "2025-12"]
+    assert json.loads(extraction.fields["월별고지금액"].value) == {
+        "2025-10": "100000", "2025-11": "20000", "2025-12": "30000"}
+    # 11-19 T3: the 합계 row is read from the 건강 column (150,000), so it agrees with the months.
+    (_, _, _, totals, *_), _ = nhis_payment._extract_monthly_detail(pages)
+    assert totals == [150_000]
     result = _from_nhis(extraction, pages, V2DocType)
     assert _check_billing_months(result, requirement()) == []
-    assert check_document(requirement(), result).status == "NEEDS_REVIEW"
+    assert check_document(requirement(), result).status == "PASS"
 
 
 # 11-18 O3: "clipped" passes with the 0.1 %p header-band slack (was strict xfail).

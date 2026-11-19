@@ -33,7 +33,7 @@ from unittest.mock import patch
 from . import batch_assess as batch
 from . import doc_timing as timing
 
-VERSION = 9
+VERSION = 10
 #: Format 1 (commit 2) had no consent/payment/p1/c1 keys. Format 2 had no ``recovery`` key.
 KINDS = batch.KINDS
 TIERS = timing.TIERS
@@ -604,6 +604,8 @@ PAYMENT_STAGES = ('HEADER', 'COLUMN', 'ROW', 'FORMAT', 'ARITH', 'TABLE_OK', 'NOT
 PAYMENT_DETAILS = ('HEADER_GROUPS', 'HEADER_BAND_CUT', 'HEADER_LABEL', 'MONTH_HEADER_MISSING',
                    'CHARGE_HEADER_MISSING', 'NONE')
 PAGING_STATES = ('COMPLETE', 'INCOMPLETE', 'NOT_REQUIRED', 'UNCERTAIN', 'ABSENT', 'INVALID')
+#: 11-19 (T3): production 구성머리글불완전사유 of a legacy reading (NONE: complete or not checked).
+PAYMENT_COMPONENT = ('FRAGMENT', 'GAP', 'BOTH', 'NONE')
 COMPLETENESS_KEYS = ('period_status', 'printed_total_observed', 'arithmetic_complete', 'issue_information_read')
 #: D1: sub-causes of a legacy-table ARITH failure (codes only; amounts stay in memory).
 ARITH_KEYS = ('arith_check', 'arith_diff', 'arith_settle', 'arith_totals', 'arith_outside', 'arith_zero',
@@ -670,9 +672,12 @@ D11_RATIO = 3.0
 D11_RATIO_BINS = ('R_LT033', 'R033_1', 'R1_3', 'R3P', 'NA')
 D11_KEYS = ('embedded', 'shared', 'hidden', 'ratio', 'bins')
 #: T3 (11-19): the legacy 합계 row read from the 건강보험료 column the months are read from, not the
-#: 고지금액 group centre (held patch HELD-T3). State of the 합계 check before and after.
+#: 고지금액 group centre (HELD-T3, applied 11-19). State of the 합계 check before and after.
 T3_TOTALS = ('MATCH', 'MISMATCH', 'NO_TOTAL', 'NA')
-#: Exact source substitution of the held patch inside ``nhis_payment._extract_monthly_detail``.
+#: Whether production already reads the 합계 row from the 건강 column (O: after = before, no shadow).
+T3_APPLIED = ('O', 'X', 'NA')
+#: Exact source substitution of the T3 change inside ``nhis_payment._extract_monthly_detail``.
+#: Old text everywhere: the shadow applies it; new text everywhere: already applied; else T3_SOURCE_CHANGED.
 T3_SOURCE = (
     ('''        lines = common.page_lines(page, result)
         header_indices = _month_header(lines)
@@ -742,15 +747,31 @@ def c1_patch():
         yield
 
 
-def t3_function():
-    """``_extract_monthly_detail`` with the held T3 change, built from the current source in memory."""
+def _t3_source():
+    """Current source of the production ``nhis_payment._extract_monthly_detail``."""
     import inspect
     import textwrap
     from engine_v2.extractors import nhis_payment as legacy
-    source = textwrap.dedent(inspect.getsource(legacy._extract_monthly_detail))
-    for old, new, count in T3_SOURCE:
-        if source.count(old) != count:
-            raise RuntimeError('T3_SOURCE_CHANGED')
+    return textwrap.dedent(inspect.getsource(legacy._extract_monthly_detail))
+
+
+def t3_applied(source=None):
+    """True when the source already holds T3, False when it holds the pre-T3 text; else T3_SOURCE_CHANGED."""
+    source = _t3_source() if source is None else source
+    if all(source.count(new) == count for _, new, count in T3_SOURCE):
+        return True
+    if all(source.count(old) == count and new not in source for old, new, count in T3_SOURCE):
+        return False
+    raise RuntimeError('T3_SOURCE_CHANGED')
+
+
+def t3_function():
+    """``_extract_monthly_detail`` with the T3 change: production itself once applied, else built in memory."""
+    from engine_v2.extractors import nhis_payment as legacy
+    source = _t3_source()
+    if t3_applied(source):
+        return legacy._extract_monthly_detail
+    for old, new, _ in T3_SOURCE:
         source = source.replace(old, new)
     namespace = dict(vars(legacy))
     exec(compile(source, legacy.__file__, 'exec'), namespace)
@@ -1451,8 +1472,10 @@ def consent_shadow(trace, path, row, ocr):
 def payment_shadow(trace, path, row, ocr):
     pages, result = trace.payment if trace.payment is not None else (None, None)
     route, stage, detail = payment_table_stage(pages, result)
+    component = ocr.fields.get('구성머리글불완전사유')
     row['payment'] = dict(route=route, stage=stage, detail=detail, **payment_evidence(ocr),
-                          **payment_reason_flags(row['reasons']), **arith_causes(pages, route, stage))
+                          **payment_reason_flags(row['reasons']), **arith_causes(pages, route, stage),
+                          component=component if component in PAYMENT_COMPONENT[:3] else 'NONE')
     if route != 'GOV':
         # P1 only wraps the government-form GROUPS header call; other routes cannot diverge.
         row['p1'] = {key: dict(paging_uncertain=row['payment']['paging_uncertain'],
@@ -1680,15 +1703,21 @@ def total_row_shadow(trace, path, row):
     pages = trace.payment[0] if trace.payment is not None else None
     if pages is None or gov.recognizes(pages):
         layout = 'NA' if pages is None else 'GOV'
-        row['t3'] = dict(layout=layout, before='NA', after='NA', decision=row['decision'])
+        row['t3'] = dict(layout=layout, before='NA', after='NA', decision=row['decision'], applied='NA')
         return
     layout = legacy.amount_layout(pages)
     before = t3_total_state(pages)
+    if t3_applied():
+        # Production already reads the 합계 row from the 건강 column: nothing to shadow.
+        row['t3'] = dict(layout=layout if layout in G4_LAYOUTS else 'NA', before=before, after=before,
+                         decision=row['decision'], applied='O')
+        return
     with t3_patch():
         after = t3_total_state(pages)
     shadow = _shadow_read(trace, path, lambda stack: stack.enter_context(t3_patch()))
     decision, _ = _assess(path, _kind(shadow.detected_doc_type), shadow)
-    row['t3'] = dict(layout=layout if layout in G4_LAYOUTS else 'NA', before=before, after=after, decision=decision)
+    row['t3'] = dict(layout=layout if layout in G4_LAYOUTS else 'NA', before=before, after=after, decision=decision,
+                     applied='X')
 
 
 def blank_row(key, code='NONE'):
@@ -1834,9 +1863,11 @@ def validate_row(row):
                                and isinstance(row['d11']['bins'], dict) and set(row['d11']['bins']) == set(D11_RATIO_BINS)
                                and all(type(v) is int and v >= 0 for v in row['d11']['bins'].values())
                                and sum(row['d11']['bins'].values()) == row['d11']['embedded']))
-    req(row['t3'] is None or (isinstance(row['t3'], dict) and set(row['t3']) == {'layout', 'before', 'after', 'decision'}
+    req(row['t3'] is None or (isinstance(row['t3'], dict)
+                              and set(row['t3']) == {'layout', 'before', 'after', 'decision', 'applied'}
                               and row['t3']['layout'] in G4_LAYOUTS + ('GOV',) and row['t3']['before'] in T3_TOTALS
-                              and row['t3']['after'] in T3_TOTALS and row['t3']['decision'] in DECISIONS))
+                              and row['t3']['after'] in T3_TOTALS and row['t3']['decision'] in DECISIONS
+                              and row['t3']['applied'] in T3_APPLIED))
     req(row['history'] is None or (isinstance(row['history'], dict) and set(row['history']) == {'numbers', 'empty_page'}
                                    and row['history']['numbers'] in HISTORY_NUMBERS
                                    and row['history']['empty_page'] in ('O', 'X', 'NA')))
@@ -1891,6 +1922,7 @@ def validate_row(row):
                        amounts_certain=('O', 'X', 'NA'), paging_uncertain=('O', 'X'),
                        missing_billing=('FAIL', 'NEEDS_REVIEW', 'X'), pages_incomplete=('O', 'X'),
                        arith_check=ARITH_CHECKS, arith_diff=ARITH_DIFFS, arith_totals=ARITH_TOTALS,
+                       component=PAYMENT_COMPONENT,
                        **{key: ('O', 'X', 'NA') for key in ('arith_settle', 'arith_outside', 'arith_zero',
                                                              'arith_combined')},
                        **{key: ('O', 'X', 'NA') for key in COMPLETENESS_KEYS})
@@ -2044,6 +2076,8 @@ def _stage_summary(done):
     _counted(lines, 'PAYMENT_PERIOD state amounts_certain missing_billing n',
              ((r['payment']['period'], r['payment']['amounts_certain'], r['payment']['missing_billing'])
               for r in payment))
+    _counted(lines, 'PAYMENT_COMPONENT reason decision n',
+             ((r['payment']['component'], r['decision']) for r in payment))
     lines.append('P1 margin PAGING_GONE PAGING_NEW BILLING_GONE BILLING_NEW DECISION_CHANGED')
     for key in P1_KEYS:
         after = [(r, r['p1'][key]) for r in payment if r['p1'] is not None]
@@ -2143,11 +2177,13 @@ def _stage_summary(done):
     _counted(lines, 'D8_DECISION numbers empty_page decision n',
              ((r['history']['numbers'], r['history']['empty_page'], r['decision']) for r in history))
     t3 = [r for r in done if r['t3'] is not None and r['t3']['before'] != 'NA']
-    lines.append('T3 legacy_docs match_before match_after newly_match lost_match pass_before pass_after')
+    applied = sorted({r['t3']['applied'] for r in t3})
+    lines.append('T3 legacy_docs match_before match_after newly_match lost_match pass_before pass_after applied')
     lines.append(_line('T3', len(t3), *(sum(r['t3'][k] == 'MATCH' for r in t3) for k in ('before', 'after')),
                        sum(r['t3']['before'] != 'MATCH' and r['t3']['after'] == 'MATCH' for r in t3),
                        sum(r['t3']['before'] == 'MATCH' and r['t3']['after'] != 'MATCH' for r in t3),
-                       sum(r['decision'] == 'PASS' for r in t3), sum(r['t3']['decision'] == 'PASS' for r in t3)))
+                       sum(r['decision'] == 'PASS' for r in t3), sum(r['t3']['decision'] == 'PASS' for r in t3),
+                       applied[0] if len(applied) == 1 else 'MIXED' if applied else 'NA'))
     _counted(lines, 'T3_DECISION before after n', ((r['decision'], r['t3']['decision']) for r in t3))
     _counted(lines, 'T3_TOTAL before after decision_before decision_after n',
              ((r['t3']['before'], r['t3']['after'], r['decision'], r['t3']['decision']) for r in t3))

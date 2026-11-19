@@ -535,6 +535,8 @@ def _from_nhis(ex, pages, v2types, classification_evidence: str = "",
 
         if has_failed_payment_validation(fields):
             confidence = min(confidence, .4)
+        if fields.get("구성머리글상태") == "불완전":
+            confidence = min(confidence, .4)  # 11-19 (T3): partly read 보수외소득월액 sub-header
     if (detected == DocType.NHIS_ACQUISITION_LOSS and
             any(v.name == "document_confirmation_number_consistent" and not v.passed
                 for v in validations)):

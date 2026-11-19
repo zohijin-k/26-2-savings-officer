@@ -41,8 +41,20 @@ Use this contract when changing OCR/text ingestion, resident-number redaction, N
   falls on the 장기요양 column of a four-column group. The 건강보험료 sub-column comes from a 건강보험료/
   건강보험 hit, an exact '건강' word ('(건강)' is 보수외소득월액), or the character span of a fused
   '건강보험료장기요양보험료' box; otherwise the month gets no value (review). The explicit combined
-  label keeps the old path. The 합계 row still uses the group centre (changing it would turn current
-  reviews into passes).
+  label keeps the old path. The 합계 row is read from the same 건강보험료 column as the months (T3,
+  11-19): with no located 건강 sub-column in a group, no 합계 is read (the months are absent anyway).
+- Legacy component sub-headers (11-19, T3): a damaged sub-header no longer fails 합계 arithmetic, so
+  `nhis_payment.component_headers_incomplete` checks the words below a 고지금액/납부금액 group header
+  (legacy reader, `charge_grouped`, not the explicit combined label). They are clustered into columns
+  by centre; a column showing a fragment ('보수외', '보수', '소득월액', '소득', '월액', '(건강)', '(요양)')
+  must read top to bottom as one of `COMPONENT_LABELS` (보수외소득월액(건강)/(요양), 보수외(건강)/(요양),
+  their parenthesis-free forms), with no gap above .5 line height between its lines (a lost middle
+  line, e.g. '보수외' / blank / '(건강)'). Otherwise `구성머리글상태=불완전` and
+  `구성머리글불완전사유` (`component_header_issue`: FRAGMENT not a known label, GAP lost line, BOTH):
+  `localocr` caps the confidence at .4 and `check_document` adds PAYMENT_COMPONENT_HEADER_INCOMPLETE
+  (NEEDS_REVIEW, reason in its detail, in `verify_upload.SAFE_CODES`). The government-form reader
+  never sets the fields. GAP is needed: a lost '소득월액' leaves '보수외' + '(건강)', which reads as the
+  known short label 보수외(건강) (damaged_component_headers[2,3,4] PASS without it).
 - 고지금액 guard (11-19, both readers, values never replaced): for 2025-10~12, a 0원 pick, a pick 12-14%
   of another amount in its row, a pick under a 장기요양 or unreadable/low-confidence (<.85) header, or a
   larger amount under a 건강 header in its row set `월별고지금액상태=불확실` and

@@ -173,3 +173,11 @@ candidate rules would change, without changing production behaviour.
   are MATCH, MISMATCH or NO_TOTAL of `monthly_total_matches` on the production pages; `decision` is
   the verdict of a second read with the change installed (OCR reused). Summary lines `T3`
   (match counts, newly matching, lost, PASS before/after), `T3_DECISION`, `T3_TOTAL`, `T3_LAYOUT`.
+- Row format 10 (11-19): T3 is applied in production. `t3_applied()` reads the production source:
+  every `T3_SOURCE` new text present → applied (`t3.applied` O: `after` = `before`, `decision` = the
+  production verdict, no second read, no shadow error); every old text present and no new text →
+  the in-memory shadow as before (`applied` X); anything else → `T3_SOURCE_CHANGED`. GOV/no-page
+  rows: `applied` NA. The `T3` summary line ends with `applied` (O, X, NA, or MIXED). Tests keep
+  the shadow path on a synthetic pre-T3 source (the substitution reversed). `payment.component` is
+  the production `구성머리글불완전사유` (FRAGMENT, GAP, BOTH; NONE when absent or not one of these);
+  summary `PAYMENT_COMPONENT reason decision n`.

@@ -180,7 +180,8 @@ def test_same_fields_as_localocr(tmp: Path) -> None:
          lambda: (install_fake_ocr([scaled_words(acquisition_pages)]), 1)),
     ]
     #: 같은 추출기가 데이터에 따라서만 내는 진단·보조 필드 (합성 납부확인서에만 장기요양 열이 있다).
-    optional = {"판독검증실패", "판독경고", "과거주소미포함의심", "장기요양보험료", "월별장기요양보험료"}
+    optional = {"판독검증실패", "판독경고", "과거주소미포함의심", "장기요양보험료", "월별장기요양보험료",
+                "구성머리글상태", "구성머리글불완전사유"}
     for label, kind, doc_type, slot_key, prepare_local in cases:
         disable()
         _, local_pages = prepare_local()

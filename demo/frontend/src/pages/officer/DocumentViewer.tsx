@@ -105,7 +105,16 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
   useEffect(() => {
     if (!isPdf) return
     let cancelled = false
-    const task = pdfjs.getDocument({ url: doc.file_url })
+    // 실제 발급 서류는 JBIG2 스캔 이미지가 많아 wasm 디코더가 없으면 흰 페이지가
+    // 된다. 경로는 vite.config.ts의 pdfjsAssets 플러그인이 제공한다.
+    const base = import.meta.env.BASE_URL
+    const task = pdfjs.getDocument({
+      url: doc.file_url,
+      wasmUrl: `${base}pdfjs/wasm/`,
+      cMapUrl: `${base}pdfjs/cmaps/`,
+      cMapPacked: true,
+      standardFontDataUrl: `${base}pdfjs/standard_fonts/`,
+    })
     task.promise
       .then((pdf) => {
         if (cancelled) {
@@ -135,9 +144,23 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
     const base = page.getViewport({ scale: 1, rotation: 0 })
     setPageSize({ width: base.width, height: base.height })
     const viewport = page.getViewport({ scale, rotation })
-    canvas.width = Math.floor(viewport.width)
-    canvas.height = Math.floor(viewport.height)
-    await page.render({ canvas, viewport }).promise
+    // 캔버스 픽셀을 CSS 크기와 같게 잡으면 72dpi로 그려진다. 고배율 모니터에선
+    // 브라우저가 그걸 늘려 흐려지고, 300dpi 스캔 원본의 잔글씨도 뭉개진다.
+    // 그래서 기기 배율과 최소 2배 중 큰 값으로 그리고 CSS 크기만 화면에 맞춘다.
+    // 브라우저 캔버스 한도를 넘지 않도록 총 픽셀 수는 제한한다.
+    const MAX_PIXELS = 16_000_000
+    let outputScale = Math.max(window.devicePixelRatio || 1, 2)
+    const pixels = viewport.width * viewport.height * outputScale * outputScale
+    if (pixels > MAX_PIXELS) outputScale *= Math.sqrt(MAX_PIXELS / pixels)
+    canvas.width = Math.floor(viewport.width * outputScale)
+    canvas.height = Math.floor(viewport.height * outputScale)
+    canvas.style.width = `${Math.floor(viewport.width)}px`
+    canvas.style.height = `${Math.floor(viewport.height)}px`
+    await page.render({
+      canvas,
+      viewport,
+      transform: outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0],
+    }).promise
   }, [pageNo, scale, rotation])
 
   useEffect(() => {

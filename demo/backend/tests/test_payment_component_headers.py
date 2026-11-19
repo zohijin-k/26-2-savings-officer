@@ -1,7 +1,8 @@
 """11-19 T3 narrowing: a partly read 보수외소득월액 sub-header is never a PASS (synthetic only).
 
-1, 2 and 4 lost fragments go to review with PAYMENT_COMPONENT_HEADER_INCOMPLETE; a complete grouped
-legacy form passes; 0원 and 장기요양-ratio picks still go to review for their own reason.
+2 and 4 lost middle lines (GAP) go to review with PAYMENT_COMPONENT_HEADER_INCOMPLETE; one lost
+fragment alone (FRAGMENT) only records 구성머리글불완전사유 and does not change the decision; a complete
+grouped legacy form passes; 0원 and 장기요양-ratio picks still go to review for their own reason.
 """
 import pytest
 
@@ -10,7 +11,7 @@ from demo.backend.tests.test_portal_uploads import client, new_app, upload  # no
 from demo.backend.tools.verify_upload import SAFE_CODES
 from engine_v2.tests import p2_payment_samples as sample, test_payment_amount_column as synth
 
-from .test_payment_amount_column import CODE as AMOUNT_CODE, _income, _monthly, _upload
+from .test_payment_amount_column import CODE as AMOUNT_CODE, _monthly, _upload
 from .test_payment_total_row import _marked
 
 CODE = "PAYMENT_COMPONENT_HEADER_INCOMPLETE"
@@ -25,17 +26,16 @@ def test_code_is_in_the_safe_vocabulary():
 
 
 @pytest.mark.parametrize("layout, text", [("stacked4", "(건강)"), ("missing_under", "보수외")])
-def test_one_lost_fragment_goes_to_review(tmp_path, layout, text):
+def test_one_lost_fragment_alone_is_recorded_only(tmp_path, layout, text):
     pages = _marked(synth.table(layout))
     (_, result), = pages
     result.words.remove(next(w for w in result.words if w.text == text))
     ocr, checked = _upload(tmp_path, pages)
     assert _monthly(ocr) == synth._health()
-    assert checked.status == "NEEDS_REVIEW" and CODE in _codes(checked)
-    assert ocr.confidence <= .4 and _income(ocr, checked)[1].status == "UNDETERMINED"
+    # 11-19: FRAGMENT alone changes neither the decision nor the confidence (real government forms).
+    assert checked.status == "PASS" and CODE not in _codes(checked), _codes(checked)
+    assert ocr.confidence > .4 and "구성머리글상태" not in ocr.fields
     assert ocr.fields["구성머리글불완전사유"] == "FRAGMENT"
-    finding = next(finding for finding in checked.findings if finding.code == CODE)
-    assert finding.detail.startswith("세부 사유: FRAGMENT ")
 
 
 @pytest.mark.parametrize("lost", [2, 4])

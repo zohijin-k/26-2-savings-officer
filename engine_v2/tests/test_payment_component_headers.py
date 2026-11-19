@@ -1,9 +1,11 @@
 """11-19 T3 narrowing: a partly read 보수외소득월액 sub-header under a legacy group header (synthetic only).
 
 With the 합계 row read from the 건강 column, a damaged sub-header no longer fails arithmetic. The
-legacy reader marks 구성머리글상태=불완전 when a column shows a fragment ('보수외', '소득월액',
-'(건강)', '(요양)') that does not read as one known label without a lost line. The government-form
-reader and complete grouped forms are unchanged.
+legacy reader records 구성머리글불완전사유 when a column shows a fragment ('보수외', '소득월액',
+'(건강)', '(요양)') that does not read as one known label (FRAGMENT) or has a lost line (GAP, BOTH).
+Only GAP and BOTH mark 구성머리글상태=불완전; FRAGMENT alone is recorded only (real government forms
+routed to the legacy reader misread one 보수외 box). The government-form reader and complete grouped
+forms are unchanged.
 """
 import pytest
 
@@ -52,17 +54,38 @@ def test_complete_grouped_legacy_forms_are_unchanged(layout):
 
 @pytest.mark.parametrize("layout, text", [("stacked4", "보수외"), ("stacked4", "(건강)"), ("stacked4", "(요양)"),
                                           ("missing_under", "(건강)")])
-def test_one_lost_fragment_is_incomplete(layout, text):
+def test_one_lost_fragment_is_recorded_only(layout, text):
     pages = _without(synth.table(layout), text)
     assert not nhis_payment_gov.recognizes(pages)
-    assert nhis_payment.component_headers_incomplete(pages) and _state(pages) == "불완전"
+    # 11-19: FRAGMENT alone no longer marks 구성머리글상태; the reason field still records it.
+    assert not nhis_payment.component_headers_incomplete(pages) and _state(pages) is None
     assert _reason(pages) == "FRAGMENT"
 
 
-def test_one_truncated_fragment_is_incomplete():
+def test_one_truncated_fragment_is_recorded_only():
     pages = synth.table("short4")
     next(w for w in pages[0][1].words if w.text == "보수외(건강)").text = "보수외(건"
-    assert _state(pages) == "불완전" and _reason(pages) == "FRAGMENT"
+    assert _state(pages) is None and _reason(pages) == "FRAGMENT"
+
+
+@pytest.mark.parametrize("misread", ["보수의", "보수"])
+def test_government_form_with_misread_outside_boxes_records_fragment_only(misread):
+    # Real government forms: own OCR reads a whole '보수외' box only once or twice per page, so the
+    # form misses the eight-column signature and goes to the legacy reader. The 보수외소득월액(요양)
+    # columns read '보수의 / 소득월액 / (요양)': a FRAGMENT, while the 합계 row still agrees.
+    cells, size = sample.payment()
+    seen = 0
+    for index, cell in enumerate(cells):
+        if cell[4] == "보수외":
+            if seen % 2:
+                cells[index] = cell[:4] + (misread,) + cell[5:]
+            seen += 1
+    pages = [page(cells, size=size)]
+    assert not nhis_payment_gov.recognizes(pages)
+    result = nhis_payment.extract(pages)
+    assert _reason(pages) == "FRAGMENT" and _state(pages) is None
+    assert not nhis_payment.component_headers_incomplete(pages)
+    assert {v.name: v.passed for v in result.validations}["monthly_total_matches"]
 
 
 @pytest.mark.parametrize("lost", [2, 3, 4])

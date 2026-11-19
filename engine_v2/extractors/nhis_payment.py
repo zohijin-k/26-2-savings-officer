@@ -318,8 +318,12 @@ COMPONENT_LABELS = frozenset(squash(label) for label in OUTSIDE_HEALTH + (
 #: A gap above this share of the line height between two lines of one column is a lost line.
 COMPONENT_LINE_GAP = .5
 GROUP_HEADERS = ("고지금액", "고지보험료", "납부금액", "납부보험료", "실납부")
-#: Why 구성머리글상태 is 불완전: a fragment column not reading as a known label, a lost line, or both.
+#: 구성머리글불완전사유: a fragment column not reading as a known label, a lost line, or both.
 COMPONENT_REASONS = ("FRAGMENT", "GAP", "BOTH")
+#: Reasons that set 구성머리글상태=불완전 (review). FRAGMENT alone is recorded only (11-19): real
+#: government forms routed to the legacy reader misread one 보수외 box ('보수의', '보수') while the
+#: 보수외소득월액 column is not used for the amounts.
+COMPONENT_REVIEW_REASONS = ("GAP", "BOTH")
 
 
 def component_header_issue(pages) -> str | None:
@@ -363,8 +367,8 @@ def component_header_issue(pages) -> str | None:
 
 
 def component_headers_incomplete(pages) -> bool:
-    """True when ``component_header_issue`` finds a partly read 보수외소득월액 sub-header."""
-    return component_header_issue(pages) is not None
+    """True when ``component_header_issue`` finds a lost header line (GAP or BOTH), not FRAGMENT alone."""
+    return component_header_issue(pages) in COMPONENT_REVIEW_REASONS
 
 
 def _extract_monthly(pages):
@@ -701,13 +705,15 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
     put_amount_guard(fields, getattr(parsed, "amount_guard", {}), page_map, sources)
     component_issue = (component_header_issue(pages)
                        if EXPLICIT_COMBINED not in title and charge_grouped(pages) else None)
-    if component_issue is not None:
+    if component_issue in COMPONENT_REVIEW_REASONS:
         # 11-19 (T3): with the 합계 row read from the 건강 column a damaged sub-header no longer fails
-        # arithmetic; the partly read 보수외소득월액 header itself sends the document to review.
+        # arithmetic; a lost 보수외소득월액 header line itself sends the document to review.
         fields["구성머리글상태"] = common.make_field("불완전", "불완전", None, page_map, .9, sources)
+        warnings.append("고지·납부금액 아래 보수외소득월액 머리글 일부를 읽지 못해 담당자 확인이 필요합니다.")
+    if component_issue is not None:
+        # FRAGMENT alone is recorded for diagnostics; it changes neither the decision nor confidence.
         fields["구성머리글불완전사유"] = common.make_field(component_issue, component_issue, None, page_map, .9,
                                                     sources)
-        warnings.append("고지·납부금액 아래 보수외소득월액 머리글 일부를 읽지 못해 담당자 확인이 필요합니다.")
     # 한 줄짜리 합성·구형 전자문서에서 고지금액 라벨과 금액이 하나만 있는 경우만
     # 분명한 값으로 남긴다. 두 단 표가 있으면 이 우회 경로를 사용하지 않는다.
     flat_text = " ".join(result.text for _, result in pages)

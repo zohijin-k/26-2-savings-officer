@@ -1022,14 +1022,15 @@ def _check_document(
     if (ocr.detected_doc_type is DocType.NHIS_PAYMENT and req.accepts(ocr.detected_doc_type)
             and ocr.fields.get("구성머리글상태") == "불완전"):
         # 11-19 (T3): the 합계 row now agrees with the 건강 column even when a sub-header is damaged;
-        # a partly read 보수외소득월액 header (legacy reader only) is never a PASS.
+        # a lost 보수외소득월액 header line (legacy reader only, GAP or BOTH) is never a PASS. A
+        # FRAGMENT alone leaves 구성머리글상태 unset and only records 구성머리글불완전사유.
         findings.append(CheckFinding(
             CODE_PAYMENT_COMPONENT_HEADER_INCOMPLETE,
             "납부확인서 월별 표의 보수외소득월액 머리글 일부를 읽지 못했습니다. 담당자가 원본에서 확인합니다.",
             how_to_fix="그대로 두셔도 담당자가 원본을 확인합니다. 월별 표가 선명하게 보이는 납부확인서를 다시 올리면 더 빨리 확인됩니다.",
             severity="NEEDS_REVIEW",
             detail=f"세부 사유: {ocr.fields.get('구성머리글불완전사유') or '미상'} "
-                   "(FRAGMENT 머리글 조각이 알려진 이름으로 완성되지 않음, GAP 머리글 줄 사이에 빠진 줄, BOTH 둘 다).",
+                   "(GAP 머리글 줄 사이에 빠진 줄, BOTH 빠진 줄과 알려진 이름으로 완성되지 않은 머리글 조각).",
         ))
 
     if nhis_review_needed:

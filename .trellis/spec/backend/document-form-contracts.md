@@ -49,11 +49,16 @@ Use this contract when changing OCR/text ingestion, resident-number redaction, N
   by centre; a column showing a fragment ('보수외', '보수', '소득월액', '소득', '월액', '(건강)', '(요양)')
   must read top to bottom as one of `COMPONENT_LABELS` (보수외소득월액(건강)/(요양), 보수외(건강)/(요양),
   their parenthesis-free forms), with no gap above .5 line height between its lines (a lost middle
-  line, e.g. '보수외' / blank / '(건강)'). Otherwise `구성머리글상태=불완전` and
-  `구성머리글불완전사유` (`component_header_issue`: FRAGMENT not a known label, GAP lost line, BOTH):
+  line, e.g. '보수외' / blank / '(건강)'). Otherwise `구성머리글불완전사유`
+  (`component_header_issue`: FRAGMENT not a known label, GAP lost line, BOTH). Only GAP and BOTH
+  (`COMPONENT_REVIEW_REASONS`, `component_headers_incomplete`) also set `구성머리글상태=불완전`:
   `localocr` caps the confidence at .4 and `check_document` adds PAYMENT_COMPONENT_HEADER_INCOMPLETE
-  (NEEDS_REVIEW, reason in its detail, in `verify_upload.SAFE_CODES`). The government-form reader
-  never sets the fields. GAP is needed: a lost '소득월액' leaves '보수외' + '(건강)', which reads as the
+  (NEEDS_REVIEW, reason in its detail, in `verify_upload.SAFE_CODES`). FRAGMENT alone (11-19) is
+  recorded in `구성머리글불완전사유` only and changes neither decision nor confidence: real government
+  forms reach the legacy reader when own OCR reads a whole '보수외' box only once or twice a page
+  (no eight-column signature), and the other 보수외소득월액 columns then read '보수의/보수 + 소득월액 +
+  (요양)', a FRAGMENT on a column the amounts never use. The government-form reader never sets the
+  fields. GAP is needed: a lost '소득월액' leaves '보수외' + '(건강)', which reads as the
   known short label 보수외(건강) (damaged_component_headers[2,3,4] PASS without it).
 - 고지금액 guard (11-19, both readers, values never replaced): for 2025-10~12, a 0원 pick, a pick 12-14%
   of another amount in its row, a pick under a 장기요양 or unreadable/low-confidence (<.85) header, or a

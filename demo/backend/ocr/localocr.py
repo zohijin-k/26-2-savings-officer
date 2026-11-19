@@ -189,6 +189,33 @@ def _entry_bbox(entry, pages) -> BBox | None:
     return BBox(entry.page, round(x0, 1), round(y0, 1), round(x1, 1), round(y1, 1))
 
 
+def _shared_image_groups(pages, marker_pages) -> list[list[int] | None] | None:
+    """11-19 D10: per counted page (marker_pages order), [image group, render number] when its
+    embedded main image (same xref) is also read as another page of this PDF, else None. None when
+    no page shares one.
+
+    The same xref gives the same OCR input twice even when the rendered pages differ; the page check
+    then reviews a marker repeated across different renders of one image (PAGE_IMAGE_SHARED). Numbers
+    only (group and render numbers, never the xref or digest).
+    """
+    if not marker_pages:
+        return None
+    seen = {page.page: (getattr(page, "image_xref", None), getattr(page, "render_digest", None))
+            for page, _ in pages}
+    shared = sorted({xref for xref, digest in seen.values() if xref is not None and digest is not None})
+    if not shared:
+        return None
+    renders: list[str] = []  # render numbers in page order
+    for xref, digest in seen.values():
+        if xref in shared and digest is not None and digest not in renders:
+            renders.append(digest)
+    groups: list[list[int] | None] = []
+    for number in marker_pages:
+        xref, digest = seen.get(number, (None, None))
+        groups.append([shared.index(xref), renders.index(digest)] if xref in shared and digest else None)
+    return groups
+
+
 def _from_resident(ex, pages, ra, v2types) -> OcrResult:
     """engine_v2 초본 추출 결과 → 데모 OcrResult (필드 이름은 데모 규칙이 쓰는 그대로)."""
     detected = (DocType.RESIDENT_ABSTRACT if ex.detected_type == v2types.RESIDENT_ABSTRACT
@@ -202,6 +229,9 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
         page_data["blank_pages"] = ex.blank_pages  # 쪽 수 확인에서 뺀 내용 없는 쪽
     if getattr(ex, "sheet_markers", None):
         page_data["sheets"] = ex.sheet_markers  # 한 장에 여러 쪽(모아찍기)의 쪽표기
+    shared = _shared_image_groups(pages, getattr(ex, "marker_pages", None))
+    if shared is not None:
+        page_data["image_groups"] = shared  # 같은 주 그림(xref)을 읽은 쪽 묶음 (D10)
     fields["쪽표기자료"] = json.dumps(page_data)
     from engine_v2.extractors.address_dates import assess
     if ex.detected_type == v2types.RESIDENT_ABSTRACT:

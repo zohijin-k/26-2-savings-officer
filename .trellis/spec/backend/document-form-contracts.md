@@ -49,6 +49,16 @@ Use this contract when changing OCR/text ingestion, resident-number redaction, N
   `월별고지금액불확실사유` (ZERO_AMOUNT, CARE_RATIO, HEADER_CARE, HEADER_UNCERTAIN, LARGER_HEALTH).
   `check_document` adds PAYMENT_AMOUNT_COLUMN_UNCERTAIN (NEEDS_REVIEW) and
   `facts._payment_amounts_trusted` returns False (PREMIUM_UNTRUSTED), whatever the stored status.
+- Resident shared page image (11-19 D10): `preprocess` keeps the main image xref of an EMBEDDED page
+  (`PageImage.image_xref`) and, only for pages whose xref is another page's too, a digest of the 72 dpi
+  render (`render_digest`). `localocr._from_resident` adds `쪽표기자료.image_groups` (per counted page:
+  null or [image group, render number in page order]; numbers only, never xref or digest) when any
+  page shares an image. Before PAGES_DUPLICATED, `_check_resident_pages` returns PAGE_IMAGE_SHARED
+  (NEEDS_REVIEW) when every repeated marker comes only from pages of one image group with pairwise
+  different renders (the OCR input repeats, the shown pages do not). A repeat across different images,
+  the same page shown twice (same render), or missing/malformed groups stays PAGES_DUPLICATED FAIL.
+  PyMuPDF stores one identical image once, so synthetic image PDFs share an xref; their identical
+  renders keep the existing duplicate expectations.
 - Historical payment rows retaining a critical failed validation require the same read-time monetary suppression and review confidence even when cached status is PASS. Retain the stored row for owner-controlled cleanup.
 
 ## 4. Validation and error matrix

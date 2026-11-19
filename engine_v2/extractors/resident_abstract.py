@@ -137,6 +137,8 @@ class ResidentAbstractResult:
     classification_evidence: str = ""
     #: 쪽 수 확인에서 뺀 내용 없는 쪽 수 (page_markers에 들어 있지 않다).
     blank_pages: int = 0
+    #: page_markers(또는 sheet_markers)의 각 항목을 읽은 쪽 번호(PageImage.page), 같은 순서 (11-19 D10).
+    marker_pages: list[int] = field(default_factory=list)
     #: 주소 이력 순번 상태 (11-18): CONTIGUOUS(1..N 모두), GAP(빠진 번호·1로 시작 안 함·중복),
     #: UNREADABLE(번호 없는 이력이 있어 연속성 확인 불가), NA(이력 없음).
     history_numbers: str = "NA"
@@ -601,6 +603,7 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
         history_numbers=history_numbers, history_empty_page=history_empty_page,
         sheet_markers=sheets if multi else None,
         page_markers=[headers[i]["page_no"] for i in kept],
+        marker_pages=[pages[i][0].page for i in kept],
         classification_evidence=classification_evidence,
         page_marker_confidence=min((headers[i]["page_confidence"] for i in kept), default=0.0),
         blank_pages=len(headers) - len(kept),

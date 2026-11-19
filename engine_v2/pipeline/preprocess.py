@@ -60,6 +60,12 @@ class PageImage:
     text: str | None = None             # text_layer일 때 본문
     aux: list[AuxRegion] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    #: EMBEDDED: xref of the main image read as this page (11-19 D10). Two pages of one PDF with
+    #: the same xref give the same OCR input even when their rendered pages differ.
+    image_xref: int | None = None
+    #: Only for a page whose image_xref is shared with another page: digest of its 72 dpi render,
+    #: telling a page shown twice (same render) from different pages drawn over one image.
+    render_digest: str | None = None
 
     def px_to_pt(self, x: float, y: float) -> tuple[float, float]:
         """OCR 좌표(픽셀) → PDF 좌표(pt). 근거 하이라이트 bbox 변환용."""
@@ -117,6 +123,7 @@ def _process_pdf_page(doc: pymupdf.Document, i: int) -> PageImage:
         if pix.alpha or pix.n - pix.alpha != 3:
             pix = pymupdf.Pixmap(pymupdf.csRGB, pix)  # RGB로 통일
         result.source = PageSource.EMBEDDED
+        result.image_xref = main["xref"]
         result.png = pix.tobytes("png")
         result.pixel_size = (pix.width, pix.height)
         result.dpi = pix.width / ((main["bbox"][2] - main["bbox"][0]) / 72)
@@ -134,6 +141,22 @@ def _process_pdf_page(doc: pymupdf.Document, i: int) -> PageImage:
     return result
 
 
+SHARED_RENDER_DPI = 72
+
+
+def _mark_shared_images(doc: pymupdf.Document, pages: list[PageImage]) -> None:
+    """Render (72 dpi) only the pages whose main image xref is also another page's (11-19 D10)."""
+    counts: dict[int, int] = {}
+    for page in pages:
+        if page.image_xref is not None:
+            counts[page.image_xref] = counts.get(page.image_xref, 0) + 1
+    for page in pages:
+        if page.image_xref is not None and counts[page.image_xref] > 1:
+            import hashlib
+            pix = doc[page.page].get_pixmap(dpi=SHARED_RENDER_DPI)
+            page.render_digest = hashlib.sha256(pix.samples).hexdigest()
+
+
 def preprocess(file_path: str | Path) -> list[PageImage]:
     path = Path(file_path)
     suffix = path.suffix.lower()
@@ -142,7 +165,9 @@ def preprocess(file_path: str | Path) -> list[PageImage]:
         doc = pymupdf.open(path)
         if doc.needs_pass:
             raise ValueError("암호가 걸린 PDF")
-        return [_process_pdf_page(doc, i) for i in range(doc.page_count)]
+        pages = [_process_pdf_page(doc, i) for i in range(doc.page_count)]
+        _mark_shared_images(doc, pages)
+        return pages
 
     if suffix in {".png", ".jpg", ".jpeg", ".heic", ".webp", ".bmp", ".tif", ".tiff"}:
         pix = pymupdf.Pixmap(str(path))

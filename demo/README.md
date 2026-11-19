@@ -82,8 +82,10 @@ PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python -m demo.fixtures.make_samples
 
 ```bash
 # 터미널 1 — 백엔드 (저장소 루트에서)
-uvicorn demo.backend.main:app --reload --port 8000
+python -m uvicorn demo.backend.main:app --env-file .env --reload --port 8000
 ```
+
+담당자 화면은 `.env`의 `OFFICER_PASSWORD`로 로그인해야 열린다. `.env.example`을 `.env`로 복사해 `OFFICER_PASSWORD`와 `OFFICER_SESSION_SECRET`을 채운다. 비어 있으면 담당자 API가 503을 낸다.
 
 이번 제출에서는 전북AI를 사용하지 않는다(연동 코드는 있으나 이번 제출에서는 사용하지 않음). JBAI_* 설정은 비워 둔 채 실행한다. 데모 로컬 OCR은 macOS를 포함한 모든 환경에서 own이 기본이다. 합성 시연 고정 응답에는 모델 설치가 필요하지 않다. 로컬 OCR 자체를 쓰려면 모델을 설치한다. 저장소 루트에서 `pip install -r engine_v2/requirements.txt`와 `python engine_v2/tools/fetch_own_models.py`를 실행한다. 모델 파일은 저장소에 포함되지 않는다.
 

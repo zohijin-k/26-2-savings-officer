@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend conventions and the pre-development checklist"}
+{"file": ".trellis/spec/backend/unified-backend.md", "reason": "Linked run topology and the rule that applicant API files stay identical across both repositories"}
+{"file": ".trellis/spec/backend/applicant-submission.md", "reason": "Applicant response boundary that must not change while the guard is added"}
+{"file": ".trellis/spec/frontend/officer-documents.md", "reason": "Officer views, role switch and original viewer that the login gate wraps"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cookie set by the backend, carried by two frontends through the dev proxy"}
+{"file": ".trellis/tasks/11-18-access-control/design.md", "reason": "Route boundary table, middleware order, cookie attributes and the youth sources being ported"}

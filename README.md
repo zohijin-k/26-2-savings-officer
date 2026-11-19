@@ -29,11 +29,11 @@ npm install
 cd ../..
 ```
 
-터미널 두 개에서 실행하고 <http://localhost:5173>을 엽니다.
+처음 한 번 `.env.example`을 `.env`로 복사하고 담당자 로그인 값 두 개(`OFFICER_PASSWORD`, `OFFICER_SESSION_SECRET`)를 채웁니다. `.env`는 커밋하지 않습니다. 그다음 터미널 두 개에서 실행하고 <http://localhost:5173>을 엽니다.
 
 ```bash
 # 저장소 루트
-uvicorn demo.backend.main:app --reload --port 8000
+python -m uvicorn demo.backend.main:app --env-file .env --reload --port 8000
 ```
 
 ```bash
@@ -43,9 +43,13 @@ npm run dev
 
 API 문서는 <http://localhost:8000/docs>에서 확인합니다. Vite가 `/api` 요청을 백엔드로 전달합니다.
 
+## 담당자 로그인과 접근 제어
+
+담당자 화면은 `.env`의 `OFFICER_PASSWORD`로 로그인해야 열립니다. 로그인은 8시간 유지되고, 머리글 오른쪽의 로그아웃으로 끝냅니다. 두 값 중 하나라도 비어 있으면 담당자 API가 503을 내고 화면에 설정 안내가 나옵니다. `?mock=1` 예시 화면은 로그인 없이 열립니다. 신청자 API는 신청을 만든 브라우저에만 열리고, 원본 서류(`/api/files/…`)는 그 신청자와 로그인한 담당자만 볼 수 있습니다. 역할·지역 선택은 로그인 뒤 화면 범위를 고르는 것이고 인증 수단이 아닙니다. 자세한 내용은 [개발 안내](docs/DEVELOPMENT.md#담당자-로그인과-접근-제어)에 있습니다.
+
 ## 신청자 화면과 연결
 
-이 저장소의 백엔드는 두배적금 신청자 화면([26-2-savings-applicant](https://github.com/zohijin-k/26-2-savings-applicant))의 API도 함께 제공합니다. 백엔드를 8000번에 띄우고 신청자 프런트(5173)와 담당자 프런트(`npm run dev -- --port 5174`)를 함께 실행하면, 신청자 화면에서 제출한 건이 이 저장소의 DB에 쌓여 담당자 화면에 바로 보입니다. 신청자 저장소의 백엔드는 띄우지 않습니다. 순서와 주의점은 [개발 안내](docs/DEVELOPMENT.md#신청자-화면과-연결해서-실행)에 있습니다.
+이 저장소의 백엔드는 두배적금 신청자 화면([26-2-savings-applicant](https://github.com/zohijin-k/26-2-savings-applicant))의 API도 함께 제공합니다. 백엔드를 `--env-file .env`로 8000번에 띄우고 신청자 프런트(5173)와 담당자 프런트(`npm run dev -- --port 5174`)를 함께 실행하면, 신청자 화면에서 제출한 건이 이 저장소의 DB에 쌓여 담당자 화면(로그인 뒤)에 바로 보입니다. 신청자 저장소의 백엔드는 띄우지 않습니다. 순서와 주의점은 [개발 안내](docs/DEVELOPMENT.md#신청자-화면과-연결해서-실행)에 있습니다.
 
 ## 시연용 데이터
 

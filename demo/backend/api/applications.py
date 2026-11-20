@@ -167,11 +167,16 @@ def _lock_identity(form1: dict[str, Any], identity: dict[str, Any]) -> dict[str,
 
 
 def _next_application_no(program_code: str) -> str:
-    """APP-2026-000001 형태. 데모라 단순 증가면 충분하다."""
-    with get_session() as s:
-        count = len(s.exec(select(Application)).all())
+    """DS-2026-000001 형태. 같은 접두어의 가장 큰 일련번호 + 1.
+
+    건수로 세면 중간 신청이 지워졌을 때 이미 있는 번호가 다시 나와 UNIQUE 제약에 걸린다.
+    """
     prefix = "DS" if program_code == "double_savings" else "JP"
-    return f"{prefix}-2026-{count + 1:06d}"
+    head = f"{prefix}-2026-"
+    with get_session() as s:
+        numbers = s.exec(select(Application.application_no).where(Application.application_no.startswith(head))).all()
+    serials = [int(no[len(head):]) for no in numbers if no[len(head):].isdigit()]
+    return f"{head}{max(serials, default=0) + 1:06d}"
 
 
 def _load(application_id: int) -> Application:

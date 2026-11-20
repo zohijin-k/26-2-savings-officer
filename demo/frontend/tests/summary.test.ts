@@ -77,3 +77,28 @@ test('evidence of the same kind is shown as one group', async () => {
   assert.deepEqual(groups.map((g) => [g.kindLabel, g.labels.join(', ')]), [
     ['자동 대조', '명의가 신청자와 다름, 생년월일이 신청서와 다름'], ['규칙 판정', '자동 판독 신뢰도 낮음']])
 })
+
+test('a single disqualifying reason is marked as a fail and listed first', async () => {
+  const { pointSeverity, rankedPoints, verdictBand } = await import('../src/pages/officer/summary-model.ts')
+  const finding = (code: string, severity: 'FAIL' | 'NEEDS_REVIEW') => ({ code, message: '', how_to_fix: '', link: '', severity })
+  const docs = [
+    { ...DOCS[0], findings: [finding('ISSUED_BEFORE_NOTICE', 'FAIL')] },
+    { ...DOCS[1], findings: [finding('LOW_CONFIDENCE', 'NEEDS_REVIEW')] },
+  ] as OfficerDocument[]
+  const base = { title: 't', detail: '', evidence: [], field: null }
+  const review = { ...base, slot_key: 'nhis_payment', codes: ['LOW_CONFIDENCE'] }
+  const failed = { ...base, slot_key: 'resident_abstract', codes: ['ISSUED_BEFORE_NOTICE'] }
+  const unmet = { ...base, slot_key: null, codes: ['ELIGIBILITY_WORK'],
+    evidence: [{ code: 'ELIGIBILITY_WORK', label: '근로 요건 미충족', kind: 'eligibility', kind_label: '자격요건' }] }
+  const missing = { ...base, slot_key: null, codes: ['MISSING_REQUIRED_DOC'] }
+  assert.equal(pointSeverity(review, docs), 'review')
+  assert.equal(pointSeverity(failed, docs), 'fail')
+  assert.equal(pointSeverity(unmet, docs), 'fail')
+  assert.equal(pointSeverity(missing, docs), 'fail')
+  // FAIL 사유라도 다른 서류의 것이면 이 항목을 탈락으로 올리지 않는다.
+  assert.equal(pointSeverity({ ...failed, slot_key: 'nhis_payment' }, docs), 'review')
+  assert.deepEqual(rankedPoints([review, failed, unmet], docs).map((row) => [row.point.codes[0], row.severity]),
+    [['ISSUED_BEFORE_NOTICE', 'fail'], ['ELIGIBILITY_WORK', 'fail'], ['LOW_CONFIDENCE', 'review']])
+  assert.deepEqual(verdictBand('FAIL'), { tone: 'fail', label: '부적합' })
+  assert.deepEqual(verdictBand(null), { tone: 'none', label: '미심사' })
+})

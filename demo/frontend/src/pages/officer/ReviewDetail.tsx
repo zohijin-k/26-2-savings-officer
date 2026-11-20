@@ -84,6 +84,19 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
     onSelect(doc.document_id, doc.slot_key)
   }
   const tiebreak = detail ? tiebreakParts(detail.score_sheet) : null
+  // 서류 버튼 줄: ←/→로 이전·다음 서류, Home/End로 처음·마지막 서류를 연다. 포커스도 함께 옮긴다.
+  const moveTab = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!detail || !detail.documents.length) return
+    const docs = detail.documents
+    const current = Math.max(0, docs.findIndex((doc) => doc.document_id === activeDoc?.document_id))
+    const next = event.key === 'ArrowRight' ? (current + 1) % docs.length
+      : event.key === 'ArrowLeft' ? (current - 1 + docs.length) % docs.length
+        : event.key === 'Home' ? 0 : event.key === 'End' ? docs.length - 1 : null
+    if (next === null) return
+    event.preventDefault()
+    onSelect(docs[next].document_id, docs[next].slot_key)
+    event.currentTarget.querySelectorAll<HTMLButtonElement>('.review__tab')[next]?.focus()
+  }
 
   return <div className="review">
     <header className="review__head">
@@ -91,12 +104,12 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
       {detail && <><strong>{detail.name}</strong><span>{detail.application_no}</span><span>{detail.region} {detail.town}</span></>}
     </header>
     {error ? <p className="officer__error" role="alert">{error}</p> : !detail ? <p role="status">서류를 불러오는 중입니다.</p> : <>
-      <nav className="review__tabs" aria-label="신청 서류">
+      <nav className="review__tabs" aria-label="신청 서류 (← → 키로 이동)" onKeyDown={moveTab}>
         {detail.documents.map((doc) => {
           const status = doc.status ? TAB_STATUS[doc.status] : null
           const on = activeDoc?.document_id === doc.document_id
           return <button key={doc.document_id} type="button" aria-current={on ? 'true' : undefined}
-            className={on ? 'review__tab review__tab--on' : 'review__tab'}
+            className={`review__tab review__tab--${doc.status?.toLowerCase() ?? 'none'}${on ? ' review__tab--on' : ''}`}
             onClick={() => onSelect(doc.document_id, doc.slot_key)}>
             <span className={`review__tab-status review__tab-status--${doc.status?.toLowerCase() ?? 'none'}`} aria-hidden="true">{status?.icon ?? '–'}</span>
             {doc.label}
@@ -117,18 +130,12 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
           <section className="panel verdict" aria-labelledby="panel-verdict">
             <div className="panel__head"><h2 id="panel-verdict"><span className="panel__step">1</span>최종 판정</h2></div>
             <AiSummaryCard key={applicationId} applicationId={applicationId} role={role}
-              documents={detail.documents} onJump={jumpToOriginal} />
-            <div className="verdict__grid">
-              <div className="verdict__box verdict__box--ai">
-                <span className="verdict__tag">AI 제안</span>
-                {detail.ai.final_status ? <StatusBadge status={detail.ai.final_status} /> : <span className="verdict__value">미심사</span>}
-                {detail.ai.recommended_action && <p>{detail.ai.recommended_action}</p>}
-              </div>
-              <div className="verdict__box verdict__box--officer">
-                <span className="verdict__tag">담당자 판단</span>
-                <span className="verdict__value">{detail.decision.label}</span>
-                <p>최종 판단은 담당자가 합니다.</p>
-              </div>
+              documents={detail.documents} finalStatus={detail.ai.final_status}
+              recommendedAction={detail.ai.recommended_action} onJump={jumpToOriginal} />
+            <div className="verdict__box verdict__box--officer">
+              <span className="verdict__tag">담당자 판단</span>
+              <span className="verdict__value">{detail.decision.label}</span>
+              <p>최종 판단은 담당자가 합니다.</p>
             </div>
             <p className="notice notice--warning" role="note">
               <span className="notice__icon" aria-hidden="true">!</span>

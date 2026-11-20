@@ -9,6 +9,8 @@ import math
 import re
 from typing import Any
 
+from engine_v2.extractors import insurance_workplace
+
 from ..engine_adapter import engine_config
 from .doc_types import DocType
 from .identity import Identity, identity_of, norm_name
@@ -87,6 +89,18 @@ def _date_confident(row, key):
         return False
 
 
+def _name_only_review(doc, fields) -> bool:
+    findings = doc.get("findings")
+    return (doc.get("doc_type") == DocType.INSURANCE_4 and doc.get("status") == "NEEDS_REVIEW"
+            and insurance_workplace.name_review(fields)
+            and isinstance(findings, list) and bool(findings)
+            and all(isinstance(item, dict) and
+                    all(isinstance(item.get(key), str) for key in
+                        ("code", "severity", "message", "how_to_fix", "link", "detail")) and
+                    item["code"] == insurance_workplace.CODE and item["severity"] == "NEEDS_REVIEW"
+                    for item in findings))
+
+
 def _trust_issue(doc, fields, identity: Identity | None, end: date) -> str | None:
     if identity is None:
         return "WORK_IDENTITY_UNCONFIRMED"
@@ -120,7 +134,8 @@ def _trust_issue(doc, fields, identity: Identity | None, end: date) -> str | Non
                                    float(quality)>=engine_config.IMAGE_QUALITY_THRESHOLD)
         except (TypeError,ValueError):
             trusted_confidence = False
-    if (doc.get("status") not in {None, "PASS"} or not trusted_confidence or
+    status_trusted = doc.get("status") in (None, "PASS") or _name_only_review(doc, fields)
+    if (not status_trusted or not trusted_confidence or
             not _complete(fields) or fields.get("판독검증실패")):
         return "WORK_STRUCTURE_UNCONFIRMED"
     issue = _date(doc.get("issue_date")) or _date(fields.get("발급일"))

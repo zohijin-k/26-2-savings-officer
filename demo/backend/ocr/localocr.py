@@ -586,11 +586,14 @@ def _from_nhis(ex, pages, v2types, classification_evidence: str = "",
 
 def _from_insurance4(ex, pages, classification_evidence: str = "") -> OcrResult:
     """4대보험 결과를 데모 필드 계약으로 변환한다."""
+    from engine_v2.extractors import insurance_workplace as workplace, nhis_common
+
     fields: dict[str, str] = {}
     bboxes: dict[str, BBox] = {}
     for key in ("성명", "생년월일", "발급일", "문서확인번호", "발급번호",
                 "가입내역", "보험별가입여부", "보험별가입자종별", "근로관련가입여부",
-                "근로관련최초취득일", "근로관련최근취득일", "사업장명칭목록", "추가첨부쪽"):
+                "근로관련최초취득일", "근로관련최근취득일", "사업장명칭목록", "추가첨부쪽",
+                workplace.COUNT_FIELD, workplace.STATE_FIELD, workplace.REASON_FIELD, workplace.PROOF_FIELD):
         extracted = ex.fields.get(key)
         if extracted is None:
             continue
@@ -611,8 +614,11 @@ def _from_insurance4(ex, pages, classification_evidence: str = "") -> OcrResult:
         row_box = _demo_bbox(row.bbox)
         for key, value in row_values.items():
             fields[key] = value
-            if row_box is not None:
-                bboxes[key] = row_box
+            box = row_box
+            if key == f"{prefix} 사업장명칭" and row.workplace_words:
+                box = _demo_bbox(nhis_common.bbox(row.workplace_words, {page.page: page for page, _ in pages}))
+            if box is not None:
+                bboxes[key] = box
     validations = list(ex.validations)
     structure_complete = getattr(ex, "structure_complete", None)
     if getattr(ex, "form_kind", None) == "portal":

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass, field, replace
 from datetime import date
@@ -18,6 +19,7 @@ from . import nhis_common as common, nhis_forms as forms
 from .resident_abstract import kst_today
 from .format_text import normalize_format_text
 from .insurance_issue import select_issue_date
+from . import insurance_workplace as workplace
 
 INSURANCE_NAMES = ("국민연금", "건강보험", "산재보험", "고용보험")
 DOC_NO_RE = re.compile(r"(?<!\d)(\d{4}-\d{4}-\d{4}-\d{4,5})(?!\d)")
@@ -47,6 +49,12 @@ class InsuranceRow:
     date_cells_complete: bool = True
     cells_complete: bool = True
     management_uncertain: bool = False
+    management_words: list[Word] = field(default_factory=list)
+    workplace_words: list[Word] = field(default_factory=list)
+    workplace_fragments: list[str] = field(default_factory=list)
+    workplace_joined: str = ""
+    workplace_fused: bool = False
+    management_reliable: bool = False
 
 
 @dataclass
@@ -387,8 +395,69 @@ def _split_management(cell: str) -> tuple[str, str, bool]:
     return "", "", False
 
 
+def _certain_words(words: list[Word]) -> bool:
+    return bool(words) and all(
+        type(word.conf) in {int, float} and math.isfinite(word.conf) and word.conf >= .85
+        for word in words)
+
+
+def _observed_columns(lines, anchors, table_y, *, portal=False) -> dict[str, float] | None:
+    """Do not mistake legacy numeric fallback anchors for observed columns."""
+    height = max((word.y1 - word.y0 for line in lines if abs(line[0].cy - table_y) < .1
+                  for word in line), default=.8)
+    band = [word for line in lines if table_y - 2 * height <= line[0].cy <= table_y + height
+            for word in line]
+    sources = []
+    labels = (("name", "성명"), ("category", "가입자종별"), ("management", "관리번호"),
+              ("workplace", "사업장명칭"), ("date", "자격취득일"))
+    for key, label in labels:
+        hits = [word for word in band if squash(word.text) in
+                ({label, "사업장관리번호"} if key == "management" else {label})]
+        if len(hits) != 1 or not _certain_words(hits):
+            return None
+        sources.append(hits[0])
+    if not all(a.x1 <= b.x0 for a, b in zip(sources, sources[1:])):
+        return None
+    # Parsing keeps its legacy anchors. Comparison proves allocation independently
+    # from the observed labels, including taller text-layer glyph boxes.
+    return anchors if portal else {key: word.x0 for (key, _), word in zip(labels, sources)}
+
+
+def _name_fragment(row: InsuranceRow, word: Word, value: str, *, fused=False) -> None:
+    row.workplace_name += value
+    if value:
+        row.workplace_words.append(word)
+        row.workplace_fragments.append(value)
+        row.workplace_fused |= fused
+
+
+def _reliable_management(row: InsuranceRow, anchors) -> bool:
+    if (row.management_uncertain or row.workplace_fused or not row.workplace_name or
+            not re.fullmatch(r"[0-9]{11}", row.management_number) or
+            not _certain_words(row.management_words) or not row.workplace_words):
+        return False
+    raw = "".join(squash(normalize_format_text(word.text)) for word in row.management_words)
+    # ASCII only, without cell trimming or number/name reconstruction.
+    if not re.fullmatch(r"[0-9-]+", raw) or raw.replace("-", "") != row.management_number:
+        return False
+    return (all(anchors["category"] <= word.x0 and word.x1 <= anchors["workplace"]
+                for word in row.management_words) and
+            max(word.x1 for word in row.management_words) <= min(word.x0 for word in row.workplace_words) and
+            all((anchors["management"] + anchors["workplace"]) / 2 <= word.x0 and word.x1 <= anchors["date"]
+                for word in row.workplace_words))
+
+
+def _conflict_groups(rows: list[InsuranceRow]) -> list[list[int]]:
+    groups: dict[str, list[int]] = {}
+    for i, row in enumerate(rows):
+        if row.status == "가입" and row.management_reliable and workplace.comparison_key(row.workplace_name):
+            groups.setdefault(row.management_number, []).append(i)
+    return [indices for indices in groups.values()
+            if len({workplace.comparison_key(rows[i].workplace_name) for i in indices}) > 1]
+
+
 def _parse_row(insurance: str, lines: list[list[Word]], anchors: dict[str, float],
-               *, portal: bool = False) -> InsuranceRow:
+               *, portal: bool = False, observed_columns: dict[str, float] | None = None) -> InsuranceRow:
     words = [word for line in lines for word in line if word.text]
     row = InsuranceRow(insurance_type=insurance, words=words)
     flat = squash("".join(word.text for word in words))
@@ -404,6 +473,7 @@ def _parse_row(insurance: str, lines: list[list[Word]], anchors: dict[str, float
     row.status = "가입"
     row.date_column_words = [word for word in words if word.x0 >= anchors["date"] - (0 if portal else 3)]
     management_clean = True
+    grouping_clean = True
     for word in words:
         text = squash(word.text.strip("()（）"))
         if text in CATEGORY_NAMES:
@@ -414,29 +484,33 @@ def _parse_row(insurance: str, lines: list[list[Word]], anchors: dict[str, float
               word.x0 >= (anchors["management"] + anchors["workplace"]) / 2 and
               re.match(r"[가-힣]", _normalize_cell(word.text))):
             # A name with digits ("제2공장") starting past the midpoint stays a name fragment.
-            row.workplace_name += _normalize_cell(word.text)
+            _name_fragment(row, word, _normalize_cell(word.text))
         elif not portal and _management_word(word, anchors):
             # General path (11-19): 사업장관리번호 digits are kept only as printed. A digit cell
             # centred in its column can start left of the shorter 관리번호 label; a number fused
             # with the name is split; lookalike letters (O, l) or other marks are never converted.
             digits, rest, clean = _split_management(_normalize_cell(word.text))
             row.management_number += digits
-            row.workplace_name += rest
+            row.management_words.append(word)
+            _name_fragment(row, word, rest, fused=bool(rest))
             management_clean &= clean
         elif anchors["management"] <= word.x0 < anchors["workplace"]:
             cell = _normalize_cell(word.text)
             if cell and re.search(r"\d", cell):
                 row.management_number += re.sub(r"\D", "", cell)
+                row.management_words.append(word)
             elif (cell and not portal and word.x0 >= (anchors["management"] + anchors["workplace"]) / 2
                   and cell not in CATEGORY_NAMES):
                 # Header words mark where a label starts, not where its column starts: a name cell
                 # can begin a little left of the 사업장명칭 label. A digit-free fragment past the
                 # midpoint between the two labels belongs to the name (11-18); digits stay 관리번호.
-                row.workplace_name += cell
+                _name_fragment(row, word, cell)
+            elif cell:
+                grouping_clean = False
         elif anchors["workplace"] <= word.x0 < anchors["date"]:
             cell = _normalize_cell(word.text)
             if cell and cell not in CATEGORY_NAMES and not re.search(r"\d{4}[.\-/]", cell):
-                row.workplace_name += cell
+                _name_fragment(row, word, cell)
 
     if portal:
         name_valid = bool(NAME_RE.fullmatch(cells["name"])) and not common.is_header_only_value(cells["name"])
@@ -455,6 +529,11 @@ def _parse_row(insurance: str, lines: list[list[Word]], anchors: dict[str, float
         row.management_number = cells["management"] if management_valid else ""
         row.management_uncertain = bool(cells["management"]) and not management_valid
         row.workplace_name = cells["workplace"] if workplace_valid else ""
+        row.management_words = [word for word in words
+                                if anchors["management"] <= word.x0 < anchors["workplace"]]
+        row.workplace_words = [word for word in words
+                               if anchors["workplace"] <= word.x0 < anchors["date"]] if workplace_valid else []
+        row.workplace_fragments = [squash(normalize_format_text(word.text)) for word in row.workplace_words]
         acquired, received, row.receipt_date_present, row.date_cells_complete = _portal_dates(row.date_column_words)
         if len(acquired) == 1:
             row.acquired, row.acquired_words = acquired[0]
@@ -474,7 +553,10 @@ def _parse_row(insurance: str, lines: list[list[Word]], anchors: dict[str, float
                 row.received, row.received_words = date_hits[1]
     row.subscriber_name = _normalize_cell(row.subscriber_name)
     row.management_number = _normalize_cell(row.management_number)
+    row.workplace_joined = row.workplace_name
     row.workplace_name = _normalize_cell(row.workplace_name)
+    row.management_reliable = bool(observed_columns and management_clean and grouping_clean and
+                                   _reliable_management(row, observed_columns))
     return row
 
 
@@ -614,8 +696,11 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
                 "workplace": _header_x(lines, "사업장명칭", 64.0, header_y or 33.5),
                 "date": _header_x(lines, "자격취득일", 81.5, header_y or 33.5),
             }
+        observed = (form_kind in {"government24", "portal"} and header_y is not None and
+                    _observed_columns(lines, anchors, header_y, portal=form_kind == "portal"))
         for insurance, chunk in row_chunks:
-            all_rows.append(_parse_row(insurance, chunk, anchors, portal=form_kind == "portal"))
+            all_rows.append(_parse_row(insurance, chunk, anchors, portal=form_kind == "portal",
+                                       observed_columns=observed))
 
     expected_order = list(INSURANCE_NAMES)
     actual_order = [row.insurance_type for row in all_rows]
@@ -647,6 +732,10 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
         warnings.append("신고접수일이 자격취득일보다 빠른 행이 있습니다.")
 
     table_words = [word for row in all_rows for word in row.words]
+    groups = _conflict_groups(all_rows)
+    name_words = [word for row in all_rows if row.status == "가입" for word in row.workplace_words]
+    if groups:
+        warnings.append(workplace.REASON)
     rows_data = []
     for row in all_rows:
         row.bbox = common.bbox(row.words, page_map)
@@ -660,6 +749,8 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
             "자격취득일신뢰도": min((word.conf for word in row.acquired_words), default=0.0),
             "상태": row.status, "bbox": row.bbox.model_dump(mode="json") if row.bbox else None,
             "신뢰도": row.confidence,
+            "사업장명칭신뢰도": min((word.conf for word in row.workplace_words), default=0.0),
+            "사업장명칭위치정밀도": "결합단어" if row.workplace_fused else "단어" if row.workplace_words else "행",
         })
         if row.management_uncertain:
             # Display-only column (no decision reads it); a doubtful reading is left blank.
@@ -684,12 +775,18 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
             "근로관련가입여부": bool(work_rows),
             "근로관련최초취득일": work_dates[0].isoformat() if work_dates else "",
             "근로관련최근취득일": work_dates[-1].isoformat() if work_dates else "",
+            workplace.COUNT_FIELD: "미확정" if groups else "명칭목록기준",
             "사업장명칭목록": list(dict.fromkeys(
                 row.workplace_name for row in all_rows if row.status == "가입" and row.workplace_name)),
         }
+        if groups:
+            summaries.update({workplace.STATE_FIELD: "불확실", workplace.REASON_FIELD: workplace.REASON,
+                              workplace.PROOF_FIELD: workplace.proof(rows_json, groups)})
         for key, value in summaries.items():
             raw = json.dumps(value, ensure_ascii=False, separators=(",", ":")) if isinstance(value, (dict, list)) else str(value)
-            fields[key] = _field(raw, table_words, page_map, sources, common.confidence([bool(all_rows)]))
+            scoped_words = name_words if key in {"사업장명칭목록", workplace.STATE_FIELD} else table_words
+            fields[key] = _field(raw, scoped_words or table_words, page_map, sources,
+                                 common.confidence([bool(all_rows)]))
     else:
         diagnostics["가입내역"] = "표 제목을 찾았으나 보험별 행을 찾지 못함"
         warnings.append("가입 내역 표를 찾지 못해 담당자 확인이 필요합니다.")

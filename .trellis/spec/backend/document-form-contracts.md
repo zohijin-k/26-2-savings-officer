@@ -287,3 +287,48 @@ New engine/backend `test_resident_history_continuation.py` covers 8+2, single co
 ### Wrong versus correct
 
 Wrong: eight sequential parsed rows establish completeness after an unread second table. Correct: independent continuation evidence requires recovery or explicit review. Wrong: new uncertainty globally caps issue-date confidence. Correct: scope the cap to history and preserve independent FAIL precedence, including the existing history-limited page-confidence exception.
+
+
+## 18. Insurance workplace-name consistency
+
+### Scope / trigger
+
+Fresh government24/portal insurance extraction, its local adapter, document review and independent work-evidence trust. No production name correction, OCR retry, shared layout change, database migration or historical-result backfill.
+
+### Signatures
+
+`insurance_4.extract(pages, today=None)` and `InsuranceRow` retain existing constructor behavior with default-empty internal provenance. `insurance_workplace.comparison_key(str)` is comparison-only NFC plus collapsed whitespace. `proof(rows_json, groups)` and `name_review(fields)` own the local typed review envelope shared by document assessment and work trust.
+
+### Contracts
+
+- Keep selected name/management words and actual transformed name fragments/join internally. Preserve existing per-form fragment selection, normalization and stored strings. Per-row name confidence/position precision never caps independent identity/date confidence. Exact name-word boxes are preferred; fused observations remain coarse.
+- Compare active nonempty names only under an exact observed 11-ASCII-digit management key. Require clean allowed source separators, finite non-boolean minimum management score >= .85, unique confident ordered observed headers and independent bounded number/name allocation. Exclude fused number/name observations, crossing/ambiguous cells, fallback coordinates alone and unsupported forms. Taller text-layer glyphs use an observed-header band scaled to glyph height; retain legacy parsing anchors and prove comparison allocation independently from observed labels. No majority, similarity, punctuation removal or Hangul correction.
+- Add `사업장명칭상태=불확실`, `사업장명칭불확실사유=SAME_MANAGEMENT_NAME_CONFLICT`, `사업장수상태=미확정` on reliable conflicts; otherwise fresh count state is `명칭목록기준`. Preserve exact first-occurrence name-list contents. The direct engine receives the fixed reason as a warning; no structural validation is added.
+- `사업장명칭불확실근거` is local JSON `{version:1,rows_sha256:<byte-separated SHA-256 hex>,groups:[[row indices],...]}`. Bind the existing exact serialized membership payload, active same-number/non-equivalent-name relation and current first-occurrence list. Reject malformed/duplicate/bool/out-of-range indices, stale digests, missing/unknown states and mismatching lists. Byte-separated hex cannot resemble an RRN and survives existing `mask_data`; it is never external summary input. This is observational binding, not authoritative spelling proof.
+- Accepted insurance documents with a valid envelope receive review-only `INSURANCE_WORKPLACE_NAME_INCONSISTENT`. Independent confirmed FAIL retains precedence. Never trigger from warning text alone or emit an unrelated generic LOW_OCR finding.
+- The work-trust exception requires an actual insurance type, stored NEEDS_REVIEW, matching valid proof and a nonempty list of complete string-typed findings whose every code is the new code and every severity is NEEDS_REVIEW. Retain all identity, birth, confidence, quality, structure, validation, issue-date and acquired-row guards. MET/NOT_MET may remain independently established; stored document review is unchanged. Keep existing applicant submission policy: hidden internal work FAIL does not itself block submission, and must remain FAIL in the stored review/officer result afterward.
+- Production path adds zero OCR calls. The standalone synthetic crop tool has no document-path input; four authored rows, original and predeclared 2x/1.1-contrast variants, <=1 MP each, eight serial region calls with a five-second call budget. Record every correct/wrong/empty/error/timeout/high-score error, disagreement and cold/warm latency; never apply candidates or remove review.
+
+### Validation / error matrix
+
+| Evidence | Result |
+|---|---|
+| Reliable same number + substantive different names | Scoped review; original names retained |
+| NFC/collapsed-space equivalents | No new spelling conflict |
+| Weak/invalid/fused/ambiguous/missing number or observed columns | No inferred group; existing checks retained |
+| Name-only typed review + independently complete work evidence | Preserve MET or NOT_MET and overall review/FAIL |
+| Mixed/malformed findings, stale proof, weak identity/date/quality/structure | No work-trust exception |
+| Certain independent failure plus name conflict | Keep FAIL |
+| All rows share the same plausible wrong spelling | Undetectable by this consistency check |
+
+### Good / base / bad cases
+
+Good: three active rows share a trusted number but differ in one Hangul character; request original-cell review without selecting a majority. Base: ordinary matching government24/portal names keep old membership/date/validation behavior. Bad: repair a high-score spelling guess or treat equal numbers as a proven business identity.
+
+### Tests required
+
+New engine/backend `test_insurance_workplace_consistency.py`, engine `test_insurance_workplace_crop_study.py`, backend work-continuity, summary and submission suites cover A–N, exact score boundaries/nonfinite/bool scores, ASCII/separators, observed versus fallback columns, source stages, fused exclusion, actual synthetic PDFs, direct-engine/adapter findings, confirmed FAIL, document_fact, officer review and real submission, stale state, scoped confidence and zero added OCR. Include a constructed digest/RRN collision through mask_data. Keep all old expectations, frozen refs and synthetic corpus truth unchanged; compare 410 original pairs and both G sets before/after.
+
+### Wrong versus correct
+
+Wrong: any one allowed review finding bypasses all other findings; a plain hash happens to be redacted, silently losing work evidence. Correct: every complete finding is name-only, current source proof matches and survives masking, and all independent trust guards still apply.

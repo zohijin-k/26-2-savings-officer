@@ -176,8 +176,8 @@
 .ai-summary__line { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); font-size: var(--fs-15); }
 .ai-summary__doc { padding: 0 6px; border-radius: var(--radius-4); background: var(--color-surface); color: var(--color-text-muted); font-size: 12px; font-weight: 500; }
 .ai-summary__evidence { display: flex; flex-wrap: wrap; gap: 4px; }
-.ai-summary__ev { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: var(--radius-4); background: var(--color-surface); font-size: 12px; color: var(--color-text); }
-.ai-summary__ev b { font-size: 11px; font-weight: 700; }
+.ai-summary__ev { display: inline-flex; align-items: baseline; gap: 4px; padding: 1px 6px; border-radius: var(--radius-4); background: var(--color-surface); font-size: 12px; color: var(--color-text); }
+.ai-summary__ev b { flex-shrink: 0; white-space: nowrap; font-size: 11px; font-weight: 700; }
 .ai-summary__ev--rule b { color: var(--warning-60); }
 .ai-summary__ev--auto { border: 1px dashed var(--info-10); }
 .ai-summary__ev--auto b { color: var(--info-60); }

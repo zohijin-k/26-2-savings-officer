@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/failure-filtering.md", "reason": "Verify stored verdicts and officer data stay complete while the applicant projection is filtered"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Backend quality checks before the final test comparison"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Officer frontend checks must be unchanged: tsc, oxlint, build, npm test"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Confirm the applicant frontend and the officer frontend both work against the merged API"}
+{"file": ".trellis/tasks/11-17-unified-backend/research/findings.md", "reason": "Baselines to compare failures against and the files that must stay untouched"}
+{"file": ".trellis/tasks/11-17-unified-backend/changed-test-expectations.md", "reason": "Any changed expectation outside this list is a defect"}

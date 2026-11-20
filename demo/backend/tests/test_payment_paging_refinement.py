@@ -125,7 +125,7 @@ def test_real_pdf_routes_share_payment_completeness_policy(tmp_path,monkeypatch,
 
 def test_second_upload_replaces_first_and_remaining_file_controls_paging(client,tmp_path,monkeypatch):
     from demo.backend.tests.test_p2_nhis_uploads import image_pdf,use_own_words
-    from demo.backend.tests.test_portal_uploads import new_app,upload
+    from demo.backend.tests.test_portal_uploads import assert_upload_status,new_app,upload
     from engine_v2.tests import p2_payment_samples as base
     aid=new_app(client,name=base.NAME,birth=base.BIRTH)
     for index,marker in enumerate(['1/2','2/2']):
@@ -134,7 +134,7 @@ def test_second_upload_replaces_first_and_remaining_file_controls_paging(client,
         use_own_words(monkeypatch,cells,size)
         path=image_pdf(tmp_path/f'FAKE-part-{index}.pdf',size)
         response,stored=upload(client,aid,path,'nhis_payment')
-        assert response['status']=='FAIL'
+        assert_upload_status(response,'FAIL')
         assert any(f['code']=='PAGES_INCOMPLETE' and f['severity']=='FAIL' for f in response['findings'])
         listed=client.get(f'/api/applications/{aid}/documents').json()
         payment=[r for r in listed if r['slot_key']=='nhis_payment']

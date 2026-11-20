@@ -1,0 +1,22 @@
+/* 담당자 로그인: 머리글 아래 가운데 카드 하나. 색·간격·글자 크기는 index.css 토큰만 쓴다. */
+.officer-login { display: flex; justify-content: center; padding: 72px var(--space-6) var(--space-8); }
+.officer-login__card { display: grid; gap: var(--space-4); width: 100%; max-width: 420px; padding: var(--space-8); border: 1px solid var(--color-border); border-radius: var(--radius-12); background: var(--color-surface); box-shadow: var(--shadow-2); }
+.officer-login__eyebrow { margin: 0; color: var(--color-text-muted); font-size: var(--fs-13); font-weight: 600; }
+.officer-login h1 { margin: 0; color: var(--color-text); font-size: var(--fs-24); font-weight: 700; line-height: 1.35; }
+.officer-login form { display: grid; gap: var(--space-2); }
+.officer-login p { margin: 0; font-size: var(--fs-15); line-height: 1.6; }
+.officer-login [role=alert] { color: var(--danger-60); }
+.officer-login__status { color: var(--color-text-muted); }
+.officer-login label { margin-top: var(--space-1); font-size: var(--fs-15); font-weight: 600; }
+.officer-login input { height: 44px; padding: 0 var(--space-3); border: 1px solid var(--color-border-strong); border-radius: var(--radius-8); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: var(--fs-16); }
+.officer-login input:focus-visible { outline: 3px solid var(--info-50); outline-offset: 2px; }
+.officer-login .btn { width: 100%; min-height: 44px; margin-top: var(--space-2); }
+
+/* 로그인 상태 줄: 머리글 오른쪽 자리(App.tsx의 .shell__session)에 그린다. */
+.officer-session-bar { display: flex; align-items: center; gap: var(--space-3); color: var(--color-text-muted); font-size: var(--fs-13); white-space: nowrap; }
+
+@media (max-width: 600px) {
+  .officer-login { padding: var(--space-8) var(--space-4); }
+  .officer-login__card { padding: var(--space-6) var(--space-5); }
+  .officer-session-bar__label { display: none; }
+}

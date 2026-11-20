@@ -6,12 +6,18 @@
  * 버튼도, blob 링크도 없다. 담당자가 심사 1건을 처리하는 동안 파일이 개인 PC로
  * 내려가는 일이 없어야 보관·파기 책임이 옮겨가지 않는다.
  *
+ * PDF는 모든 쪽을 세로로 이어 붙여 스크롤로 넘겨 본다. 쪽마다 자리(크기)는 열자마자
+ * 잡아두고, 실제 캔버스는 화면 근처에 온 쪽만 그린다 — 수십 쪽짜리 서류를 열어도
+ * 캔버스 메모리가 쪽 수만큼 불어나지 않게 하기 위해서다. 툴바의 ‹ › 는 해당 쪽으로
+ * 스크롤하고, 쪽 번호는 스크롤 위치를 따라간다.
+ *
  * bbox 하이라이트는 판독값 좌표를 화면 좌표로 옮겨 얹는다. 좌표계는 PyMuPDF와
  * 같은 **좌상단 원점 PDF 포인트**이므로 y를 뒤집지 않는다. 회전은 오버레이에서
  * 같이 돌린다 — 원본을 돌려놓고 근거를 클릭해도 자리가 맞아야 한다.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -21,7 +27,14 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
 type Rotation = 0 | 90 | 180 | 270
 
+interface Size {
+  width: number
+  height: number
+}
+
 const ZOOM_STEPS = [0.6, 0.8, 1, 1.25, 1.5, 2, 2.5, 3]
+/** `.viewer__stage`의 padding과 같아야 쪽 이동 시 위 여백이 맞는다. */
+const STAGE_PADDING = 12
 
 interface Props {
   doc: OfficerDocument
@@ -36,6 +49,13 @@ interface Box {
   top: number
   width: number
   height: number
+}
+
+/** 열린 PDF와 쪽별 원본 크기(배율 1, 회전 0). url로 어느 서류의 것인지 구분한다. */
+interface LoadedPdf {
+  url: string
+  pdf: pdfjs.PDFDocumentProxy
+  sizes: Size[]
 }
 
 /** 좌상단 원점 좌표 → 회전·배율이 적용된 화면 좌표. */
@@ -65,56 +85,72 @@ function place(
   }
 }
 
-export default function DocumentViewer({ doc, highlight, highlightLabel }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const markRef = useRef<HTMLDivElement>(null)
-  const pdfRef = useRef<pdfjs.PDFDocumentProxy | null>(null)
+/** 회전·배율을 적용한 화면상 쪽 크기 (pdf.js 뷰포트와 같은 내림). */
+function displaySize(size: Size, scale: number, rotation: Rotation): Size {
+  const turned = rotation === 90 || rotation === 270
+  const w = (turned ? size.height : size.width) * scale
+  const h = (turned ? size.width : size.height) * scale
+  return { width: Math.floor(w), height: Math.floor(h) }
+}
 
-  const [pageCount, setPageCount] = useState(1)
-  const [loadedUrl, setLoadedUrl] = useState<string | null>(null)
-  // 원본이 아직 안 열렸을 때 클릭한 근거가 몇 쪽인지 잃지 않도록 **자르지 않은**
-  // 희망 쪽수를 들고 있다가, 실제 표시 쪽수는 렌더 때 총 쪽수로 자른다.
-  const [desiredPage, setDesiredPage] = useState(1)
+export default function DocumentViewer({ doc, highlight, highlightLabel }: Props) {
+  const stageRef = useRef<HTMLDivElement>(null)
+  const pageRefs = useRef<(HTMLDivElement | null)[]>([])
+  const markRef = useRef<HTMLDivElement>(null)
+  /** 배율·회전을 바꿔도 보던 자리를 유지하려고 스크롤 비율을 들고 있는다. */
+  const scrollRatioRef = useRef(0)
+  const scrollRafRef = useRef(0)
+
+  const [loaded, setLoaded] = useState<LoadedPdf | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
   const [zoomIndex, setZoomIndex] = useState(2)
   const [rotation, setRotation] = useState<Rotation>(0)
-  const [pageSize, setPageSize] = useState({ width: 0, height: 0 })
+  const [imageSize, setImageSize] = useState<Size>({ width: 0, height: 0 })
   const [error, setError] = useState('')
 
   const scale = ZOOM_STEPS[zoomIndex]
   const isPdf = doc.file_format === 'pdf'
-  const pageNo = Math.min(desiredPage, pageCount)
+  // 탭을 바꾼 직후엔 이전 서류의 PDF가 아직 상태에 남아 있다. url이 다르면 없는 셈 친다.
+  const pdfDoc = isPdf && loaded?.url === doc.file_url ? loaded : null
+  const pageCount = pdfDoc?.sizes.length ?? 1
 
-  // 서류 탭이 바뀌면 배율·회전은 유지하고 페이지만 1쪽으로 되돌린다. 심사표 근거를
-  // 클릭해 넘어온 경우엔 그 근거가 있는 쪽을 연다 (R4.3).
-  //
-  // 이 조정을 effect가 아니라 렌더 중에 하는 이유: effect로 하면 "이전 서류의 1쪽"을
-  // 한 번 그린 뒤 다시 그리게 되어 화면이 깜빡인다. 아래는 리액트가 권장하는
-  // '프롭이 바뀔 때 상태 조정' 패턴으로, 커밋 없이 곧바로 다시 렌더된다.
+  // 서류 탭이 바뀌면 배율·회전은 유지하고 쪽 표시만 1쪽으로 되돌린다.
+  // effect가 아니라 렌더 중에 조정해 이전 서류 상태로 한 번 그려지는 깜빡임을 막는다.
   const [prevDocId, setPrevDocId] = useState(doc.document_id)
-  const [prevHighlight, setPrevHighlight] = useState<BBox | null>(highlight)
-  const docChanged = prevDocId !== doc.document_id
-  if (docChanged || prevHighlight !== highlight) {
+  if (prevDocId !== doc.document_id) {
     setPrevDocId(doc.document_id)
-    setPrevHighlight(highlight)
-    if (highlight) setDesiredPage(highlight.page + 1)
-    else if (docChanged) setDesiredPage(1)
-    if (docChanged) setError('')
+    setCurrentPage(1)
+    setError('')
   }
 
   // --- PDF 열기. 탭이 바뀔 때마다 이전 문서를 닫아 워커 메모리를 정리한다.
   useEffect(() => {
     if (!isPdf) return
     let cancelled = false
-    const task = pdfjs.getDocument({ url: doc.file_url })
+    // 실제 발급 서류는 JBIG2 스캔 이미지가 많아 wasm 디코더가 없으면 흰 페이지가
+    // 된다. 경로는 vite.config.ts의 pdfjsAssets 플러그인이 제공한다.
+    const base = import.meta.env.BASE_URL
+    const url = doc.file_url
+    const task = pdfjs.getDocument({
+      url,
+      wasmUrl: `${base}pdfjs/wasm/`,
+      cMapUrl: `${base}pdfjs/cmaps/`,
+      cMapPacked: true,
+      standardFontDataUrl: `${base}pdfjs/standard_fonts/`,
+    })
     task.promise
-      .then((pdf) => {
-        if (cancelled) {
-          void pdf.destroy()
-          return
-        }
-        pdfRef.current = pdf
-        setPageCount(pdf.numPages)
-        setLoadedUrl(doc.file_url)
+      .then(async (pdf) => {
+        // 스크롤 영역 높이를 처음부터 맞추려고 모든 쪽의 크기를 먼저 읽는다.
+        // 크기만 읽는 것이라 그리기보다 훨씬 가볍다.
+        const sizes = await Promise.all(
+          Array.from({ length: pdf.numPages }, async (_, i) => {
+            const page = await pdf.getPage(i + 1)
+            const vp = page.getViewport({ scale: 1, rotation: 0 })
+            return { width: vp.width, height: vp.height }
+          }),
+        )
+        if (cancelled) return
+        setLoaded({ url, pdf, sizes })
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
@@ -122,40 +158,90 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
     return () => {
       cancelled = true
       void task.destroy()
-      pdfRef.current = null
     }
   }, [doc.file_url, isPdf])
 
-  // --- 페이지 렌더
-  const render = useCallback(async () => {
-    const pdf = pdfRef.current
-    const canvas = canvasRef.current
-    if (!pdf || !canvas) return
-    const page = await pdf.getPage(Math.min(pageNo, pdf.numPages))
-    const base = page.getViewport({ scale: 1, rotation: 0 })
-    setPageSize({ width: base.width, height: base.height })
-    const viewport = page.getViewport({ scale, rotation })
-    canvas.width = Math.floor(viewport.width)
-    canvas.height = Math.floor(viewport.height)
-    await page.render({ canvas, viewport }).promise
-  }, [pageNo, scale, rotation])
+  // --- 탭이 바뀌면 맨 위부터 본다.
+  useLayoutEffect(() => {
+    const stage = stageRef.current
+    if (stage) stage.scrollTop = 0
+    scrollRatioRef.current = 0
+  }, [doc.file_url])
 
-  useEffect(() => {
-    void render().catch((e: unknown) =>
-      setError(e instanceof Error ? e.message : String(e)),
-    )
-  }, [render, pageCount, loadedUrl])
+  // --- 배율·회전이 바뀌면 보던 위치를 같은 비율로 되살린다.
+  //     근거 하이라이트가 떠 있으면 아래 effect가 하이라이트로 옮겨주므로 건너뛴다.
+  const hasHighlight = highlight !== null
+  useLayoutEffect(() => {
+    const stage = stageRef.current
+    if (!stage || hasHighlight) return
+    stage.scrollTop = scrollRatioRef.current * stage.scrollHeight
+  }, [scale, rotation, hasHighlight])
 
-  // --- 하이라이트: 위 렌더 중 조정이 쪽을 옮겨두면 여기서 그 자리로 스크롤한다 (R4.3)
+  // --- 스크롤 위치로 현재 쪽 번호를 계산한다 (프레임당 1번).
+  const onScroll = useCallback(() => {
+    if (scrollRafRef.current) return
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0
+      const stage = stageRef.current
+      if (!stage) return
+      scrollRatioRef.current = stage.scrollHeight ? stage.scrollTop / stage.scrollHeight : 0
+      const pages = pageRefs.current
+      if (pages.length === 0) return
+      // 맨 끝까지 내렸으면 마지막 쪽이 짧아도 마지막 쪽으로 친다.
+      if (stage.scrollTop + stage.clientHeight >= stage.scrollHeight - 2) {
+        setCurrentPage(pages.length)
+        return
+      }
+      // 화면 위쪽 40% 선을 넘어선 마지막 쪽을 '지금 보는 쪽'으로 본다.
+      const line = stage.getBoundingClientRect().top + stage.clientHeight * 0.4
+      let n = 1
+      pages.forEach((el, i) => {
+        if (el && el.getBoundingClientRect().top <= line) n = i + 1
+      })
+      setCurrentPage(n)
+    })
+  }, [])
+
+  useEffect(() => () => cancelAnimationFrame(scrollRafRef.current), [])
+
+  const goToPage = (n: number) => {
+    const stage = stageRef.current
+    const el = pageRefs.current[n - 1]
+    if (!stage || !el) return
+    const offset = el.getBoundingClientRect().top - stage.getBoundingClientRect().top
+    stage.scrollTop += offset - STAGE_PADDING
+    setCurrentPage(n)
+  }
+
+  // --- 하이라이트: 근거가 있는 쪽의 그 자리로 스크롤한다 (R4.3).
+  //     쪽 자리는 크기만으로 잡히므로 캔버스가 다 그려지기 전에도 위치가 맞다.
+  const highlightReady = isPdf ? pdfDoc !== null : imageSize.width > 0
   useEffect(() => {
-    if (!highlight) return
+    if (!highlight || !highlightReady) return
     markRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [highlight, pageSize, scale, rotation])
+  }, [highlight, highlightReady, scale, rotation])
 
-  const box =
-    highlight && pageSize.width
-      ? place(highlight, pageSize.width, pageSize.height, scale, rotation)
-      : null
+  const highlightPage = highlight ? Math.min(highlight.page, pageCount - 1) : -1
+
+  const renderMark = (box: Box) => (
+    <div
+      ref={markRef}
+      className="viewer__mark"
+      style={{
+        left: `${box.left}px`,
+        top: `${box.top}px`,
+        width: `${box.width}px`,
+        height: `${box.height}px`,
+      }}
+    >
+      {highlightLabel && <span className="viewer__mark-tag">{highlightLabel}</span>}
+    </div>
+  )
+
+  // 이전 서류가 더 길었으면 남은 쪽 참조를 잘라 현재 쪽 계산에 끼지 않게 한다.
+  useLayoutEffect(() => {
+    pageRefs.current.length = pdfDoc ? pdfDoc.sizes.length : 0
+  }, [pdfDoc])
 
   return (
     <div className="viewer">
@@ -163,13 +249,20 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
         <span className="viewer__name">{doc.file_name}</span>
         {isPdf && pageCount > 1 && (
           <span className="viewer__pages">
-            <button type="button" onClick={() => setDesiredPage(Math.max(1, pageNo - 1))}>
-              ‹
-            </button>
-            {pageNo} / {pageCount}
             <button
               type="button"
-              onClick={() => setDesiredPage(Math.min(pageCount, pageNo + 1))}
+              onClick={() => goToPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage <= 1}
+              aria-label="이전 쪽"
+            >
+              ‹
+            </button>
+            {currentPage} / {pageCount}
+            <button
+              type="button"
+              onClick={() => goToPage(Math.min(pageCount, currentPage + 1))}
+              disabled={currentPage >= pageCount}
+              aria-label="다음 쪽"
             >
               ›
             </button>
@@ -206,29 +299,154 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
 
       {error && <p className="viewer__error">원본을 열지 못했습니다: {error}</p>}
 
-      <div className="viewer__stage">
-        <div className="viewer__paper">
-          {isPdf ? (
-            <canvas ref={canvasRef} className="viewer__canvas" />
-          ) : (
-            <ImagePage doc={doc} scale={scale} rotation={rotation} onSize={setPageSize} />
-          )}
-          {box && (
-            <div
-              ref={markRef}
-              className="viewer__mark"
-              style={{
-                left: `${box.left}px`,
-                top: `${box.top}px`,
-                width: `${box.width}px`,
-                height: `${box.height}px`,
-              }}
-            >
-              {highlightLabel && <span className="viewer__mark-tag">{highlightLabel}</span>}
-            </div>
-          )}
-        </div>
+      <div className="viewer__stage" ref={stageRef} onScroll={onScroll}>
+        {isPdf ? (
+          <div className="viewer__doc">
+            {pdfDoc?.sizes.map((size, i) => (
+              <PdfPage
+                key={`${pdfDoc.url}#${i}`}
+                pdf={pdfDoc.pdf}
+                pageNo={i + 1}
+                size={size}
+                scale={scale}
+                rotation={rotation}
+                rootRef={stageRef}
+                pageRef={(el) => {
+                  pageRefs.current[i] = el
+                }}
+                onError={setError}
+              >
+                {highlight &&
+                  i === highlightPage &&
+                  renderMark(place(highlight, size.width, size.height, scale, rotation))}
+              </PdfPage>
+            ))}
+          </div>
+        ) : (
+          <div className="viewer__paper">
+            <ImagePage doc={doc} scale={scale} rotation={rotation} onSize={setImageSize} />
+            {highlight &&
+              imageSize.width > 0 &&
+              renderMark(place(highlight, imageSize.width, imageSize.height, scale, rotation))}
+          </div>
+        )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * PDF 한 쪽. 자리(크기)는 항상 차지하고, 캔버스는 스크롤 영역 근처에 왔을 때만 그린다.
+ *
+ * 다시 그릴 때마다 새 캔버스에 그린 뒤 다 그려지면 갈아 끼운다. 그래서 배율을 바꾸는
+ * 동안에도 이전 그림이 늘어난 채로 남아 있어 흰 화면이 번쩍이지 않고, pdf.js의
+ * "같은 캔버스에 동시 render 금지" 제약에도 걸리지 않는다.
+ */
+function PdfPage({
+  pdf,
+  pageNo,
+  size,
+  scale,
+  rotation,
+  rootRef,
+  pageRef,
+  onError,
+  children,
+}: {
+  pdf: pdfjs.PDFDocumentProxy
+  pageNo: number
+  size: Size
+  scale: number
+  rotation: Rotation
+  rootRef: RefObject<HTMLDivElement | null>
+  pageRef: (el: HTMLDivElement | null) => void
+  onError: (message: string) => void
+  children?: ReactNode
+}) {
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const holderRef = useRef<HTMLDivElement>(null)
+  const [near, setNear] = useState(false)
+
+  // 화면 위아래로 한 화면 반 이내에 들어오면 그린다.
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const io = new IntersectionObserver(
+      ([entry]) => setNear(entry.isIntersecting),
+      { root: rootRef.current, rootMargin: '150% 0px' },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [rootRef])
+
+  useEffect(() => {
+    const holder = holderRef.current
+    if (!holder) return
+    if (!near) {
+      // 멀어진 쪽은 캔버스를 비워 메모리를 돌려준다.
+      for (const c of holder.querySelectorAll('canvas')) {
+        c.width = 0
+        c.height = 0
+      }
+      holder.replaceChildren()
+      return
+    }
+    let cancelled = false
+    let task: pdfjs.RenderTask | null = null
+    const canvas = document.createElement('canvas')
+    canvas.className = 'viewer__canvas'
+
+    const draw = async () => {
+      const page = await pdf.getPage(pageNo)
+      if (cancelled) return
+      const viewport = page.getViewport({ scale, rotation })
+      // 캔버스 픽셀을 CSS 크기와 같게 잡으면 72dpi로 그려진다. 고배율 모니터에선
+      // 브라우저가 그걸 늘려 흐려지고, 300dpi 스캔 원본의 잔글씨도 뭉개진다.
+      // 그래서 기기 배율과 최소 2배 중 큰 값으로 그리고 CSS 크기만 화면에 맞춘다.
+      // 브라우저 캔버스 한도를 넘지 않도록 총 픽셀 수는 제한한다.
+      const MAX_PIXELS = 16_000_000
+      let outputScale = Math.max(window.devicePixelRatio || 1, 2)
+      const pixels = viewport.width * viewport.height * outputScale * outputScale
+      if (pixels > MAX_PIXELS) outputScale *= Math.sqrt(MAX_PIXELS / pixels)
+      canvas.width = Math.floor(viewport.width * outputScale)
+      canvas.height = Math.floor(viewport.height * outputScale)
+      task = page.render({
+        canvas,
+        viewport,
+        transform: outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0],
+      })
+      await task.promise
+      if (cancelled) return
+      for (const old of holder.querySelectorAll('canvas')) {
+        old.width = 0
+        old.height = 0
+      }
+      holder.replaceChildren(canvas)
+    }
+
+    draw().catch((e: unknown) => {
+      if (cancelled) return
+      onError(e instanceof Error ? e.message : String(e))
+    })
+    return () => {
+      cancelled = true
+      task?.cancel()
+    }
+  }, [near, pdf, pageNo, scale, rotation, onError])
+
+  const shown = displaySize(size, scale, rotation)
+  return (
+    <div
+      ref={(el) => {
+        wrapRef.current = el
+        pageRef(el)
+      }}
+      className="viewer__page"
+      style={{ width: `${shown.width}px`, height: `${shown.height}px` }}
+      aria-label={`${pageNo}쪽`}
+    >
+      <div ref={holderRef} className="viewer__page-canvas" />
+      {children}
     </div>
   )
 }
@@ -243,7 +461,7 @@ function ImagePage({
   doc: OfficerDocument
   scale: number
   rotation: Rotation
-  onSize: (size: { width: number; height: number }) => void
+  onSize: (size: Size) => void
 }) {
   return (
     <img

@@ -12,6 +12,8 @@ from demo.backend.ocr.pdftext import read_page_text
 from engine_v2.pipeline import ocr
 from engine_v2.tests.nhis_form_samples import acquisition_cells, text_pdf
 from .test_portal_uploads import client, new_app, upload
+from demo.backend.tests.test_portal_uploads import assert_upload_status
+from demo.backend.tests.security_support import authenticate_officer
 
 
 RRN = "900101-1654321"
@@ -56,7 +58,7 @@ def test_upload_persisted_results_responses_logs_and_birth(image, split, client,
     aid = new_app(client)
     response, saved = upload(client, aid, path, "nhis_acquisition_loss", filename="FAKE-safe-name.pdf")
     assert saved["fields"]["생년월일"] == "1990-01-01"
-    assert response["status"] == "PASS"
+    assert_upload_status(response, "PASS")
     direct = read_document(str(path))
     assert direct.fields["생년월일"] == "1990-01-01"
     with models.get_session() as session:
@@ -100,7 +102,8 @@ def test_legacy_stored_ocr_values_are_masked_in_read_projections():
     assert row.ocr_json["fields"]["주민등록번호"] == RRN
 
 
-def test_officer_response_masks_legacy_review_payload_and_score(client):
+def test_officer_response_masks_legacy_review_payload_and_score(client, monkeypatch):
+    authenticate_officer(client, monkeypatch)
     aid = new_app(client)
     with models.get_session() as session:
         application = session.get(models.Application, aid)

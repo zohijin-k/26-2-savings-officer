@@ -10,7 +10,7 @@ from demo.backend.rules.doc_check import _check_billing_months
 from demo.backend.rules.doc_types import DocType
 from demo.backend.tests.test_payment_failure_certainty import requirement
 from demo.backend.tests.test_p2_nhis_uploads import image_pdf, use_own_words
-from demo.backend.tests.test_portal_uploads import client, new_app, upload
+from demo.backend.tests.test_portal_uploads import assert_upload_status, client, new_app, upload
 from engine_v2.extractors import nhis_payment, payment_period
 from engine_v2.schemas.models import DocType as V2DocType
 from engine_v2.tests import p2_payment_samples as base, payment_stage2_samples as shapes
@@ -117,7 +117,7 @@ def test_repaired_shapes_traverse_actual_image_upload_without_changing_average(c
     use_own_words(monkeypatch, cells, size)
     path = image_pdf(tmp_path / "FAKE-stage2-shape.pdf", size)
     response, stored = upload(client, new_app(client, name=base.NAME, birth=base.BIRTH), path, "nhis_payment")
-    assert response["status"] == "PASS"
+    assert_upload_status(response, "PASS")
     assert stored["fields"]["건강보험료"] == "50000"
     assert json.loads(stored["fields"]["월별고지금액"])["2025-12"] == "30000"
     assert stored["fields"]["양식판독상태"] == "완전"
@@ -129,7 +129,7 @@ def test_unrecognized_adjustment_stays_review_through_actual_upload(client, tmp_
     use_own_words(monkeypatch, cells, size)
     path = image_pdf(tmp_path / "FAKE-stage2-unknown.pdf", size)
     response, stored = upload(client, new_app(client, name=base.NAME, birth=base.BIRTH), path, "nhis_payment")
-    assert response["status"] == "NEEDS_REVIEW"
+    assert_upload_status(response, "NEEDS_REVIEW")
     assert stored["fields"]["양식판독상태"] == "불완전"
 
 

@@ -11,6 +11,7 @@ from demo.backend.rules.required_docs import WorkCategory
 from demo.backend.tests.test_eligibility_blockers import ready
 from demo.backend.tests.test_income_review import make_application
 from demo.backend.tests.test_portal_uploads import client
+from demo.backend.tests.security_support import claim_synthetic_application
 from engine_v2.tests import fail_case_samples as sample
 from engine_v2.extractors import daily_work_record,insurance_4
 from engine_v2.schemas.models import DocType as V2Type
@@ -19,6 +20,7 @@ from engine_v2.schemas.models import DocType as V2Type
 @pytest.mark.parametrize("case",["3a","3b"])
 def test_source_shaped_work_failure_reaches_all_consumers(client,case):
     app=ready(make_application(premium=1))
+    claim_synthetic_application(client,app.id)
     if case=="3a":
         pages=sample.daily()
         read=_from_nhis(daily_work_record.extract(pages),pages,V2Type,
@@ -59,6 +61,10 @@ def test_source_shaped_work_failure_reaches_all_consumers(client,case):
     officer=next(row for row in _eligibility(Entry(app,review),{}) if row["key"]=="work")
     assert officer["ok"] is False and officer["basis"]==work["basis"]
     final=client.get(f"/api/applications/{app.id}/final-check").json()
-    item=next(item for item in final["blockers"] if item["kind"]=="eligibility" and item["target"]=="work")
-    assert not final["can_submit"] and item["code"]=="WORK_CONTINUITY_NOT_MET"
-    assert client.post(f"/api/applications/{app.id}/submit").status_code==400
+    assert final["can_submit"]
+    assert not any(item["kind"]=="eligibility" for item in final["blockers"])
+    assert client.post(f"/api/applications/{app.id}/submit").status_code==200
+    with models.get_session() as session:
+        saved=session.exec(select(models.Review).where(models.Review.application_id==app.id)).one()
+        assert saved.final_status=="FAIL"
+        assert saved.review_payload_json["work_continuity"]==work

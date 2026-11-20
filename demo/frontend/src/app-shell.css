@@ -19,8 +19,9 @@
 .shell__home { display: block; flex: none; line-height: 0; cursor: pointer; margin-left: -8px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; transition: background-color 160ms ease; }
 .shell__home:hover { background: var(--brand-5); }
 .shell__logo { display: block; width: auto; height: 36px; }
-/* 역할 표시는 로고 바로 옆에 둔다(오른쪽 도구 자리는 비어 있다). */
+/* 역할 표시는 로고 바로 옆에 둔다. 오른쪽 자리에는 로그인 상태 줄(로그아웃)이 온다(OfficerSession). */
 .shell__role { margin-right: auto; padding-left: var(--space-4); border-left: 1px solid var(--color-border); color: #33363d; font-size: var(--fs-15); font-weight: 700; line-height: 24px; white-space: nowrap; }
+.shell__session { display: flex; align-items: center; }
 
 /* 본문 좌우 여백이 16px로 줄어드는 폭에서 머리글도 같이 줄인다. */
 @media (max-width: 800px) { .shell__inner { padding-inline: 16px; } }

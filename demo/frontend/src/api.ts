@@ -1,4 +1,5 @@
-import { mockBulkDecision, mockDecision, mockOfficerList, mockReviewDetail, mockRoles } from './pages/officer/mock-data.ts'
+import { officerSessionResponse } from './officer-session.ts'
+import { mockBulkDecision, mockDecision, mockOfficerList, mockOfficerSummary, mockReviewDetail, mockRoles } from './pages/officer/mock-data.ts'
 
 export type DocStatus = 'PASS' | 'FAIL' | 'NEEDS_REVIEW'
 export type DecisionKey = 'approve' | 'reject' | 'hold'
@@ -143,11 +144,44 @@ export interface ReviewDetailData {
   role: OfficerRole
 }
 
+/** 최종 판정 패널 맨 위의 AI 종합의견. 저장된 판정을 풀어 쓴 참고 문구이며 판정을 바꾸지 않는다. */
+/** 근거 한 건. 화면에는 코드 대신 label(담당자 문구)과 kind_label(규칙 판정·자동 대조 등)을 보인다. */
+export interface SummaryEvidence {
+  code: string
+  label: string
+  kind: 'rule' | 'auto' | 'eligibility' | 'score' | string
+  kind_label: string
+}
+export interface SummaryCheckPoint {
+  slot_key: string | null
+  title: string
+  detail: string
+  /** 근거 코드. 서버가 입력에 있던 코드만 남긴다. 화면에는 evidence를 쓴다. */
+  codes: string[]
+  evidence: SummaryEvidence[]
+  /** 원본에서 강조할 판독 항목(문서 bboxes의 키). 위치가 없으면 null. */
+  field: string | null
+}
+export interface OfficerSummary {
+  headline: string
+  status_explanation: string
+  check_points: SummaryCheckPoint[]
+  document_notes: { slot_key: string; note: string }[]
+  score_note: string
+  /** jbai = 전북AI 생성, rules = 제공자 꺼짐·실패 시 규칙 기반 대체 요약 */
+  source: 'jbai' | 'rules' | string
+  label: string
+  model: string | null
+  generated_at: string
+  cached: boolean
+}
+
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
+  officerSessionResponse(path, response)
   if (!response.ok) throw new Error(`요청을 처리하지 못했습니다 (${response.status})`)
   return response.json() as Promise<T>
 }
@@ -167,6 +201,12 @@ export const fetchOfficerList = (query: OfficerListQuery, page: number): Promise
 export const fetchReviewDetail = async (id: number, role: RoleKey = 'province'): Promise<ReviewDetailData> => isOfficerMockActive()
   ? Promise.resolve(mockReviewDetail(id, role))
   : json(`/api/officer/applications/${id}?role=${role}`)
+export const fetchOfficerSummary = (id: number, role: RoleKey = 'province'): Promise<OfficerSummary> => isOfficerMockActive()
+  ? Promise.resolve(mockOfficerSummary(id))
+  : json(`/api/officer/applications/${id}/summary?role=${role}`)
+export const regenerateOfficerSummary = (id: number, role: RoleKey = 'province'): Promise<OfficerSummary> => isOfficerMockActive()
+  ? Promise.resolve(mockOfficerSummary(id))
+  : json(`/api/officer/applications/${id}/summary?role=${role}`, { method: 'POST' })
 export const postDecision = (id: number, decision: DecisionKey, memo: string, role: RoleKey = 'province'): Promise<unknown> => isOfficerMockActive()
   ? Promise.resolve(mockDecision(id, decision, memo, role))
   : json(`/api/officer/applications/${id}/decision`, {

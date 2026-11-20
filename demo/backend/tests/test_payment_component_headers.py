@@ -7,7 +7,7 @@ grouped legacy form passes; 0원 and 장기요양-ratio picks still go to review
 import pytest
 
 from demo.backend.tests.test_p2_nhis_uploads import image_pdf, use_own_words
-from demo.backend.tests.test_portal_uploads import client, new_app, upload  # noqa: F401
+from demo.backend.tests.test_portal_uploads import assert_upload_status, client, new_app, stored_findings, upload  # noqa: F401
 from demo.backend.tools.verify_upload import SAFE_CODES
 from engine_v2.tests import p2_payment_samples as sample, test_payment_amount_column as synth
 
@@ -50,8 +50,8 @@ def test_lost_middle_lines_go_to_review_through_actual_upload(client, tmp_path, 
     use_own_words(monkeypatch, kept, size)
     path = image_pdf(tmp_path / "FAKE-payment-component.pdf", size)
     response, stored = upload(client, new_app(client, name=sample.NAME, birth=sample.BIRTH), path, "nhis_payment")
-    assert response["status"] == "NEEDS_REVIEW"
-    assert CODE in [finding["code"] for finding in response["findings"]]
+    assert_upload_status(response, "NEEDS_REVIEW")
+    assert CODE in [finding["code"] for finding in stored_findings(response)]
     assert stored["fields"]["구성머리글상태"] == "불완전" and stored["confidence"] <= .4
     assert stored["fields"]["구성머리글불완전사유"] == "GAP"
 

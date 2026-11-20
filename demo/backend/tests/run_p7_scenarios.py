@@ -41,6 +41,7 @@ from sqlmodel import create_engine
 
 from .. import models
 from ..forms import coords as form_coords
+from .security_support import authenticate_officer
 from ..rules.programs import DOUBLE_SAVINGS, JOB_PACKAGE
 from ..rules.roles import ROLE_PROVINCE
 
@@ -772,8 +773,12 @@ def test_form_files_and_paper_flow(client, tmp: Path) -> None:
         files={"file": ("synthetic-unsigned.pdf", unsigned_path.read_bytes(), "application/pdf")},
         data={"slot_key": "admin_info_consent"},
     )
-    check("서명 없는 스캔은 담당자 확인", unsigned_response.json().get("status"), "NEEDS_REVIEW")
-    check_true("서명 판독 불확실 사유", any(f.get("code") == "ADMIN_CONSENT_SIGNATURE_UNREADABLE" for f in unsigned_response.json().get("findings", [])))
+    check("서명 판독 불확실 스캔 업로드 완료", unsigned_response.json().get("status"), "UPLOADED")
+    check("서명 판독 불확실 사유 비노출", unsigned_response.json().get("findings"), [])
+    with models.get_session() as session:
+        unsigned_stored = session.get(models.Document, unsigned_response.json()["document_id"])
+    check("서명 판독 불확실 원판정 보존", unsigned_stored.stage1_status, "NEEDS_REVIEW")
+    check_true("서명 판독 불확실 원사유 보존", any(f.get("code") == "ADMIN_CONSENT_SIGNATURE_UNREADABLE" for f in unsigned_stored.findings_json))
 
     flow_id, _ = seed(client, tmp)
     context = client.put(f"/api/applications/{flow_id}/doc-context", json={
@@ -1353,6 +1358,7 @@ def main(clock_day: date | None = None) -> int:
     try:
         test_coordinate_maps()
         with TestClient(app) as client:
+            authenticate_officer(client)
             ds_id, jp_id = seed(client, tmp)
             test_export_headers(client, ds_id, jp_id)
             test_form_files_and_paper_flow(client, tmp)

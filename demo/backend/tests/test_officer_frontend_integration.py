@@ -7,6 +7,7 @@ import subprocess
 from fastapi.testclient import TestClient
 
 from demo.backend.main import app
+from demo.backend.tests.security_support import authenticate_officer
 from demo.backend.tests.test_seed_officer_demo import isolated_demo
 from demo.backend.tools import seed_officer_demo as tool
 
@@ -32,11 +33,12 @@ class TableText(HTMLParser):
             self.parts.append(data)
 
 
-def test_seeded_api_rows_render_in_the_actual_frontend_queue_tabs(isolated_demo, capsys):
+def test_seeded_api_rows_render_in_the_actual_frontend_queue_tabs(isolated_demo, capsys, monkeypatch):
     assert tool.main([]) == 0
     seeded = json.loads(capsys.readouterr().out)
     before = tool._snapshot()
     with TestClient(app) as client:
+        authenticate_officer(client, monkeypatch)
         response = client.get("/api/officer/applications", params={
             "role": "province", "program": "double_savings", "page_size": 200,
         })

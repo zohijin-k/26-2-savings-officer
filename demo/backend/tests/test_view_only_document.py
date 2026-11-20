@@ -2,6 +2,8 @@
 from engine_v2.tests.test_resident_abstract import wd
 
 from ..api.common import applicant_findings
+from ..api.officer import _document_view
+from ..models import Document
 from ..ocr.pdftext import VIEWING_COPY_FIELD, read_page_text
 from .test_resident_blank_pages import _read, _two_pages
 
@@ -33,4 +35,7 @@ def test_text_layer_mark_sets_the_flag_only_when_printed():
 def test_applicant_view_keeps_other_findings():
     findings = [{"code": "VIEW_ONLY_DOCUMENT", "message": "담당자용", "severity": "NEEDS_REVIEW"},
                 {"code": "ISSUE_DATE_MISSING", "message": "발급일", "severity": "NEEDS_REVIEW"}]
-    assert [f["code"] for f in applicant_findings(findings)] == ["ISSUE_DATE_MISSING"]
+    assert applicant_findings(findings) == []
+    document = Document(slot_key="resident_abstract", file_path="synthetic.pdf", findings_json=findings)
+    officer_findings = _document_view(document, {})["findings"]
+    assert [f["code"] for f in officer_findings] == ["VIEW_ONLY_DOCUMENT", "ISSUE_DATE_MISSING"]

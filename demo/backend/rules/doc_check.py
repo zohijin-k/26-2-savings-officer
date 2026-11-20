@@ -1002,7 +1002,8 @@ def _check_document(
             how_to_fix="그대로 두셔도 담당자가 원본을 확인합니다. 주소 이력이 모든 쪽에 선명하게 보이는 초본 전체를 다시 올리면 더 빨리 확인됩니다.",
             severity="NEEDS_REVIEW",
             detail=f"세부 사유: {ocr.fields.get('주소이력불확실사유') or '미상'} "
-                   "(NUMBER_GAP 번호 누락, NUMBER_UNREADABLE 번호 판독 실패, EMPTY_PAGE 표 머리글만 읽힌 쪽).",
+                   "(NUMBER_GAP 번호 누락, NUMBER_UNREADABLE 번호 판독 실패, EMPTY_PAGE 표 머리글만 읽힌 쪽, "
+                   "TABLE_NOT_FOUND 후속 표 미확인, ROWS_UNREADABLE 후속 이력 판독 불완전).",
         ))
 
     if (ocr.detected_doc_type is DocType.NHIS_PAYMENT and req.accepts(ocr.detected_doc_type)

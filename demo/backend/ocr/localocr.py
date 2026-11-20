@@ -278,6 +278,8 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
             ("NUMBER_UNREADABLE", getattr(ex, "history_numbers", "NA") == "UNREADABLE"),
             ("EMPTY_PAGE", getattr(ex, "history_empty_page", False)),
         ) if hit]
+        table_issues = getattr(ex, "history_table_issues", [])
+        uncertain.extend(table_issues)
         if uncertain:
             fields["주소이력상태"] = "불확실"
             fields["주소이력불확실사유"] = ",".join(uncertain)
@@ -285,6 +287,10 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
                 if label in fields:
                     fields[label] = "불확실"
                 bboxes.pop(label, None)
+            if table_issues:
+                for label in ("현주소시도", "주소변동내역"):
+                    if label in fields:
+                        fields[label] = "불확실"
 
     passed = sum(v.passed for v in ex.validations)
     fields["판독검증"] = f"{passed}/{len(ex.validations)} 통과"
@@ -296,6 +302,7 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
     key = [f[k].confidence for k in ("issue_date", "name", "birth_date") if k in f]
     confidence = min([ex.type_confidence, *key]) if "issue_date" in f else 0.5
     if any(not validation.passed and validation.name.startswith(("history", "occurred"))
+           and validation.name != "history_tables_readable"
            for validation in ex.validations):
         confidence = min(confidence, .4)
         fields["판독경고"] = "주소 이력의 순번 또는 날짜를 완전히 확인하지 못했습니다."

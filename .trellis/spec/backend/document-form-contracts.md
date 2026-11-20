@@ -246,3 +246,44 @@ Good: a markerless balanced table with confirmed range and source issue date ret
 ### Wrong versus correct
 
 Wrong: aggregate unrelated batch-folder files into an upload slot. Correct: the explicit-slot replacement contract makes its retained file the complete received set; require reliable consistent printed excess before FAIL. Wrong: existing arithmetic_complete=True survives changed monthly fields. Correct: validate and bind original source-derived monthly values and issue date before excluding paging review.
+
+## 17. Resident continuation table recovery
+
+### Scope / trigger
+
+Resident abstracts whose continuation headers are separated into nearby OCR lines. Preserve shared OCR grouping, local model assets, legacy same-line tables and existing page policy.
+
+### Signatures
+
+`resident_abstract._table_bounds(lines, *, allow_split=True, corroborated=False)` retains the default callable contract. `ResidentAbstractResult.history_table_issues` is a default-empty list of fixed reason codes. No API/DB migration.
+
+### Contracts
+
+- Recovery requires observed number/address/date-or-holder header categories in ordered column regions, bounded vertical distance (at most 3.5 page-height points and three median glyph heights, adjacent relevant lines at most 1.5 heights), and matching independent ordinal/address/report-date rows. Two complete rows are required by default; one requires an immediately preceding read table and compatible consecutive markers with the same total.
+- Parse candidate pages into temporary state before merging. Match observed ordinals and date cells to the parsed rows; do not append an unread candidate to the prior address. Preserve existing memo numbering and blank-page exclusions. `_table_end` shares the established military-section/blank-space/footer boundary between detection, split-header search and omission-risk evidence; later unrelated sections cannot support recovery or review.
+- Unrecovered structured evidence emits `TABLE_NOT_FOUND`; an otherwise consistent legacy continuation with unread date-cell evidence emits `ROWS_UNREADABLE`. Header-free suspicion requires multiple aligned regional-address/ordinal/date rows. A compact partial header plus an aligned regional-address row supports review only.
+- `history_tables_readable=False` is added for new issues or an existing counted empty-table page. Exclude this new check from the legacy global confidence cap; cap history/count/current-address fields instead. The direct engine consumes its accompanying warning; the adapter retains the exact existing `EMPTY_PAGE` reason for already detected empty tables. Existing number/date defects retain their established global confidence policy.
+- `_from_resident` extends `주소이력불확실사유`, sets `주소이력상태=불확실`, and suppresses residence-derived transfer/count/region/history-presence values. Independently verified identity, issue-date and page FAIL evidence remains usable. The existing `ADDRESS_HISTORY_INCOMPLETE` finding is review-only; FAIL retains precedence.
+- Date-value concatenation is not introduced. Fragmented/conflicting/unread report-date cells are uncertainty; never substitute lookalike characters or invent missing components.
+- Diagnostic observers must preserve public extractor `*args, **kwargs`, record invocation before calling and re-raise failures. Do not wrap private bounds/row helpers with fixed signatures or equate their call counts with pages/committed rows: split recovery performs internal probes. Count committed entries by `HistoryEntry.page`; keep telemetry errors distinct from engine errors and retain closed, value-free output schemas.
+
+### Validation / error matrix
+
+| Evidence | Outcome |
+|---|---|
+| Compact ordered split header and complete aligned rows | Recover observed entries; retain ordinary assessment |
+| Structured continuation but failed recovery / unexplained date cells | No speculative page merge; scoped history uncertainty and review |
+| Independent confirmed identity/date/page failure plus new history issue | Preserve FAIL and its code |
+| Unrelated prose/table, scattered labels or dates without address-row geometry | No new history issue; retain existing page assessment |
+
+### Good / base / bad cases
+
+Good: eight entries plus two recovered continuation entries. Base: normal one/two-page same-line tables keep their previous results. Bad: concatenate whole-page prose to find labels, treat every extra page as incomplete, or globally lower identity confidence because the address table is unread.
+
+### Required tests
+
+New engine/backend `test_resident_history_continuation.py` covers 8+2, single corroborated row, split labels, proximity boundaries/scaling, ambiguous/partial tables, date fragments/lookalikes, attachments, old ordinal/page protections and combined independent failures. Keep previous expectations unchanged; run full suites/scenarios/frontend and identical synthetic before/after measurement, reporting all status transitions without document keys.
+
+### Wrong versus correct
+
+Wrong: eight sequential parsed rows establish completeness after an unread second table. Correct: independent continuation evidence requires recovery or explicit review. Wrong: new uncertainty globally caps issue-date confidence. Correct: scope the cap to history and preserve independent FAIL precedence, including the existing history-limited page-confidence exception.

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from statistics import median
@@ -144,6 +145,8 @@ class ResidentAbstractResult:
     history_numbers: str = "NA"
     #: 주소 표 머리글은 찾았는데 이력 줄을 0건 읽은 쪽이 있음 (쪽 수에서 뺀 중복 빈 쪽 제외).
     history_empty_page: bool = False
+    #: Fixed-vocabulary risks from unread continuation tables; no source values.
+    history_table_issues: list[str] = field(default_factory=list)
 
 
 # --- 유틸 ---------------------------------------------------------------
@@ -288,21 +291,118 @@ def _content_chars(lines: list[list[Word]], top: float) -> int:
     return count
 
 
-def _table_bounds(lines: list[list[Word]]) -> tuple[float, float] | None:
+def _table_bounds(lines: list[list[Word]], *, allow_split: bool = True,
+                  corroborated: bool = False) -> tuple[float, float] | None:
     start = None
     for line in lines:
         t = squash(line_text(line))
         if line[0].cy > HEADER_MAX_Y and "번호" in t and ("세대주" in t or "신고일" in t or "발생일" in t):
             start = line[0].cy + 1.5   # 바로 아래 세로쓰기 소제목 줄 건너뜀
             break
-    if start is None:
-        return None
+    split = start is None
+    if split:
+        start = _split_header_start(lines) if allow_split else None
+        if start is None:
+            return None
+    end = _table_end(lines, start)
+    if split:
+        draft: list[HistoryEntry] = []
+        notes: list[int] = []
+        observed: list[int] = []
+        _parse_rows(lines, start, end, 0, draft, [], notes, observed)
+        numbers = [entry.no for entry in draft]
+        anchors, dated, paired = _history_body_evidence(lines, start, end)
+        if (len(draft) < (1 if corroborated else 2)
+                or any(entry.no is None or not entry.address for entry in draft)
+                or len(set(numbers)) != len(numbers)
+                or sorted(numbers + notes) != sorted(observed)
+                or anchors != len(draft) or dated != len(draft) or paired != len(draft)
+                or not _report_cells_readable(lines, start, end)):
+            return None
+    return start, end
+
+
+def _table_end(lines: list[list[Word]], start: float) -> float:
     end = FOOTER_Y
     for line in lines:
-        t = squash(line_text(line))
-        if line[0].cy > start and ("이하여백" in t or ("병역" in t and line[0].x0 < 12)):
+        text = squash(line_text(line))
+        if line[0].cy > start and ("이하여백" in text or ("병역" in text and line[0].x0 < 12)):
             end = min(end, line[0].cy)
-    return start, end
+    return end
+
+
+def _split_header_start(lines: list[list[Word]], *, require_address: bool = True) -> float | None:
+    """Prove a compact, ordered header band, without changing OCR line grouping."""
+    end = _table_end(lines, HEADER_MAX_Y)
+    words = [word for line in lines for word in line if HEADER_MAX_Y < word.cy < end]
+    numbers = [word for word in words if squash(word.text) == "번호"
+               and word.x0 < COL_NO_MAX_X and HEADER_MAX_Y < word.cy < 65]
+    starts = []
+    for number in numbers:
+        radius = min(3.5, 3 * max(number.y1 - number.y0, .3))
+        band = [word for word in words if abs(word.cy - number.cy) <= radius]
+        address = [word for word in band if COL_NO_MAX_X <= word.x0 < COL_ADDR_MAX_X
+                   and squash(word.text) in {"주", "소", "주소"}]
+        dates = [word for word in band if COL_OCCUR_X[0] <= word.x0 < COL_HOLDER_MIN_X
+                 and squash(word.text) in {"발", "생", "신", "고", "일", "발생", "신고",
+                                           "발생일", "신고일", "발생일/신고일"}]
+        holders = [word for word in band if word.x0 >= COL_HOLDER_MIN_X
+                   and squash(word.text) in {"세대주", "및", "관계", "세대주및관계"}]
+
+        def joined(cell):
+            return squash("".join(line_text(line) for line in group_lines(cell)))
+
+        date_label = (any(squash(word.text) in {"발생일", "신고일", "발생일/신고일"} for word in dates)
+                      or any(joined([word for word in dates if left <= word.x0 < right])
+                             in {"발생일", "신고일"} for left, right in (COL_OCCUR_X, COL_REPORT_X)))
+        holder_label = joined(holders) in {"세대주", "세대주및관계"}
+        if (require_address and joined(address) != "주소") or not (date_label or holder_label):
+            continue
+        selected = [number, *address, *(dates if date_label else []), *(holders if holder_label else [])]
+        height = median(max(word.y1 - word.y0, .3) for word in selected)
+        centers = sorted({word.cy for word in selected})
+        if ((address and number.x1 >= min(word.x0 for word in address))
+                or (address and max(word.x1 for word in address) >= min(word.x0 for word in dates + holders))
+                or centers[-1] - centers[0] > min(3.5, 3 * height)
+                or any(b - a > 1.5 * height for a, b in zip(centers, centers[1:]))):
+            continue
+        starts.append(max(word.y1 for word in selected))
+    return starts[0] if len(starts) == 1 else None
+
+
+def _history_body_evidence(lines: list[list[Word]], start: float, end: float,
+                           *, require_region: bool = False) -> tuple[int, int, int]:
+    """Count independent ordinal/address/date alignments, never inferred rows."""
+    end = min(end, _table_end(lines, start))
+    body = [word for line in lines for word in line if start <= word.cy < end]
+    numbers = [word for word in body if word.x0 < COL_NO_MAX_X
+               and re.fullmatch(r"[0-9]{1,3}", word.text.strip())]
+    dates = [word for word in body if COL_REPORT_X[0] <= word.x0 < COL_REPORT_X[1]
+             and _to_date(ISO_DATE.fullmatch(normalize_format_text(word.text))) is not None]
+
+    def near(a, b):
+        return abs(a.cy - b.cy) <= 1.5 * max(a.y1 - a.y0, b.y1 - b.y0, .3)
+
+    def address_at(anchor):
+        return any(COL_NO_MAX_X <= word.x0 < COL_ADDR_MAX_X and near(anchor, word)
+                   and not word.text.strip().startswith("[") and re.search(r"[가-힣]", word.text)
+                   and (not require_region or any(squash(word.text).startswith(region) for region in SIDO))
+                   for word in body)
+
+    anchors = [word for word in numbers if address_at(word)]
+    dated = [word for word in dates if address_at(word)]
+    paired = sum(len([number for number in anchors if near(number, word)]) == 1 for word in dated)
+    return len(anchors), len(dated), paired
+
+
+def _report_cells_readable(lines: list[list[Word]], start: float, end: float) -> bool:
+    """Fragmented/conflicting date-shaped cells are uncertainty, not corrected values."""
+    tokens = [word for line in lines for word in line if start <= word.cy < end
+              and COL_REPORT_X[0] <= word.x0 < COL_REPORT_X[1]
+              and (re.search(r"[0-9]", normalize_format_text(word.text))
+                   or re.fullmatch(r"[OoIl]{4}[-.][OoIl]{1,2}[-.][OoIl]{1,2}", word.text.strip()))]
+    return all(len(row) == 1 and _to_date(ISO_DATE.fullmatch(normalize_format_text(row[0].text))) is not None
+               for row in group_lines(tokens))
 
 
 def _join_note_numbers(lines: list[list[Word]], start: float, end: float) -> list[list[Word]]:
@@ -404,25 +504,57 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
     observed_numbers: list[int] = []
     warnings: list[str] = []
 
+    table_issues: list[str] = []
+
     contentless: list[bool] = []
     table_without_rows: list[bool] = []
     #: 표 머리글만 되풀이되고 이력 줄·내용이 없는 쪽 (다른 쪽과 같은 쪽표기일 때만 쪽 수에서 뺀다).
     table_only: list[bool] = []
+    prior_table_read = False
     for p, r in pages:
         lines = group_lines(normalize(r.words, p.page, p.pixel_size))
         if p.page == 0:
             first_page_lines = lines
         headers.append(_parse_header(lines))
-        bounds = _table_bounds(lines)
+        bounds = _table_bounds(lines, allow_split=False)
+        previous = bool(entries)
+        marker = headers[-1]["page_no"]
+        prior_marker = headers[-2]["page_no"] if len(headers) > 1 else None
+        compatible = (marker is not None and prior_marker is not None
+                      and marker == (prior_marker[0] + 1, prior_marker[1]))
+        if bounds is None and previous and compatible:
+            bounds = _table_bounds(lines, corroborated=prior_table_read)
         contentless.append(bounds is None and _content_chars(lines, BODY_TOP_Y) <= BLANK_BODY_MAX_CHARS)
         before, notes_before = len(entries), len(note_numbers)
+        issue = None
         if bounds:
-            _parse_rows(lines, *bounds, p.page, entries, pending, note_numbers, observed_numbers)
+            # Preserve legacy parsing exactly unless independent evidence exposes a new risk.
+            draft, draft_pending = deepcopy(entries), list(pending)
+            draft_notes, draft_observed = list(note_numbers), list(observed_numbers)
+            _parse_rows(lines, *bounds, p.page, draft, draft_pending, draft_notes, draft_observed)
+            draft_numbers = [entry.no for entry in draft if entry.no is not None] + draft_notes
+            legacy_sequence_ok = (all(entry.no is not None for entry in draft)
+                                  and sorted(draft_numbers) == sorted(draft_observed))
+            if (previous and len(draft) > before and legacy_sequence_ok
+                    and not _report_cells_readable(lines, *bounds)):
+                issue = "ROWS_UNREADABLE"
+            else:
+                entries, pending = draft, draft_pending
+                note_numbers, observed_numbers = draft_notes, draft_observed
         else:
             warnings.append(f"page {p.page}: 주소 이력 표를 찾지 못함")
+            if previous and compatible:
+                anchors, dated, paired = _history_body_evidence(lines, HEADER_MAX_Y, FOOTER_Y, require_region=True)
+                if (paired >= 2 or (paired and _split_header_start(lines, require_address=False) is not None)
+                        or (_split_header_start(lines) is not None and (anchors or dated))):
+                    issue = "TABLE_NOT_FOUND"
+        if issue and issue not in table_issues:
+            table_issues.append(issue)
         table_only.append(bool(bounds) and len(entries) == before
                           and _content_chars(lines, bounds[0]) <= BLANK_BODY_MAX_CHARS)
         table_without_rows.append(bool(bounds) and len(entries) == before and len(note_numbers) == notes_before)
+        prior_table_read = (bool(bounds) and not issue and len(entries) > before and legacy_sequence_ok
+                            and _report_cells_readable(lines, *bounds))
 
     # --- 서류 종류 ---
     titles = "".join(h["title"] for h in headers)
@@ -540,7 +672,11 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
     validations.append(Validation("occurred_before_reported", occ_ok))
 
     hist_checks = [v.passed for v in validations if v.name.startswith(("history", "occurred"))]
-    history_complete = all(hist_checks)
+    legacy_history_complete = all(hist_checks)
+    history_complete = legacy_history_complete and not table_issues
+    if table_issues:
+        validations.append(Validation("history_tables_readable", False))
+        warnings.append("후속 페이지의 주소 이력 표를 완전히 읽지 못했습니다.")
     if not history_complete:
         warnings.append("주소 이력의 순번 또는 날짜를 완전히 확인하지 못했습니다.")
     if entries:
@@ -560,9 +696,13 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
             confidence=_confidence(hist_checks + [resolved_sido(entries, len(entries) - 1) is not None]),
             bbox=_bbox(last.words, page_map))
 
-    if not history_complete:
+    if not legacy_history_complete:
         for extracted in fields.values():
             extracted.confidence = min(extracted.confidence, .4)
+    elif not history_complete:
+        for key in ("address_history", "address_history_count", "current_address"):
+            if key in fields:
+                fields[key].confidence = min(fields[key].confidence, .4)
 
     # 내용 없는 쪽(빈 쪽, 머리 상자만 되풀이된 쪽)은 쪽표기가 없거나 다른 쪽과 같은 쪽표기일 때만
     # 쪽 수 확인에서 뺀다. 내용이 있는 쪽은 중복이어도 그대로 센다. 표 머리글까지 되풀이된 빈 쪽은
@@ -598,9 +738,17 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
                        "UNREADABLE" if any(e.no is None for e in entries) else
                        "CONTIGUOUS" if numbers == list(range(1, len(numbers) + 1)) else "GAP")
     history_empty_page = any(table_without_rows[i] for i in kept)
+    if history_empty_page and not table_issues:
+        # The direct engine also needs the existing adapter's empty-table evidence.
+        validations.append(Validation("history_tables_readable", False))
+        warnings.append("주소 이력 표가 있는 쪽에서 이력을 읽지 못했습니다.")
+        for key in ("address_history", "address_history_count", "current_address"):
+            if key in fields:
+                fields[key].confidence = min(fields[key].confidence, .4)
     return ResidentAbstractResult(
         detected, tconf, fields, entries, validations, warnings,
         history_numbers=history_numbers, history_empty_page=history_empty_page,
+        history_table_issues=table_issues,
         sheet_markers=sheets if multi else None,
         page_markers=[headers[i]["page_no"] for i in kept],
         marker_pages=[pages[i][0].page for i in kept],

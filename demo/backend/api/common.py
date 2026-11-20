@@ -201,12 +201,15 @@ REUPLOAD_CODES = frozenset({
 
 def applicant_findings(findings: list[Any] | None) -> list[dict[str, Any]]:
     """Expose only confirmed, actionable reupload failures; never mutate evidence."""
+    from ..rules.doc_check import OFFICER_ONLY_CODES
+
     return [
         {key: finding[key] for key in ("code", "message", "how_to_fix", "link", "severity")
          if key in finding}
         for finding in (findings or [])
         if isinstance(finding, dict) and isinstance(finding.get("code"), str)
         and finding["code"] in REUPLOAD_CODES
+        and finding["code"] not in OFFICER_ONLY_CODES
         and finding.get("severity", "FAIL") == "FAIL"
     ]
 

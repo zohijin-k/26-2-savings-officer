@@ -27,9 +27,11 @@ def image_quality_status(
     """Grade measured quality using the existing document-reading assessment."""
     if not image_quality_score < config.IMAGE_QUALITY_THRESHOLD:
         return Status.PASS
-    if classification_succeeded is True and required_fields_readable is True:
-        return Status.NEEDS_REVIEW
-    return Status.FAIL
+    # 11-18 S5: the resolution score alone never forces a re-upload (FAIL); people could read every
+    # labeled LOW_IMAGE_QUALITY FAIL. Unreadable fields keep their own findings, and the absolute
+    # floor IMAGE_RESOLUTION_TOO_LOW (demo doc_check) stays FAIL.
+    del classification_succeeded, required_fields_readable
+    return Status.NEEDS_REVIEW
 
 
 def _find_confusion_group(doc_type: str) -> set[str] | None:

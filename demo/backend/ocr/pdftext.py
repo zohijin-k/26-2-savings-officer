@@ -105,6 +105,12 @@ def classify(text: str) -> DocType | None:
     return classify_with_evidence(text)[0]
 
 
+#: 4대보험 대체 판별: 고정 키워드가 하나도 맞지 않을 때만 본다. 제목 두 조각이 떨어져 있어도
+#: (예: 둘째 줄 왼쪽의 용도 표시 '확인용'이 끼어든 제목) 4대보험 추출기의 서식 인식
+#: (engine_v2/extractors/insurance_4.py)과 같은 범위로 받아들인다.
+INSURANCE_4_FRAGMENTS = ("4대사회보험", "가입자가입내역확인서")
+
+
 def classify_with_evidence(text: str) -> tuple[DocType | None, str]:
     """기대 슬롯과 무관하게 본문 제목·서식 키워드로 종류와 근거를 고른다."""
     flat = _squeeze(text)
@@ -112,6 +118,8 @@ def classify_with_evidence(text: str) -> tuple[DocType | None, str]:
         for keyword in keywords:
             if _squeeze(keyword) in flat:
                 return doc_type, f"본문에서 '{keyword}' 제목·서식 단서를 확인했습니다."
+    if all(fragment in flat for fragment in INSURANCE_4_FRAGMENTS):
+        return DocType.INSURANCE_4, "본문에서 '4대사회보험'과 '가입자가입내역확인서' 제목 조각을 함께 확인했습니다."
     return None, "본문에서 지원 서류의 제목·서식 단서를 찾지 못했습니다."
 
 
@@ -251,6 +259,8 @@ def read_page_text(text: str, page, page_index: int) -> OcrResult:
     transfer_in = extract_transfer_in(text)
     if transfer_in:
         fields["전입일"] = transfer_in.isoformat()
+    if "열람용" in _squeeze(text or ""):
+        fields[VIEWING_COPY_FIELD] = "있음"
 
     size = extract_household_size(text)
     if size:
@@ -323,7 +333,29 @@ def read_page_text(text: str, page, page_index: int) -> OcrResult:
         tier=NAME,
         classification_evidence=type_evidence,
         classification_confidence=0.95 if doc_type is not None else 0.0,
+        quality_note=viewing_copy_note(text),
     )
+
+
+#: Officer-only memo for viewing copies (11-18 S3).
+VIEWING_COPY_NOTE = "열람용 문서입니다(VIEWING_COPY). 발급일과 원본 여부를 담당자가 확인합니다."
+#: Field set when the printed '열람용' mark is read (11-18); doc_check reviews it as VIEW_ONLY_DOCUMENT.
+VIEWING_COPY_FIELD = "열람용표시"
+
+
+def viewing_copy_note(text: str, current: str = "") -> str:
+    """Append the viewing-copy memo when the printed '열람용' mark is present."""
+    if "열람용" not in _squeeze(text or "") or VIEWING_COPY_NOTE in current:
+        return current
+    return f"{current} / {VIEWING_COPY_NOTE}" if current else VIEWING_COPY_NOTE
+
+
+def mark_viewing_copy(result: OcrResult, text: str) -> OcrResult:
+    """Officer memo and the review flag for a printed '열람용' mark (OCR paths)."""
+    if "열람용" in _squeeze(text or ""):
+        result.fields[VIEWING_COPY_FIELD] = "있음"
+    result.quality_note = viewing_copy_note(text, result.quality_note)
+    return result
 
 
 def _read_pdf(path: Path) -> OcrResult | None:

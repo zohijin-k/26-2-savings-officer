@@ -22,7 +22,7 @@
     "S10_결제영수증_응시료43000.pdf"
   ],
   "expect": {
-    "application_no": "JP-2026-000005",
+    "application_no": "JP-2026-000001",
     "self_check_items": 2,
     "upload_slots": 6,
     "upload_slot_keys": [

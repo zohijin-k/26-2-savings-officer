@@ -37,12 +37,13 @@ def test_quality_fail_survives_confidence_and_every_early_return(confidence, pat
     read = OcrResult(kind, confidence, image_quality=.55, fields=fields, tier="localocr")
     result = check_document(DocRequirement("work_proof", kind or DocType.FARM_BIZ_CERT, "가짜 서류"),
                             read, file_format="jpg")
-    expected = "NEEDS_REVIEW" if path == "normal" else "FAIL"
+    # 11-18 S5: the quality score alone never forces a re-upload on any path (was FAIL off "normal").
+    expected = "NEEDS_REVIEW"
     assert result.status == expected
     found = [f for f in result.findings if f.code == "LOW_IMAGE_QUALITY"]
     assert len(found) == 1 and found[0].severity == expected
-    assert found[0].how_to_fix == (QUALITY_REVIEW_GUIDANCE if path == "normal" else QUALITY_REUPLOAD_GUIDANCE)
-    assert ("이대로 제출" in found[0].how_to_fix) is (path == "normal")
+    assert found[0].how_to_fix == QUALITY_REVIEW_GUIDANCE
+    assert "이대로 제출" in found[0].how_to_fix
 
 
 def test_only_quality_leaves_review_only_vocabulary():
@@ -73,9 +74,11 @@ def test_specific_date_page_and_quality_failures_all_reach_one_blocker(tmp_path)
     read.confidence = .95  # Independent readable folios, despite measured poor resolution.
     read.fields["쪽표기자료"] = json.dumps({"markers": [[1,2]], "confidence": .99})
     result = check_document(req(), read, file_format="jpg")
-    required = {"MISSING_ADDRESS_DATES", "PAGES_INCOMPLETE", "LOW_IMAGE_QUALITY"}
+    # 11-18 S5: LOW_IMAGE_QUALITY is reviewed (was FAIL); the date and page failures still block.
+    required = {"MISSING_ADDRESS_DATES", "PAGES_INCOMPLETE"}
     failures = [f for f in result.findings if f.severity == "FAIL"]
     assert required <= {f.code for f in failures}
+    assert next(f.severity for f in result.findings if f.code == "LOW_IMAGE_QUALITY") == "NEEDS_REVIEW"
     row = tool._row(req(), tmp_path / "FAKE.jpg", read, result)
     row.findings_json.insert(0, {"code": "LOW_OCR_CONFIDENCE", "severity": "NEEDS_REVIEW", "message": "가짜 검토 전용 경고"})
     row.findings_json.append(dict(row.findings_json[-1]))
@@ -100,11 +103,16 @@ def test_receipt_ocr_absence_retains_quality_specific_failure_only_when_measured
     if size[0] == 1654:
         assert result.status == "NEEDS_REVIEW"
         assert not any(f.severity == "FAIL" for f in result.findings)
-    else:
+    elif size[0] == 586:
+        # The absolute floor still fails.
         assert result.status == "FAIL"
-        expected = "IMAGE_RESOLUTION_TOO_LOW" if size[0] == 586 else "LOW_IMAGE_QUALITY"
-        assert next(f.severity for f in result.findings if f.code == expected) == "FAIL"
-        assert not ("LOW_IMAGE_QUALITY" in result.codes and "IMAGE_RESOLUTION_TOO_LOW" in result.codes)
+        assert next(f.severity for f in result.findings if f.code == "IMAGE_RESOLUTION_TOO_LOW") == "FAIL"
+        assert "LOW_IMAGE_QUALITY" not in result.codes
+    else:
+        # 11-18 S5: the quality score alone is reviewed (was LOW_IMAGE_QUALITY FAIL).
+        assert result.status == "NEEDS_REVIEW"
+        assert next(f.severity for f in result.findings if f.code == "LOW_IMAGE_QUALITY") == "NEEDS_REVIEW"
+        assert "IMAGE_RESOLUTION_TOO_LOW" not in result.codes
 
 
 @pytest.mark.parametrize("partial", [False, True])
@@ -135,7 +143,9 @@ def test_actual_synthetic_image_upload_and_final_check_show_both_failures(client
     response, stored = upload(client, aid, path, "resident_abstract", filename="FAKE.png")
     failures = [f for f in response["findings"] if f["severity"] == "FAIL"]
     assert_upload_status(response, "FAIL")
-    assert {"LOW_IMAGE_QUALITY", "MISSING_ADDRESS_DATES"} <= {f["code"] for f in failures}
+    # 11-18 S5: LOW_IMAGE_QUALITY is reviewed (was FAIL); the address-date failure still blocks.
+    assert {"MISSING_ADDRESS_DATES"} <= {f["code"] for f in failures}
+    assert "LOW_IMAGE_QUALITY" not in {f["code"] for f in failures}
     final = client.get(f"/api/applications/{aid}/final-check").json()
     blocker = next(b for b in final["blockers"] if b["kind"] == "document" and b["target"] == "resident_abstract")
     assert not final["can_submit"]

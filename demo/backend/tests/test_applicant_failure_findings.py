@@ -164,7 +164,8 @@ def test_daily_unknown_checkbox_reference_metadata_survives_existing_boundary(pa
 
 
 @pytest.mark.parametrize("case,slot,expected", [
-    ("5", "resident_abstract", [("MISSING_ADDRESS_DATES", "FAIL"), ("LOW_IMAGE_QUALITY", "FAIL")]),
+    # 11-18 S5: LOW_IMAGE_QUALITY is reviewed (was an applicant FAIL reason).
+    ("5", "resident_abstract", [("MISSING_ADDRESS_DATES", "FAIL")]),
     ("7", "nhis_payment", [("MISSING_BILLING_MONTHS", "FAIL")]),
 ])
 def test_source_shaped_case_cli_shows_only_applicant_failures(
@@ -183,7 +184,10 @@ def test_source_shaped_case_cli_shows_only_applicant_failures(
             for line in output.splitlines() if line.startswith("applicant_reason: ")] == expected
     assert "document_status: FAIL\n" in output and "blockers: O\n" in output
     if case == "7":
+        # 11-18 A4: the authored case has no 가입구분 in the personal area once the monthly header
+        # is removed, so insurance_type_found also fails; the verdict and applicant reasons are unchanged.
         assert [line for line in output.splitlines() if line.startswith("failed_validation:")] == [
+            "failed_validation: nhis_payment insurance_type_found",
             "failed_validation: nhis_payment monthly_rows_found",
             "failed_validation: nhis_payment monthly_amounts_numeric",
             "failed_validation: nhis_payment months_continuous",

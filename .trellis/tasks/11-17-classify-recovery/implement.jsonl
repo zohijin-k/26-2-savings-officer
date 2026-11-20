@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/doc-timing.md", "reason": "Production read path, delegation-only wrappers, value-free outputs and run scaffolding reused by the diagnostic tool"}
+{"file": ".trellis/spec/backend/batch-assess.md", "reason": "Shared inventory, guarded boundary and scan reading path (300dpi render) reproduced for comparison"}
+{"file": ".trellis/tasks/11-17-classify-recovery/research/findings.md", "reason": "Exit conditions with file:line, synthetic reproductions, consent and payment stage facts"}
+{"file": ".trellis/tasks/11-17-speed-baseline/research/validation-set.md", "reason": "G1/G2 presentation and validation set definitions and baseline values"}

@@ -15,7 +15,7 @@ from ..rules.doc_types import DocType
 from .base import BBox, OcrAdapter, OcrFallback, OcrResult
 from .fixture import FixtureOcr, fixture_keys
 from .jbai import JbaiOcr
-from .localocr import LocalOcr, ensure_nhis_required_fields, ensure_business_required_fields
+from .localocr import LocalOcr, ensure_nhis_required_fields, ensure_business_required_fields, exception_code
 from .pdftext import PdfTextOcr, split_pdf_pages
 from .upstage import UpstageOcr
 
@@ -45,7 +45,9 @@ def read_document(file_path: str, expected: DocType | None = None) -> OcrResult:
             result = None
         except NotImplementedError:
             result = None  # 미구성 계층은 조용히 건너뛴다
-        except Exception:  # noqa: BLE001 - 한 계층이 터져도 다음으로 넘어가야 한다
+        except Exception as exc:  # noqa: BLE001 - 한 계층이 터져도 다음으로 넘어가야 한다
+            # 예외 문장에는 서류 내용이 섞일 수 있어 클래스 이름만 대체 사유로 남긴다.
+            fallback_reasons.append(f"{str(getattr(adapter, 'name', 'tier')).upper()}_EXCEPTION:{exception_code(exc)}")
             result = None
         if result is not None:
             break
@@ -66,6 +68,9 @@ def read_document(file_path: str, expected: DocType | None = None) -> OcrResult:
         result.engine = result.tier
     if fallback_reasons and not result.fallback_reason:
         result.fallback_reason = " / ".join(fallback_reasons)
+    elif fallback_reasons and result.fallback_reason.startswith("RENDER_RETRY"):
+        # LocalOcr 안의 렌더링 대체 판독 사유는 앞 계층 사유 뒤에 이어 둔다.
+        result.fallback_reason = " / ".join([*fallback_reasons, result.fallback_reason])
 
     # 모든 OCR 계층이 공통으로 지난 뒤 추출값이 머리표만으로 구성됐는지 확인한다.
     from pathlib import Path

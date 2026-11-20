@@ -94,6 +94,8 @@ def _payment_amounts_trusted(doc: DocFact | None) -> bool:
         return True
     if has_failed_payment_validation(fields):
         return False
+    if fields.get("월별고지금액상태") == "불확실":
+        return False  # 11-19: the 고지금액 column may be 장기요양 or a 0원 pick; no income decision.
     if doc.get("status") not in {None, "PASS"}:
         return False
     if "confidence" in doc:
@@ -315,6 +317,11 @@ def build_facts(form1: dict[str, Any], documents: list[DocFact], payment_months:
     else:
         transfer_in = parse_ymd(form1.get("transferIn"))
         residence_source = FactSource(origin="신청서 입력값(최종 전입일)")
+        if _field(abstract, "전입일") == "불확실":
+            residence_source = FactSource(origin=(
+                "신청서 입력값(최종 전입일) · 초본 주소 이력 일부 미판독 의심으로 판독 전입일을 쓰지 않음; "
+                "담당자 확인 필요"
+            ))
         try:
             evidence = json.loads(_field(abstract, "주소날짜검증자료") or "null")
             if isinstance(evidence, dict) and evidence.get("status") == "MISSING":

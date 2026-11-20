@@ -10,6 +10,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from .engine_adapter import engine_config
 from .ocr import read_document
 from .models import Document
 from .ocr.base import BBox, OcrResult
@@ -37,6 +38,19 @@ def suggested_other_slot_label(
         ):
             return candidate.label
     return None
+
+
+#: 동의 표시 판독 불확실 (11-18): '동의하지 않음'으로 읽혔으나 화질·표시 신뢰도 기준 미달.
+CODE_ADMIN_CONSENT_MARK_UNCERTAIN = "ADMIN_CONSENT_MARK_UNCERTAIN"
+#: 미동의 확정에 필요한 화질: LOW_IMAGE_QUALITY·IMAGE_RESOLUTION_TOO_LOW가 아닌 것.
+_QUALITY_DEFECT_CODES = frozenset({"LOW_IMAGE_QUALITY", "IMAGE_RESOLUTION_TOO_LOW"})
+
+
+def _consent_refusal_certain(ocr: OcrResult, result: CheckResult) -> bool:
+    """ADMIN_CONSENT_NOT_GIVEN (FAIL) needs both the quality bar and a confident mark reading."""
+    quality_ok = (ocr.image_quality >= engine_config.IMAGE_QUALITY_THRESHOLD
+                  and not any(f.code in _QUALITY_DEFECT_CODES for f in result.findings))
+    return quality_ok and ocr.fields.get("동의표시판독") == "확실"
 
 
 def assess_upload(
@@ -73,7 +87,17 @@ def assess_upload(
     )
     if req.slot_key == "admin_info_consent" and paper_admin_consent and ocr.detected_doc_type is DocType.ADMIN_INFO_CONSENT:
         consent_value = ocr.fields.get("동의여부")
-        if consent_value == "동의하지 않음":
+        if consent_value == "동의하지 않음" and not _consent_refusal_certain(ocr, result):
+            # 11-18: a refusal read from a low-quality image or an uncertain mark is reviewed, never rejected.
+            ocr.fields["동의여부"] = "확인필요"
+            result.findings.append(CheckFinding(
+                CODE_ADMIN_CONSENT_MARK_UNCERTAIN,
+                "동의 표시 판독이 불확실합니다. 담당자가 원본을 확인합니다.", severity="NEEDS_REVIEW",
+                detail="'동의하지 않음'으로 읽혔지만 화질 또는 표시 판독 신뢰도가 기준에 못 미칩니다.",
+            ))
+            if result.status == "PASS":
+                result.status = "NEEDS_REVIEW"
+        elif consent_value == "동의하지 않음":
             result.findings.append(CheckFinding(
                 "ADMIN_CONSENT_NOT_GIVEN", "행정정보 공동이용에 동의하지 않은 것으로 확인됩니다. 서류를 확인해 주세요.", severity="FAIL"
             ))

@@ -54,6 +54,16 @@ def birth_from_rrn(text: str) -> date | None:
         return None
 
 
+#: Issue-date labels accepted next to a date (출력일 is deliberately absent, 11-18 S3).
+ISSUE_LABELS = ("발급일", "발급일자", "발행일")
+
+
+def _starts_issue_label(text: str, following: str) -> bool:
+    """A word is an issue-date label, or the first half of one split across two words."""
+    return any(label in text or (text and label.startswith(text) and label in text + following)
+               for label in ISSUE_LABELS)
+
+
 def parse_date(text: str) -> date | None:
     text = normalize_format_text(text)
     match = DATE_RE.search(text)
@@ -236,10 +246,16 @@ def header_for_page(page: PageImage, result: OcrResult) -> PageHeader:
             if birth_match:
                 header.birth = parse_date(birth_match.group())
                 header.birth_words = birth_words or line
-        if header.issue is None and any(label in flat for label in ("발급일", "발급일자", "발행일", "출력일")):
-            header.issue = parse_date(text)
-            if header.issue:
-                header.issue_words = [word for word in line if parse_date(word.text)] or line
+        if header.issue is None and any(label in flat for label in ISSUE_LABELS):
+            # Only a date at or after the label word counts (11-18 S3). 출력일(시) is the print time
+            # of a viewing copy, not an issue date, and a date left of the label belongs elsewhere.
+            start = next((i for i, word in enumerate(line) if _starts_issue_label(
+                squash(word.text), squash(line[i + 1].text) if i + 1 < len(line) else "")), None)
+            if start is not None:
+                after = line[start:]
+                header.issue = parse_date(" ".join(word.text for word in after))
+                if header.issue:
+                    header.issue_words = [word for word in after if parse_date(word.text)] or after
     return header
 
 

@@ -45,6 +45,46 @@ verdict, on the own engine. Never change operating code to make it measurable.
   survive (others become UNKNOWN_CODE); message, guidance and detail are never read.
   Format 1 rows stay readable (also for `--strata-from`). No summary lines use them;
   A7/A8 are computed from rows per the task's measurement definitions.
+- Row format 3 adds `intra_threads` and `page_workers` (ints ≥ 1): the own OCR
+  settings in force. `engine_v2.pipeline.ocr.own` reads `OWN_OCR_INTRA_THREADS`
+  (default 2) and `OWN_OCR_PAGE_WORKERS` (default 4; 1 = pages read sequentially)
+  once at import; unset/empty keeps the default silently, anything but 1-6 plain
+  digits > 0 keeps the default with one warning line that never echoes the value.
+  run.json `options.ocr_threads` and the summary `OCR_THREADS` line also carry
+  `page_workers_cap` = min(page_workers, cpu_count // intra_threads), at least 1.
+  `run_ocr_pages` reads pages concurrently only when `ENGINES["own"]` is the real
+  reader or a wrapper reaching it through `__wrapped__` (doc_timing's timing wrapper
+  qualifies). A reader swapped in by a test (e.g. a fake handing out page results in
+  call order) is called sequentially on the caller's thread, whatever
+  `OWN_OCR_PAGE_WORKERS` says; to test concurrency, patch `own.recognize` instead.
+- Automatic thread choice (11-19, `own.AUTO_THREADS`): when neither `OWN_OCR_*` variable is set
+  (unset or empty), a document read one page at a time (one OCR page, one page worker, a swapped
+  reader, any thread that is not a page worker) uses `sessions()` with `single_intra_threads()` =
+  min(4, cpu_count) threads; 2+ pages read concurrently use `page_sessions(slot)` with
+  `INTRA_OP_THREADS` (2) each, every slot its own session (slot 0 is not the single session), so
+  page_workers x 2 <= cpu_count. `prepare_page_workers` loads no page session when it returns 1.
+  Two-page documents (T4b, 11-19, auto only): `page_intra_threads(2)` = `TWO_PAGE_INTRA_THREADS`
+  (4) when 2 x 4 <= cpu_count (and `MAX_PAGE_WORKERS` >= 2), so both pages are read at once on two
+  intra-4 page sessions; with fewer cores they keep the intra-2 rule. Page sessions are cached per
+  `(slot, intra_threads)` (`page_sessions(slot, intra_threads)`, both always passed), so the
+  two-page sessions never share with 3+-page ones; one page and 3+ pages are unchanged. Slot 0
+  reuses the single `sessions()` when `shares_single_session(slot, intra)` (fixed mode as before;
+  auto only when the page threads equal `single_intra_threads()`, i.e. two pages), so auto preload
+  holds 6 sessions on 8+ cores (single intra 4, four intra 2, one more intra 4); doc_timing does
+  not exclude a shared slot 0 twice.
+  Setting either variable turns auto off: every session uses `INTRA_OP_THREADS` and page slot 0
+  shares `sessions()`, exactly as before. Server preload loads the single and every page session, including the two-page ones
+  (`prepare_page_workers(MAX_PAGE_WORKERS)` then `prepare_page_workers(2)`).
+  Row format 3 and the `OCR_THREADS` line are unchanged (they carry the page-session values);
+  run.json `options.ocr_thread_mode` and the summary `OCR_THREADS_MODE` line give the mode
+  (`auto`/`fixed`), single and page threads and the worker cap; `OCR_THREADS_USED intra workers n`
+  (run.json `ocr_threads_used`) counts measured documents by the threads and page workers they
+  were actually read with (documents without own OCR are not counted; a two-page document in
+  auto counts as `4 2`). doc_timing excludes every
+  page-session load as cold start in auto mode (slot 0 included).
+  Every reader of doc_timing rows (`load_strata`, `classify_recovery_diag`
+  crosstab/compare/run --timing, label_review on its branch) goes through `validate_row`, which
+  accepts formats 1-3; a format bump must keep older formats readable.
 - rows.jsonl uses a 16-hex key of the root-relative path. Screen, run.json and
   summary_brief.txt contain numbers, O/X and fixed codes only, never paths, names,
   keys, values or exception text. run.json records machine, cores, power, load,

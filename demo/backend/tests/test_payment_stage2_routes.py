@@ -10,7 +10,7 @@ from demo.backend.rules.doc_check import _check_billing_months
 from demo.backend.rules.doc_types import DocType
 from demo.backend.tests.test_payment_failure_certainty import requirement
 from demo.backend.tests.test_p2_nhis_uploads import image_pdf, use_own_words
-from demo.backend.tests.test_portal_uploads import client, new_app, upload
+from demo.backend.tests.test_portal_uploads import assert_upload_status, client, new_app, upload
 from engine_v2.extractors import nhis_payment, payment_period
 from engine_v2.schemas.models import DocType as V2DocType
 from engine_v2.tests import p2_payment_samples as base, payment_stage2_samples as shapes
@@ -96,14 +96,19 @@ def test_short_month_boxes_can_select_legacy_but_no_billing_finding_is_not_pass(
     pages = [base.page(changed, size=size)]
     extraction = nhis_payment.extract(pages)
     assert extraction.form_kind is None
-    assert len(json.loads(extraction.fields["월별고지금액"].value)) == 12
+    # 11-18 L2: the title period (2025-10~2025-12) bounds the billing months of the 1~12 calendar.
+    assert json.loads(extraction.fields["월별고지금액"].value) == {
+        "2025-10": "100000", "2025-11": "20000", "2025-12": "30000"}
+    # 11-19 T3: the 합계 row is read from the 건강 column (150,000), so it agrees with the months.
+    (_, _, _, totals, *_), _ = nhis_payment._extract_monthly_detail(pages)
+    assert totals == [150_000]
     result = _from_nhis(extraction, pages, V2DocType)
     assert _check_billing_months(result, requirement()) == []
-    assert check_document(requirement(), result).status == "NEEDS_REVIEW"
+    assert check_document(requirement(), result).status == "PASS"
 
 
-@pytest.mark.parametrize("shape", ["adjustment", pytest.param("clipped", marks=pytest.mark.xfail(
-    strict=True, reason="C2 header-edge recovery held")), "fused"])
+# 11-18 O3: "clipped" passes with the 0.1 %p header-band slack (was strict xfail).
+@pytest.mark.parametrize("shape", ["adjustment", "clipped", "fused"])
 def test_repaired_shapes_traverse_actual_image_upload_without_changing_average(client, tmp_path, monkeypatch, shape):
     if shape == "adjustment":
         cells, size, _ = shapes.adjustment()
@@ -112,7 +117,7 @@ def test_repaired_shapes_traverse_actual_image_upload_without_changing_average(c
     use_own_words(monkeypatch, cells, size)
     path = image_pdf(tmp_path / "FAKE-stage2-shape.pdf", size)
     response, stored = upload(client, new_app(client, name=base.NAME, birth=base.BIRTH), path, "nhis_payment")
-    assert response["status"] == "PASS"
+    assert_upload_status(response, "PASS")
     assert stored["fields"]["건강보험료"] == "50000"
     assert json.loads(stored["fields"]["월별고지금액"])["2025-12"] == "30000"
     assert stored["fields"]["양식판독상태"] == "완전"
@@ -124,12 +129,12 @@ def test_unrecognized_adjustment_stays_review_through_actual_upload(client, tmp_
     use_own_words(monkeypatch, cells, size)
     path = image_pdf(tmp_path / "FAKE-stage2-unknown.pdf", size)
     response, stored = upload(client, new_app(client, name=base.NAME, birth=base.BIRTH), path, "nhis_payment")
-    assert response["status"] == "NEEDS_REVIEW"
+    assert_upload_status(response, "NEEDS_REVIEW")
     assert stored["fields"]["양식판독상태"] == "불완전"
 
 
-@pytest.mark.parametrize("shape", ["adjustment", pytest.param("clipped", marks=pytest.mark.xfail(
-    strict=True, reason="C2 header-edge recovery held")), "fused"])
+# 11-18 O3: "clipped" passes with the 0.1 %p header-band slack (was strict xfail).
+@pytest.mark.parametrize("shape", ["adjustment", "clipped", "fused"])
 def test_repaired_complete_table_cannot_override_independent_period_conflict(shape):
     from demo.backend.rules.doc_check import check_document
     if shape == "adjustment":

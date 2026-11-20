@@ -56,6 +56,16 @@ CODE_NHIS_SUBSCRIBER_IDENTITY_REVIEW = "NHIS_SUBSCRIBER_IDENTITY_REVIEW"
 CODE_PAGES_INCOMPLETE = "PAGES_INCOMPLETE"
 CODE_PAGES_UNREADABLE = "PAGES_UNREADABLE"
 CODE_PAGES_DUPLICATED = "PAGES_DUPLICATED"
+#: 11-19 D10: the repeated page markers come from pages that read one shared embedded image (xref).
+CODE_PAGE_IMAGE_SHARED = "PAGE_IMAGE_SHARED"
+CODE_ISSUE_DATE_MISSING = "ISSUE_DATE_MISSING"
+CODE_VIEW_ONLY_DOCUMENT = "VIEW_ONLY_DOCUMENT"
+CODE_ADDRESS_HISTORY_INCOMPLETE = "ADDRESS_HISTORY_INCOMPLETE"
+CODE_PAYMENT_AMOUNT_COLUMN_UNCERTAIN = "PAYMENT_AMOUNT_COLUMN_UNCERTAIN"
+#: 11-19 (T3): a 보수외소득월액 sub-header under a legacy 고지금액/납부금액 group is only partly read.
+CODE_PAYMENT_COMPONENT_HEADER_INCOMPLETE = "PAYMENT_COMPONENT_HEADER_INCOMPLETE"
+#: Findings shown on the officer screen only; applicant responses drop them (11-18 열람용).
+OFFICER_ONLY_CODES = frozenset({CODE_VIEW_ONLY_DOCUMENT})
 CODE_PAYMENT_PAGING_UNCERTAIN = "NHIS_PAYMENT_PAGING_UNCERTAIN"
 CODE_IMAGE_RESOLUTION_TOO_LOW = "IMAGE_RESOLUTION_TOO_LOW"
 CODE_MISSING_ADDRESS_DATES = "MISSING_ADDRESS_DATES"
@@ -104,6 +114,8 @@ HOW_TO_FIX: dict[str, str] = {
     CODE_PAGES_UNREADABLE: "서류 전체가 선명하게 보이게 다시 촬영해 주세요. " + RETAKE_GUIDANCE,
     CODE_PAGES_INCOMPLETE: "빠진 쪽까지 모두 올려 주세요.",
     CODE_PAGES_DUPLICATED: "중복된 쪽을 확인하고 서로 다른 모든 쪽을 올려 주세요.",
+    CODE_PAGE_IMAGE_SHARED: "그대로 두셔도 담당자가 원본의 모든 쪽을 확인합니다.",
+    CODE_ISSUE_DATE_MISSING: "발급일이 인쇄된 원본을 올려 주세요. 열람용·출력용 문서에는 발급일이 없을 수 있습니다.",
     "NHIS_HISTORY_PERIOD_UNREADABLE": "최근 변동내역의 범위는 담당자가 원본에서 확인합니다. " + RETAKE_GUIDANCE,
     "NHIS_HISTORY_PERIOD_MISSING": "조회기간에 최근 {years}년 전체가 포함되도록 다시 발급받아 올려 주세요.",
 }
@@ -152,6 +164,8 @@ REVIEW_ONLY_CODES = {
     "NHIS_HISTORY_PERIOD_UNREADABLE",
     CODE_RESIDENT_APPLICANT_UNREADABLE,
     CODE_PAGES_UNREADABLE,
+    # 같은 그림을 두 쪽에서 읽어 쪽표기가 되풀이된 경우 — 화면의 쪽은 다를 수 있어 반려하지 않는다.
+    CODE_PAGE_IMAGE_SHARED,
     # 입력 발급일 불일치이나 판독이 불확실 — 오독일 수 있어 자동 반려하지 않는다.
     "DECLARED_DATE_UNCERTAIN",
     # 본인 정보 불일치이나 판독이 불확실 — 남의 서류로 단정하지 않는다.
@@ -160,7 +174,14 @@ REVIEW_ONLY_CODES = {
     CODE_UNKNOWN_DOCUMENT_TYPE,
     CODE_RECEIPT_AMOUNT_UNREADABLE,
     CODE_REQUIRED_FIELD_UNREADABLE,
+    CODE_ISSUE_DATE_MISSING,
 }
+
+#: Forms that print a 발급일 (11-18 S3). Job-package documents carry 결제일·면접일·응시일 instead.
+ISSUE_DATED_TYPES = frozenset({
+    DocType.RESIDENT_ABSTRACT, DocType.RESIDENT_CERTIFICATE, DocType.NHIS_PAYMENT, DocType.NHIS_QUALIFICATION,
+    DocType.NHIS_ACQUISITION_LOSS, DocType.INSURANCE_4, DocType.ADMIN_INFO_CONSENT,
+})
 
 ESSENTIAL_FIELD_UNREADABLE_CODES = {
     CODE_REQUIRED_FIELD_UNREADABLE,
@@ -169,8 +190,9 @@ ESSENTIAL_FIELD_UNREADABLE_CODES = {
     "RECEIPT_OCR_UNAVAILABLE",
     "NHIS_HISTORY_PERIOD_UNREADABLE",
     "ADMIN_CONSENT_IDENTITY_UNREADABLE",
-    "ADMIN_CONSENT_MARK_UNREADABLE",
-    "ADMIN_CONSENT_SIGNATURE_UNREADABLE",
+    # 동의 표시·서명 판독 실패(ADMIN_CONSENT_MARK_UNREADABLE·ADMIN_CONSENT_SIGNATURE_UNREADABLE)는
+    # 넣지 않는다(11-18 C1): 판독 방식의 한계로 생기므로 원본 150dpi 미만과 겹쳐도 재업로드(FAIL)가
+    # 아니라 담당자 확인(NEEDS_REVIEW)으로 둔다.
 }
 
 
@@ -349,6 +371,31 @@ def _nhis_history_coverage(data, issue: date, years: int, structure_complete: bo
     return (covered if covered or not has_basis else None), False
 
 
+def _repeats_from_shared_image(data, markers, sheets) -> bool:
+    """11-19 D10: every repeated marker was read from pages that share one embedded main image but
+    render differently (the OCR input repeats; the pages shown do not).
+
+    ``image_groups`` (localocr, per counted page) is None or [image group, render number] for pages
+    whose main image xref is read as another page too. A repeat is shared only when all its pages
+    carry the same image group and pairwise different render numbers. Anything else (missing or
+    malformed data, different images, the same page shown twice) stays PAGES_DUPLICATED.
+    """
+    groups = data.get("image_groups")
+    units = sheets if sheets is not None else [[marker] for marker in markers]
+    if (not isinstance(groups, list) or len(groups) != len(units) or any(
+            group is not None and (not isinstance(group, list) or len(group) != 2
+                                   or any(type(v) is not int for v in group)) for group in groups)):
+        return False
+    pages_of: dict[tuple[int, int], list] = {}
+    for unit, group in zip(units, groups):
+        for marker in unit:
+            pages_of.setdefault(tuple(marker), []).append(group)
+    repeated = [found for found in pages_of.values() if len(found) > 1]
+    return bool(repeated) and all(
+        None not in found and len({g[0] for g in found}) == 1 and len({g[1] for g in found}) == len(found)
+        for found in repeated)
+
+
 def _check_resident_pages(ocr: OcrResult, req: DocRequirement) -> list[CheckFinding]:
     # 쪽 완전성 검사를 수행한 추출기의 구조화된 결과만 소비한다.
     # 기존 fixture/일반 글자층 판독값에는 이 검사의 결과 자체가 없다.
@@ -372,7 +419,21 @@ def _check_resident_pages(ocr: OcrResult, req: DocRequirement) -> list[CheckFind
                                for name in failed))
         if history_limited:
             confidence = min(float(data["confidence"]), ocr.classification_confidence)
-        if (not markers or len(markers) != ocr.page_count
+        # 내용 없는 쪽(빈 쪽·머리 상자만 되풀이된 쪽)은 추출기가 쪽표기 목록에서 빼고 수만 남긴다.
+        blank_pages = data.get("blank_pages", 0)
+        if type(blank_pages) is not int or blank_pages < 0:
+            return [unreadable]
+        sheets = data.get("sheets")
+        if sheets is not None:
+            # S1 (held): every header marker of a 2-up sheet counts as a page; sheets, not
+            # markers, are compared with the uploaded page count.
+            if (not isinstance(sheets, list) or not sheets or len(sheets) + blank_pages != ocr.page_count
+                    or any(not isinstance(sheet, list) or not sheet for sheet in sheets)):
+                return [unreadable]
+            markers = [marker for sheet in sheets for marker in sheet]
+            if not confidence >= engine_config.OCR_CONFIDENCE_THRESHOLD:
+                return [unreadable]
+        elif (not markers or len(markers) + blank_pages != ocr.page_count
                 or not confidence >= engine_config.OCR_CONFIDENCE_THRESHOLD):
             return [unreadable]
         if any(not isinstance(m, list) or len(m) != 2
@@ -389,6 +450,12 @@ def _check_resident_pages(ocr: OcrResult, req: DocRequirement) -> list[CheckFind
                 f"주민등록초본 {total}쪽 중 {len(seen)}쪽만 올라왔습니다. 빠진 쪽까지 모두 올려 주세요.", req,
             )]
         if len(markers) != len(seen):
+            if _repeats_from_shared_image(data, markers, sheets):
+                return [_finding(
+                    CODE_PAGE_IMAGE_SHARED,
+                    "주민등록초본의 여러 쪽이 같은 그림을 담고 있어 쪽을 확실히 확인하지 못했습니다. "
+                    "담당자가 원본을 확인합니다.", req,
+                )]
             return [_finding(CODE_PAGES_DUPLICATED, "주민등록초본에 중복된 쪽이 올라왔습니다.", req)]
     except (ValueError, TypeError, KeyError, AttributeError):
         return [unreadable]
@@ -628,6 +695,18 @@ def _check_document(
         findings.append(_finding(
             CODE_REQUIRED_FIELD_UNREADABLE,
             "서류의 발급일 라벨과 날짜를 확인하지 못했습니다. 담당자가 원본을 확인합니다.",
+            req, field="발급일",
+        ))
+    # PdfText's missing label date is already REQUIRED_FIELD_UNREADABLE above.
+    if (not ocr.is_encrypted and ocr.tier not in ("fixture", "pdftext")
+            and ocr.detected_doc_type in ISSUE_DATED_TYPES
+            and req.date_basis == "issue_date" and engine_doc.issue_date is None
+            and (req.min_issue_date is not None or req.max_issue_date is not None)):
+        # 11-18 S3: without a labeled or fixed-position issue date the period rule cannot run;
+        # never let the document pass on that rule, and never guess a date from elsewhere.
+        findings.append(_finding(
+            CODE_ISSUE_DATE_MISSING,
+            "서류에서 발급일을 확인하지 못해 발급 기간을 판정하지 못했습니다. 담당자가 원본을 확인합니다.",
             req, field="발급일",
         ))
     for f in engine_check_single_document(engine_doc, to_engine_spec(req)):
@@ -914,6 +993,46 @@ def _check_document(
             detail="판독한 주소 이력이 1건뿐이어서 과거 주소 변동사항이 생략됐을 가능성이 있습니다. 부적합으로 단정하지 않습니다.",
         ))
 
+    if (ocr.detected_doc_type is DocType.RESIDENT_ABSTRACT and req.accepts(ocr.detected_doc_type)
+            and ocr.fields.get("주소이력상태") == "불확실"):
+        # 11-18: missing ordinals or a table page without rows may hide history rows; 전입일 is not used.
+        findings.append(CheckFinding(
+            CODE_ADDRESS_HISTORY_INCOMPLETE,
+            "초본 주소 이력 일부를 읽지 못했을 수 있습니다. 전입일과 주소 이력은 담당자가 원본에서 확인합니다.",
+            how_to_fix="그대로 두셔도 담당자가 원본을 확인합니다. 주소 이력이 모든 쪽에 선명하게 보이는 초본 전체를 다시 올리면 더 빨리 확인됩니다.",
+            severity="NEEDS_REVIEW",
+            detail=f"세부 사유: {ocr.fields.get('주소이력불확실사유') or '미상'} "
+                   "(NUMBER_GAP 번호 누락, NUMBER_UNREADABLE 번호 판독 실패, EMPTY_PAGE 표 머리글만 읽힌 쪽).",
+        ))
+
+    if (ocr.detected_doc_type is DocType.NHIS_PAYMENT and req.accepts(ocr.detected_doc_type)
+            and ocr.fields.get("월별고지금액상태") == "불확실"):
+        # 11-19: a 2025-10~12 고지금액 may come from the 장기요양 column (or a 0원 pick); the income
+        # decision does not use the amounts (facts._payment_amounts_trusted) and values are not guessed.
+        findings.append(CheckFinding(
+            CODE_PAYMENT_AMOUNT_COLUMN_UNCERTAIN,
+            "납부확인서의 월별 건강보험료 고지금액을 확실히 읽지 못했습니다. 담당자가 원본에서 확인합니다.",
+            how_to_fix="그대로 두셔도 담당자가 원본을 확인합니다. 월별 표가 선명하게 보이는 납부확인서를 다시 올리면 더 빨리 확인됩니다.",
+            severity="NEEDS_REVIEW",
+            detail=f"세부 사유: {ocr.fields.get('월별고지금액불확실사유') or '미상'} "
+                   "(ZERO_AMOUNT 0원, CARE_RATIO 같은 줄 금액의 12~14%, HEADER_CARE 장기요양 머리글, "
+                   "HEADER_UNCERTAIN 머리글 판독 불확실, LARGER_HEALTH 같은 줄 건강 머리글에 더 큰 금액).",
+        ))
+
+    if (ocr.detected_doc_type is DocType.NHIS_PAYMENT and req.accepts(ocr.detected_doc_type)
+            and ocr.fields.get("구성머리글상태") == "불완전"):
+        # 11-19 (T3): the 합계 row now agrees with the 건강 column even when a sub-header is damaged;
+        # a lost 보수외소득월액 header line (legacy reader only, GAP or BOTH) is never a PASS. A
+        # FRAGMENT alone leaves 구성머리글상태 unset and only records 구성머리글불완전사유.
+        findings.append(CheckFinding(
+            CODE_PAYMENT_COMPONENT_HEADER_INCOMPLETE,
+            "납부확인서 월별 표의 보수외소득월액 머리글 일부를 읽지 못했습니다. 담당자가 원본에서 확인합니다.",
+            how_to_fix="그대로 두셔도 담당자가 원본을 확인합니다. 월별 표가 선명하게 보이는 납부확인서를 다시 올리면 더 빨리 확인됩니다.",
+            severity="NEEDS_REVIEW",
+            detail=f"세부 사유: {ocr.fields.get('구성머리글불완전사유') or '미상'} "
+                   "(GAP 머리글 줄 사이에 빠진 줄, BOTH 빠진 줄과 알려진 이름으로 완성되지 않은 머리글 조각).",
+        ))
+
     if nhis_review_needed:
         # Incomplete or mismatching identity cannot establish this applicant's
         # eligibility. Retain legacy finding codes while sending them for review.
@@ -975,7 +1094,46 @@ def check_document(
     for finding in _check_payment_paging(ocr, req):
         if not any(f.code == finding.code and f.severity == finding.severity for f in result.findings):
             result.findings.append(finding)
+    _review_uncertain_absence(result)
+    if (not ocr.is_encrypted and req.accepts(ocr.detected_doc_type)
+            and ocr.fields.get("열람용표시") == "있음"):
+        # 11-18: a printed '열람용' (viewing copy) mark is never accepted automatically. Officer-only reason.
+        result.findings.append(CheckFinding(
+            CODE_VIEW_ONLY_DOCUMENT, "열람용 문서입니다. 발급일과 원본 여부를 담당자가 확인합니다.",
+            severity="NEEDS_REVIEW", detail="서류에 '열람용' 문구가 인쇄되어 있습니다.",
+        ))
+        if result.status == "PASS":
+            result.status = "NEEDS_REVIEW"
     return finalize_image_quality(req, ocr, result, file_format)
+
+
+#: Absence FAIL codes without their own region-level proof (11-18 S4). MISSING_ADDRESS_DATES,
+#: the certain MISSING_BILLING_MONTHS and NHIS_HISTORY_PERIOD_MISSING already require the region
+#: itself to be read with confidence >= 0.85, so an unrelated reading cap does not weaken them.
+ABSENCE_FAIL_CODES = frozenset({CODE_MISSING_ADDRESS_HISTORY, "MISSING_REQUIRED_FIELD"})
+#: Evidence that the region behind an absence was not read reliably.
+UNCERTAIN_READING_CODES = frozenset({CODE_REQUIRED_FIELD_UNREADABLE, "LOW_OCR_CONFIDENCE"})
+UNCERTAIN_ABSENCE_PREFIX = "판독 불확실: "
+
+
+def _review_uncertain_absence(result: CheckResult) -> None:
+    """11-18 S4: 'absent' rejects only when the region was read reliably.
+
+    An absence FAIL that comes with an unreadable required field or low reading confidence
+    may be a reading failure, so it becomes NEEDS_REVIEW and says so. FAIL to NEEDS_REVIEW only.
+    """
+    if not any(f.code in UNCERTAIN_READING_CODES for f in result.findings):
+        return
+    changed = False
+    for finding in result.findings:
+        if finding.code in ABSENCE_FAIL_CODES and finding.severity == "FAIL":
+            finding.severity = "NEEDS_REVIEW"
+            if not finding.message.startswith(UNCERTAIN_ABSENCE_PREFIX):
+                finding.message = UNCERTAIN_ABSENCE_PREFIX + finding.message
+            changed = True
+    if changed:
+        result.status = ("FAIL" if any(f.severity == "FAIL" for f in result.findings) else
+                         "NEEDS_REVIEW" if any(f.severity == "NEEDS_REVIEW" for f in result.findings) else "PASS")
 
 
 def finalize_image_quality(

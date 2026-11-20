@@ -48,6 +48,16 @@ ISSUER = re.compile(r"(시장|군수|구청장)")
 
 # --- 영역 (페이지 대비 %) — 실측값. 양식이 바뀌면 여기만 고친다 ------------
 HEADER_MAX_Y = 16.0
+#: Minimum horizontal distance (page-width %) between two header markers of one 2-up sheet.
+SHEET_SPREAD = 25.0
+#: 쪽마다 되풀이되는 머리 상자(제목·쪽표기·성명·주민등록번호 줄) 아래부터 본문으로 본다.
+BODY_TOP_Y = 26.0
+#: 본문 영역 글자가 이 수 이하이면 내용 없는 쪽(스캔 잡티 허용).
+BLANK_BODY_MAX_CHARS = 3
+#: 빈 쪽 판정에서 글자로 세지 않는 것 (11-18 L1 보완): 쪽표기·쪽 번호("2/3", "- 3 -"),
+#: 한글·영문·숫자가 아닌 잡티, 쪽 테두리가 글자로 읽힌 한 글자.
+_PAGE_MARK_TEXT = re.compile(r"^[\-–—(]*\d{1,2}(?:/\d{1,2})?[\-–—)]*$")
+_FRAME_GLYPHS = frozenset("|lI1!/\\")
 COL_NO_MAX_X = 11.5
 COL_ADDR_MAX_X = 50.0
 COL_OCCUR_X = (50.0, 61.0)
@@ -122,7 +132,18 @@ class ResidentAbstractResult:
     # 미판독(None)과 읽힌 누락을 분리한다. 중복 쪽·서로 다른 총수도 보존한다.
     page_markers: list[tuple[int, int] | None] = field(default_factory=list)
     page_marker_confidence: float = 0.0
+    #: Header-band markers per sheet when several pages are printed side by side (S1, held).
+    sheet_markers: list[list[tuple[int, int]]] | None = None
     classification_evidence: str = ""
+    #: 쪽 수 확인에서 뺀 내용 없는 쪽 수 (page_markers에 들어 있지 않다).
+    blank_pages: int = 0
+    #: page_markers(또는 sheet_markers)의 각 항목을 읽은 쪽 번호(PageImage.page), 같은 순서 (11-19 D10).
+    marker_pages: list[int] = field(default_factory=list)
+    #: 주소 이력 순번 상태 (11-18): CONTIGUOUS(1..N 모두), GAP(빠진 번호·1로 시작 안 함·중복),
+    #: UNREADABLE(번호 없는 이력이 있어 연속성 확인 불가), NA(이력 없음).
+    history_numbers: str = "NA"
+    #: 주소 표 머리글은 찾았는데 이력 줄을 0건 읽은 쪽이 있음 (쪽 수에서 뺀 중복 빈 쪽 제외).
+    history_empty_page: bool = False
 
 
 # --- 유틸 ---------------------------------------------------------------
@@ -175,7 +196,7 @@ def _birth_from_rrn(front6: str, g: str) -> date | None:
 # --- 페이지 단위 파싱 -----------------------------------------------------
 def _parse_header(lines: list[list[Word]]) -> dict:
     out: dict = {"title": "", "issue": None, "issue_words": [], "doc_no": None,
-                 "page_no": None, "page_confidence": 0.0, "issuer": None, "name": None, "name_words": [],
+                 "page_no": None, "page_confidence": 0.0, "header_markers": [], "doc_nos": set(), "issuer": None, "name": None, "name_words": [],
                  "birth": None, "gender": None, "birth_words": []}
     title_parts = []
     for line in lines:
@@ -185,6 +206,10 @@ def _parse_header(lines: list[list[Word]]) -> dict:
             title_parts.append(t)
             if (m := DOC_NO.search(normalize_format_text(t))) and out["doc_no"] is None:
                 out["doc_no"] = m.group(0)
+            out["doc_nos"].update(DOC_NO.findall(normalize_format_text(t)))
+            for w in line:
+                if (hm := PAGE_NO.match(w.text)):
+                    out["header_markers"].append((w.x0, (int(hm.group(1)), int(hm.group(2))), w.conf))
             for w in line:
                 if w.x0 > 70 and (m := PAGE_NO.match(w.text)):
                     out["page_no"] = (int(m.group(1)), int(m.group(2)))
@@ -247,6 +272,20 @@ def _parse_applicant(lines: list[list[Word]]) -> dict:
             continue
         return {"name": name, "birth": birth, "words": line}
     return {"name": None, "birth": None, "words": []}
+
+
+def _content_chars(lines: list[list[Word]], top: float) -> int:
+    """Letters and digits between top and FOOTER_Y, without page marks, frame glyphs or 이하 여백."""
+    count = 0
+    for line in lines:
+        if "이하여백" in squash(line_text(line)):
+            continue
+        for word in line:
+            text = re.sub(r"\s+", "", word.text)
+            if not top <= word.cy < FOOTER_Y or _PAGE_MARK_TEXT.match(text) or text in _FRAME_GLYPHS:
+                continue
+            count += len(re.findall(r"[가-힣A-Za-z0-9]", text))
+    return count
 
 
 def _table_bounds(lines: list[list[Word]]) -> tuple[float, float] | None:
@@ -365,16 +404,25 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
     observed_numbers: list[int] = []
     warnings: list[str] = []
 
+    contentless: list[bool] = []
+    table_without_rows: list[bool] = []
+    #: 표 머리글만 되풀이되고 이력 줄·내용이 없는 쪽 (다른 쪽과 같은 쪽표기일 때만 쪽 수에서 뺀다).
+    table_only: list[bool] = []
     for p, r in pages:
         lines = group_lines(normalize(r.words, p.page, p.pixel_size))
         if p.page == 0:
             first_page_lines = lines
         headers.append(_parse_header(lines))
         bounds = _table_bounds(lines)
+        contentless.append(bounds is None and _content_chars(lines, BODY_TOP_Y) <= BLANK_BODY_MAX_CHARS)
+        before, notes_before = len(entries), len(note_numbers)
         if bounds:
             _parse_rows(lines, *bounds, p.page, entries, pending, note_numbers, observed_numbers)
         else:
             warnings.append(f"page {p.page}: 주소 이력 표를 찾지 못함")
+        table_only.append(bool(bounds) and len(entries) == before
+                          and _content_chars(lines, bounds[0]) <= BLANK_BODY_MAX_CHARS)
+        table_without_rows.append(bool(bounds) and len(entries) == before and len(note_numbers) == notes_before)
 
     # --- 서류 종류 ---
     titles = "".join(h["title"] for h in headers)
@@ -516,11 +564,49 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
         for extracted in fields.values():
             extracted.confidence = min(extracted.confidence, .4)
 
+    # 내용 없는 쪽(빈 쪽, 머리 상자만 되풀이된 쪽)은 쪽표기가 없거나 다른 쪽과 같은 쪽표기일 때만
+    # 쪽 수 확인에서 뺀다. 내용이 있는 쪽은 중복이어도 그대로 센다. 표 머리글까지 되풀이된 빈 쪽은
+    # 다른 쪽과 같은 쪽표기일 때만 뺀다(쪽표기를 못 읽으면 그대로 세어 판독 불가로 남는다).
+    blank = [contentless[i] or table_only[i] for i in range(len(headers))]
+    kept = [i for i in range(len(headers)) if not blank[i]]
+    kept_markers = {headers[i]["page_no"] for i in kept}
+    for i in range(len(headers)):
+        marker = headers[i]["page_no"]
+        if blank[i] and ((marker is not None and marker not in kept_markers)
+                         or (not contentless[i] and marker is None)):
+            kept.append(i)
+            kept_markers.add(marker)
+    kept.sort()
+    if not kept:
+        kept = list(range(len(headers)))
+    # S1 (held): a sheet with two or more header markers at least SHEET_SPREAD apart and one document
+    # number holds several printed pages (2-up). Body text never counts (header band only).
+    sheets, multi = [], False
+    for i in kept:
+        found = sorted(headers[i]["header_markers"])
+        xs = [x for x, _, _ in found]
+        if len(found) >= 2 and max(xs) - min(xs) >= SHEET_SPREAD and len(headers[i]["doc_nos"]) <= 1:
+            sheets.append([marker for _, marker, _ in found])
+            headers[i]["page_confidence"] = min(conf for _, _, conf in found)
+            multi = True
+        else:
+            sheets.append([headers[i]["page_no"]])
+    # 주소 이력 누락 감지 (11-18): 순번은 1부터 빠짐없이 이어져야 하고(메모 줄도 자기 순번을 가진다),
+    # 표 머리글을 찾은 쪽은 이력 줄을 한 건 이상 읽어야 한다. 쪽 수에서 뺀 중복 빈 쪽은 보지 않는다.
+    numbers = sorted([e.no for e in entries if e.no is not None] + note_numbers)
+    history_numbers = ("NA" if not entries else
+                       "UNREADABLE" if any(e.no is None for e in entries) else
+                       "CONTIGUOUS" if numbers == list(range(1, len(numbers) + 1)) else "GAP")
+    history_empty_page = any(table_without_rows[i] for i in kept)
     return ResidentAbstractResult(
         detected, tconf, fields, entries, validations, warnings,
-        page_markers=[h["page_no"] for h in headers],
+        history_numbers=history_numbers, history_empty_page=history_empty_page,
+        sheet_markers=sheets if multi else None,
+        page_markers=[headers[i]["page_no"] for i in kept],
+        marker_pages=[pages[i][0].page for i in kept],
         classification_evidence=classification_evidence,
-        page_marker_confidence=min((h["page_confidence"] for h in headers), default=0.0),
+        page_marker_confidence=min((headers[i]["page_confidence"] for i in kept), default=0.0),
+        blank_pages=len(headers) - len(kept),
     )
 
 

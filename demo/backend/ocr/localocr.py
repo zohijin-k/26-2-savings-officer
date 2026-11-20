@@ -49,6 +49,43 @@ GENERIC_CONFIDENCE_CAP = 0.8
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _logger = logging.getLogger(__name__)
 
+#: 1차 경로가 서식을 정하지 못한 PDF를 다시 읽는 렌더링 해상도.
+#: batch_assess(A-스캔)와 같은 방식: 모든 층·투명도를 합성한 RGB, 알파 없음.
+RENDER_RETRY_DPI = 300
+#: 대체 판독 사유 코드. 결과의 fallback_reason에 ``RENDER_RETRY:<코드>``로 남는다(담당자 화면 전용).
+RETRY_CODES = (
+    "IMAGE_UNCLASSIFIED",       # 그림 길: OCR 글자는 있으나 서식 단서 없음
+    "IMAGE_OCR_EMPTY",          # 그림 길: OCR 글자 0 (큰 배경 그림만 꺼낸 경우 포함)
+    "IMAGE_PREPROCESS_ERROR",   # 그림 길: 본문 그림 꺼내기 오류 (흑백 마스크 등)
+    "IMAGE_TEXT_PAGE",          # 그림 길: 첫 쪽은 그림, 뒤쪽에 글자층
+    "TEXT_RECLASS_NONE",        # 글자층 길: 모든 쪽 다시 판별도 실패 (숨은 글자층 포함)
+    "TEXT_RECLASS_DISCARD",     # 글자층 길: 모든 쪽 다시 판별 결과가 이 계층 담당 밖이라 버려짐
+)
+_CLASS_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+
+
+def exception_code(exc: BaseException) -> str:
+    """예외 클래스 이름만 돌려준다. 예외 문장(서류 내용이 섞일 수 있음)은 읽지 않는다."""
+    name = type(exc).__name__
+    return name if _CLASS_NAME.fullmatch(name) else "OTHER"
+
+
+def render_pages(path: Path) -> list:
+    """모든 쪽을 300dpi로 렌더링한다 (engine_v2.tools.batch_assess._inspect와 같은 렌더링)."""
+    import pymupdf
+    from engine_v2.pipeline.preprocess import PageImage, PageSource
+
+    pages = []
+    with pymupdf.open(path) as document:
+        if document.needs_pass:
+            return []
+        for index, page in enumerate(document):
+            pix = page.get_pixmap(dpi=RENDER_RETRY_DPI, colorspace=pymupdf.csRGB, alpha=False)
+            pages.append(PageImage(index, PageSource.RENDER, (page.rect.width, page.rect.height),
+                                   png=pix.tobytes("png"), pixel_size=(pix.width, pix.height),
+                                   dpi=RENDER_RETRY_DPI))
+    return pages
+
 
 def engine_decision() -> tuple[str, str]:
     """선택한 엔진과 대체 사유(대체 없으면 빈 문자열). 모델 로드·검증·로그 없음."""
@@ -71,6 +108,37 @@ def _engine_name() -> str:
     return engine_decision()[0]
 
 
+def preload_own() -> str:
+    """서버 시작 때 own 모델(쪽 작업 세션 포함)을 미리 불러 첫 요청 지연을 없앤다.
+
+    자동 스레드(OWN_OCR_* 미설정)일 때는 한 쪽씩 읽는 세션(intra 4)과 쪽 동시 읽기 세션
+    (3쪽 이상: intra 2, 작업 수만큼; 2쪽: intra 4 두 개, 코어가 허락할 때)을 함께 불러온다.
+
+    결과 코드만 돌려준다: LOADED / SKIPPED(own이 아님) / FAILED.
+    실패해도 아무것도 바꾸지 않는다. 그때는 지금처럼 첫 OCR 호출이 불러오고
+    같은 오류를 그 자리에서 낸다(세션 캐시는 실패를 기억하지 않는다).
+    """
+    try:
+        if engine_decision()[0] != "own":
+            return "SKIPPED"
+        import io
+
+        from PIL import Image
+        from engine_v2.pipeline.ocr import own
+
+        own.sessions()
+        own.prepare_page_workers(own.MAX_PAGE_WORKERS)
+        own.prepare_page_workers(2)  # 2쪽 문서용 세션(자동·코어 8개 이상: intra 4 두 개, 그 밖은 이미 불러온 것)
+        # 빈 그림 한 장으로 판독 경로의 지연 import(cv2·pyclipper)와 첫 실행 준비를 끝낸다.
+        blank = io.BytesIO()
+        Image.new("RGB", (32, 32), "white").save(blank, format="PNG")
+        own.recognize(blank.getvalue(), (32, 32))
+        return "LOADED"
+    except Exception as exc:  # noqa: BLE001 - 시작은 막지 않는다
+        _logger.warning("own 모델 미리 불러오기 실패(첫 호출 때 불러옴): %s", exception_code(exc))
+        return "FAILED"
+
+
 def _import_v2():
     """engine_v2는 지연 import 한다 — OCR을 안 쓰는 경로에서 의존성을 요구하지 않도록."""
     if str(_REPO_ROOT) not in sys.path:
@@ -84,6 +152,12 @@ def _import_v2():
     from engine_v2.schemas.models import DocType as V2DocType, DocumentInput
 
     return resident_abstract, nhis_payment, nhis_acquisition_loss, run_ocr, PageSource, preprocess, V2DocType, DocumentInput, _load_pages, insurance_4
+
+
+def _read_pages(run_ocr, engine: str, page_images):
+    """쪽마다 읽기 함수를 쪽 순서대로 낸다. 여러 쪽 own은 동시에 읽는다(engine_v2 run_ocr_pages)."""
+    from engine_v2.pipeline.ocr import run_ocr_pages
+    return run_ocr_pages(engine, [(p.png, p.pixel_size) for p in page_images], run=run_ocr)
 
 
 def _quality(pages) -> float:
@@ -115,6 +189,33 @@ def _entry_bbox(entry, pages) -> BBox | None:
     return BBox(entry.page, round(x0, 1), round(y0, 1), round(x1, 1), round(y1, 1))
 
 
+def _shared_image_groups(pages, marker_pages) -> list[list[int] | None] | None:
+    """11-19 D10: per counted page (marker_pages order), [image group, render number] when its
+    embedded main image (same xref) is also read as another page of this PDF, else None. None when
+    no page shares one.
+
+    The same xref gives the same OCR input twice even when the rendered pages differ; the page check
+    then reviews a marker repeated across different renders of one image (PAGE_IMAGE_SHARED). Numbers
+    only (group and render numbers, never the xref or digest).
+    """
+    if not marker_pages:
+        return None
+    seen = {page.page: (getattr(page, "image_xref", None), getattr(page, "render_digest", None))
+            for page, _ in pages}
+    shared = sorted({xref for xref, digest in seen.values() if xref is not None and digest is not None})
+    if not shared:
+        return None
+    renders: list[str] = []  # render numbers in page order
+    for xref, digest in seen.values():
+        if xref in shared and digest is not None and digest not in renders:
+            renders.append(digest)
+    groups: list[list[int] | None] = []
+    for number in marker_pages:
+        xref, digest = seen.get(number, (None, None))
+        groups.append([shared.index(xref), renders.index(digest)] if xref in shared and digest else None)
+    return groups
+
+
 def _from_resident(ex, pages, ra, v2types) -> OcrResult:
     """engine_v2 초본 추출 결과 → 데모 OcrResult (필드 이름은 데모 규칙이 쓰는 그대로)."""
     detected = (DocType.RESIDENT_ABSTRACT if ex.detected_type == v2types.RESIDENT_ABSTRACT
@@ -123,9 +224,15 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
     fields: dict[str, str] = {}
     bboxes: dict[str, BBox] = {}
 
-    fields["쪽표기자료"] = json.dumps({
-        "markers": ex.page_markers, "confidence": ex.page_marker_confidence,
-    })
+    page_data = {"markers": ex.page_markers, "confidence": ex.page_marker_confidence}
+    if getattr(ex, "blank_pages", 0):
+        page_data["blank_pages"] = ex.blank_pages  # 쪽 수 확인에서 뺀 내용 없는 쪽
+    if getattr(ex, "sheet_markers", None):
+        page_data["sheets"] = ex.sheet_markers  # 한 장에 여러 쪽(모아찍기)의 쪽표기
+    shared = _shared_image_groups(pages, getattr(ex, "marker_pages", None))
+    if shared is not None:
+        page_data["image_groups"] = shared  # 같은 주 그림(xref)을 읽은 쪽 묶음 (D10)
+    fields["쪽표기자료"] = json.dumps(page_data)
     from engine_v2.extractors.address_dates import assess
     if ex.detected_type == v2types.RESIDENT_ABSTRACT:
         fields["주소날짜검증자료"] = json.dumps(assess(pages, type_confidence=ex.type_confidence), ensure_ascii=False)
@@ -162,6 +269,23 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
         if len(ex.history) >= 2:
             fields["주소변동내역"] = "포함"
 
+    # 주소 이력 누락 의심 (11-18): 순번이 1부터 이어지지 않거나, 번호를 못 읽었거나, 표 머리글은 있는데
+    # 이력 줄을 0건 읽은 쪽이 있으면 전입일·주소이력건수를 '불확실'로 두고 doc_check가 확인필요로 보낸다.
+    # 번호 누락과 번호 판독 실패는 세부 사유를 나눠 남긴다.
+    if ex.detected_type == v2types.RESIDENT_ABSTRACT:
+        uncertain = [code for code, hit in (
+            ("NUMBER_GAP", getattr(ex, "history_numbers", "NA") == "GAP"),
+            ("NUMBER_UNREADABLE", getattr(ex, "history_numbers", "NA") == "UNREADABLE"),
+            ("EMPTY_PAGE", getattr(ex, "history_empty_page", False)),
+        ) if hit]
+        if uncertain:
+            fields["주소이력상태"] = "불확실"
+            fields["주소이력불확실사유"] = ",".join(uncertain)
+            for label in ("전입일", "주소이력건수"):
+                if label in fields:
+                    fields[label] = "불확실"
+                bboxes.pop(label, None)
+
     passed = sum(v.passed for v in ex.validations)
     fields["판독검증"] = f"{passed}/{len(ex.validations)} 통과"
     failed = [v.name for v in ex.validations if not v.passed]
@@ -176,7 +300,8 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
         confidence = min(confidence, .4)
         fields["판독경고"] = "주소 이력의 순번 또는 날짜를 완전히 확인하지 못했습니다."
 
-    return OcrResult(
+    from .pdftext import mark_viewing_copy
+    return mark_viewing_copy(OcrResult(
         detected_doc_type=detected,
         confidence=round(confidence, 2),
         image_quality=_quality([p for p, _ in pages]),
@@ -187,7 +312,7 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
         tier=NAME,
         classification_confidence=ex.type_confidence,
         classification_evidence=ex.classification_evidence,
-    )
+    ), "\n".join(r.text for _, r in pages))
 
 
 def ensure_nhis_required_fields(result: OcrResult) -> OcrResult:
@@ -410,6 +535,8 @@ def _from_nhis(ex, pages, v2types, classification_evidence: str = "",
 
         if has_failed_payment_validation(fields):
             confidence = min(confidence, .4)
+        if fields.get("구성머리글상태") == "불완전":
+            confidence = min(confidence, .4)  # 11-19 (T3): partly read 보수외소득월액 sub-header
     if (detected == DocType.NHIS_ACQUISITION_LOSS and
             any(v.name == "document_confirmation_number_consistent" and not v.passed
                 for v in validations)):
@@ -531,7 +658,8 @@ def _from_supported_form(extractor, pages, v2types, evidence, detected):
                   else _from_nhis(ex, scoped, v2types, evidence, detected))
     result.page_count = len(pages)
     result.engine = _pages_engine(scoped)
-    return result
+    from .pdftext import mark_viewing_copy
+    return mark_viewing_copy(result, "\n".join(r.text for _, r in pages))
 
 
 #: 취업지원패키지 추가서류 → (engine_v2 추출기 모듈, engine_v2 서류 종류 값)
@@ -727,7 +855,10 @@ class LocalOcr:
                     result.engine = _pages_engine(pages)
                     return result
                 if detected not in (DocType.RESIDENT_ABSTRACT, DocType.RESIDENT_CERTIFICATE):
-                    return None
+                    # 첫 쪽 글자층으로도, 모든 쪽 다시 판별로도 이 계층이 맡을 서식을 정하지 못했다.
+                    # 숨은 글자층·짧은 글자층 뒤의 그림을 A-스캔과 같은 렌더링으로 한 번 더 읽는다.
+                    return self._render_retry(path, engine, "TEXT_RECLASS_NONE" if detected is None
+                                              else "TEXT_RECLASS_DISCARD")
                 # Coordinate fallback changes classification only. Fields still
                 # use the established resident reader and review rules.
                 result = _from_resident(ra.extract(pages), pages, ra, v2types)
@@ -762,30 +893,73 @@ class LocalOcr:
         try:
             page_images = preprocess(path)
         except ValueError:
-            return None
+            return self._render_retry(path, engine, "IMAGE_PREPROCESS_ERROR")
         if any(p.source == PageSource.TEXT_LAYER for p in page_images):
-            return None
+            return self._render_retry(path, engine, "IMAGE_TEXT_PAGE")
 
         pages = []
-        for p in page_images:
-            r = run_ocr(engine, p.png, p.pixel_size)
+        for p, read in zip(page_images, _read_pages(run_ocr, engine, page_images)):
+            r = read()
             if r.error:
                 return None  # 엔진 미설치 등 → 다음 계층
             pages.append((p, r))
+        return self._from_ocr_pages(pages, page_images, path, engine, retry=True)
 
+    def _render_retry(self, path: Path, engine: str, code: str) -> OcrResult | None:
+        """1차 경로가 서식을 정하지 못한 PDF만 300dpi 렌더링 OCR로 한 번 더 판별한다.
+
+        서식을 찾았을 때만 결과를 돌려주고 사유 코드를 남긴다. 못 찾으면 None으로
+        지금까지와 같이 다음 계층에 넘긴다. 다시 읽은 결과에서는 또 대체하지 않는다.
+        """
+        if path.suffix.lower() != ".pdf" or engine == "off" or code not in RETRY_CODES:
+            return None
+        run_ocr = _import_v2()[3]
+        page_images = render_pages(path)
+        if not page_images:
+            return None
+        pages = []
+        for page, reader in zip(page_images, _read_pages(run_ocr, engine, page_images)):
+            read = reader()
+            if read.error:
+                return None
+            pages.append((page, read))
+        result = self._from_ocr_pages(pages, page_images, path, engine, retry=False)
+        if result is None or result.detected_doc_type is None:
+            return None
+        result.fallback_reason = f"RENDER_RETRY:{code}"
+        return result
+
+    def _from_ocr_pages(self, pages, page_images, path: Path, engine: str, *, retry: bool) -> OcrResult | None:
+        """OCR한 쪽들로 서식을 판별하고 그 서식의 판독기를 고른다."""
+        from . import pdftext
+
+        ra, payment_extractor, acquisition_extractor, _, _, _, v2types, _, _, insurance4_extractor = _import_v2()
         text = "\n".join(result.text for _, result in pages)
         detected, evidence = pdftext.classify_pages_with_evidence(pages)
         if detected is None:
+            code = "IMAGE_UNCLASSIFIED" if text.strip() else "IMAGE_OCR_EMPTY"
+            retry_error = None
+            if retry:
+                try:
+                    recovered = self._render_retry(path, engine, code)
+                except Exception as exc:  # noqa: BLE001 - 사유만 남기고 1차 결과를 유지한다
+                    recovered, retry_error = None, exc
+                if recovered is not None:
+                    return recovered
             # Do not discard successfully read words and independent folios just
             # because damaged title glyphs cannot establish a document type.
             from .file_evidence import independent_page_markers
             markers = independent_page_markers(pages)
             if markers is None:
+                if retry_error is not None:
+                    raise retry_error  # read_document가 예외 클래스 이름을 대체 사유로 남긴다.
                 return None  # Keep prior fallback results when there is no new usable evidence.
             fields = {"독립쪽표기자료": json.dumps(markers)}
             result = OcrResult(fields=fields, page_count=len(pages), tier=NAME,
                                engine=engine, image_quality=_quality(page_images),
                                classification_evidence=evidence)
+            if retry_error is not None:
+                result.fallback_reason = f"RENDER_RETRY_ERROR:{exception_code(retry_error)}"
             if path.suffix.lower() != ".pdf":
                 _merge_image_heuristics(result, path)
             return result

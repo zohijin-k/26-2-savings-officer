@@ -35,6 +35,8 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Own adapter diagnostics](./own-adapter-diagnostics.md) | Original extraction/replay, conservative cause evidence, closed outputs and explicit denominators | Active |
 | [Officer AI summary](./officer-summary.md) | 전북AI 종합의견: allowlist projection, scrubbing, grounded check points, rule fallback, cache | Active |
 | [Per-document timing](./doc-timing.md) | Production upload path, delegation-only stage wrappers, cold start, warm-up/repeat statistics and value-free outputs | Active |
+| [Classification recovery diagnostics](./classify-recovery-diag.md) | Existing-result crosstab, LocalOcr exit and cause codes, shadow-only candidate rules and value-free outputs | Active |
+| [Blind label review](./label-review.md) | Localhost-only blind labeling for B/C, fixed samples, code-only labels and Clopper-Pearson summary | Active |
 
 ---
 

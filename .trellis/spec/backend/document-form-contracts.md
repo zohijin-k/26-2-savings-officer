@@ -25,9 +25,57 @@ Use this contract when changing OCR/text ingestion, resident-number redaction, N
 - Qualification `가구원목록` is JSON with Korean keys `성명`, `생년월일`, `자격취득일`, `자격상실일`. Emit it and `가구원수` only for a complete structure. Partial members must not become an authoritative reduced household count.
 - Emit `자격확인요청일` separately; it is never an issue-date source. Notification number and validity date stay internal, and validity adds no eligibility rule. Do not infer `가입구분` from subscriber-role labels.
 - Insurance row output preserves existing names and fields. Acquisition and parenthesized receipt dates are separate occurrences even when their values are equal. Erase resident-number source tokens even when header identity is ambiguous.
+- Insurance 사업장관리번호 (11-19): no decision reads it on the general (government24/unknown) path;
+  on the portal path its strict 11-digit cell check feeds `portal_row_cells` (review when unreadable).
+  General path: a digit word belongs to the column when it starts at/after the 관리번호 label edge or its
+  centre is at/after it (a centred 11-digit number is wider than the stacked label); hyphens, spaces and
+  two-line splits are joined; a number fused with the name is split at the first Hangul/bracket; a
+  digit-bearing fragment starting with Hangul past the label midpoint is a name. Lookalike letters
+  (O, l) or other marks are never converted, and a total other than 11 digits is not kept: the cell is
+  blank and the 가입내역 row carries `사업장관리번호상태=불확실`. Other columns stay as read.
 - Payment `월별납부내역` is a JSON list with twelve printed months and eight amount cells per row. Empty optional cells serialize as JSON null. Existing `billed_by_month`, `paid_by_month`, `건강보험료` and average aliases retain their existing meanings. `숫자형식교정` records corrected row, column and categories. The dedicated government reader emits no unprinted insurance category.
 - Business proof requires `발급번호`, `과세유형`, `상호`, `사업자등록번호`, `성명`, `생년월일`, `사업장소재지`, `개업일`, `사업자등록일`, `업태`, `종목`, `공동사업자유무` and `발급일`. `업태` and `종목` serialize nonempty string lists as JSON. `공동사업자유무` is `있음` or `없음`. Internal address/list values stay within existing response allowlists.
 - Explicit payment review/failure, supplied subthreshold or invalid confidence, and present incomplete structure prevent monetary fields from establishing income facts. Preserve stored fields for officer inspection. Engine conversion carries a high-confidence explicit `NEEDS_REVIEW` through the existing OCR threshold without changing the stored confidence.
+- Legacy 월별고지금액 column (11-19): when 고지금액 is a group header (a component sub-header is
+  printed below it, `nhis_payment.charge_grouped`), its centre is never used as the billed column; it
+  falls on the 장기요양 column of a four-column group. The 건강보험료 sub-column comes from a 건강보험료/
+  건강보험 hit, an exact '건강' word ('(건강)' is 보수외소득월액), or the character span of a fused
+  '건강보험료장기요양보험료' box; otherwise the month gets no value (review). The explicit combined
+  label keeps the old path. The 합계 row is read from the same 건강보험료 column as the months (T3,
+  11-19): with no located 건강 sub-column in a group, no 합계 is read (the months are absent anyway).
+- Legacy component sub-headers (11-19, T3): a damaged sub-header no longer fails 합계 arithmetic, so
+  `nhis_payment.component_headers_incomplete` checks the words below a 고지금액/납부금액 group header
+  (legacy reader, `charge_grouped`, not the explicit combined label). They are clustered into columns
+  by centre; a column showing a fragment ('보수외', '보수', '소득월액', '소득', '월액', '(건강)', '(요양)')
+  must read top to bottom as one of `COMPONENT_LABELS` (보수외소득월액(건강)/(요양), 보수외(건강)/(요양),
+  their parenthesis-free forms), with no gap above .5 line height between its lines (a lost middle
+  line, e.g. '보수외' / blank / '(건강)'). Otherwise `구성머리글불완전사유`
+  (`component_header_issue`: FRAGMENT not a known label, GAP lost line, BOTH). Only GAP and BOTH
+  (`COMPONENT_REVIEW_REASONS`, `component_headers_incomplete`) also set `구성머리글상태=불완전`:
+  `localocr` caps the confidence at .4 and `check_document` adds PAYMENT_COMPONENT_HEADER_INCOMPLETE
+  (NEEDS_REVIEW, reason in its detail, in `verify_upload.SAFE_CODES`). FRAGMENT alone (11-19) is
+  recorded in `구성머리글불완전사유` only and changes neither decision nor confidence: real government
+  forms reach the legacy reader when own OCR reads a whole '보수외' box only once or twice a page
+  (no eight-column signature), and the other 보수외소득월액 columns then read '보수의/보수 + 소득월액 +
+  (요양)', a FRAGMENT on a column the amounts never use. The government-form reader never sets the
+  fields. GAP is needed: a lost '소득월액' leaves '보수외' + '(건강)', which reads as the
+  known short label 보수외(건강) (damaged_component_headers[2,3,4] PASS without it).
+- 고지금액 guard (11-19, both readers, values never replaced): for 2025-10~12, a 0원 pick, a pick 12-14%
+  of another amount in its row, a pick under a 장기요양 or unreadable/low-confidence (<.85) header, or a
+  larger amount under a 건강 header in its row set `월별고지금액상태=불확실` and
+  `월별고지금액불확실사유` (ZERO_AMOUNT, CARE_RATIO, HEADER_CARE, HEADER_UNCERTAIN, LARGER_HEALTH).
+  `check_document` adds PAYMENT_AMOUNT_COLUMN_UNCERTAIN (NEEDS_REVIEW) and
+  `facts._payment_amounts_trusted` returns False (PREMIUM_UNTRUSTED), whatever the stored status.
+- Resident shared page image (11-19 D10): `preprocess` keeps the main image xref of an EMBEDDED page
+  (`PageImage.image_xref`) and, only for pages whose xref is another page's too, a digest of the 72 dpi
+  render (`render_digest`). `localocr._from_resident` adds `쪽표기자료.image_groups` (per counted page:
+  null or [image group, render number in page order]; numbers only, never xref or digest) when any
+  page shares an image. Before PAGES_DUPLICATED, `_check_resident_pages` returns PAGE_IMAGE_SHARED
+  (NEEDS_REVIEW) when every repeated marker comes only from pages of one image group with pairwise
+  different renders (the OCR input repeats, the shown pages do not). A repeat across different images,
+  the same page shown twice (same render), or missing/malformed groups stays PAGES_DUPLICATED FAIL.
+  PyMuPDF stores one identical image once, so synthetic image PDFs share an xref; their identical
+  renders keep the existing duplicate expectations.
 - Historical payment rows retaining a critical failed validation require the same read-time monetary suppression and review confidence even when cached status is PASS. Retain the stored row for owner-controlled cleanup.
 
 ## 4. Validation and error matrix

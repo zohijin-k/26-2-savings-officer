@@ -46,6 +46,7 @@ class InsuranceRow:
     confidence: float = 0.0
     date_cells_complete: bool = True
     cells_complete: bool = True
+    management_uncertain: bool = False
 
 
 @dataclass
@@ -350,6 +351,42 @@ def _normalize_cell(value: str) -> str:
     return "" if value in {"", "-", "－", "—", "–", "해당없음"} else value
 
 
+MANAGEMENT_DIGITS = 11
+_MANAGEMENT_DIGITS_RE = re.compile(r"[\d-]*\d[\d-]*")
+_MANAGEMENT_FUSED_RE = re.compile(r"([\d-]*\d)-?([가-힣(（][^\d]*)")
+
+
+def _management_word(word: Word, anchors: dict[str, float]) -> bool:
+    """A digit-bearing word in the 사업장관리번호 column of the general table path.
+
+    Anchors are the left edges of header words. The stacked 관리번호 label is narrower
+    than an 11-digit number centred under it, so a digit word starting left of the label
+    still belongs to the column when its centre is at or right of that edge.
+    """
+    if not re.search(r"\d", word.text):
+        return False
+    if anchors["management"] <= word.x0 < anchors["workplace"]:
+        return True
+    return (anchors["category"] <= word.x0 < anchors["management"] and
+            (word.x0 + word.x1) / 2 >= anchors["management"])
+
+
+def _split_management(cell: str) -> tuple[str, str, bool]:
+    """Return (digits, fused name remainder, read cleanly) for one management-column cell.
+
+    Only digits with hyphens or spaces are a clean reading. Digits fused with the
+    workplace name are split at the first Hangul or bracket. Anything else (O for 0,
+    l for 1, other marks) is unclean: its characters are not converted or guessed.
+    """
+    text = squash(normalize_format_text(cell))
+    if _MANAGEMENT_DIGITS_RE.fullmatch(text):
+        return re.sub(r"\D", "", text), "", True
+    fused = _MANAGEMENT_FUSED_RE.fullmatch(text)
+    if fused:
+        return re.sub(r"\D", "", fused.group(1)), fused.group(2), True
+    return "", "", False
+
+
 def _parse_row(insurance: str, lines: list[list[Word]], anchors: dict[str, float],
                *, portal: bool = False) -> InsuranceRow:
     words = [word for line in lines for word in line if word.text]
@@ -366,16 +403,36 @@ def _parse_row(insurance: str, lines: list[list[Word]], anchors: dict[str, float
         return row
     row.status = "가입"
     row.date_column_words = [word for word in words if word.x0 >= anchors["date"] - (0 if portal else 3)]
+    management_clean = True
     for word in words:
         text = squash(word.text.strip("()（）"))
         if text in CATEGORY_NAMES:
             row.subscriber_category = text
         elif anchors["name"] - 3 <= word.x0 < anchors["category"] and NAME_RE.fullmatch(text):
             row.subscriber_name = text
+        elif (not portal and _management_word(word, anchors) and
+              word.x0 >= (anchors["management"] + anchors["workplace"]) / 2 and
+              re.match(r"[가-힣]", _normalize_cell(word.text))):
+            # A name with digits ("제2공장") starting past the midpoint stays a name fragment.
+            row.workplace_name += _normalize_cell(word.text)
+        elif not portal and _management_word(word, anchors):
+            # General path (11-19): 사업장관리번호 digits are kept only as printed. A digit cell
+            # centred in its column can start left of the shorter 관리번호 label; a number fused
+            # with the name is split; lookalike letters (O, l) or other marks are never converted.
+            digits, rest, clean = _split_management(_normalize_cell(word.text))
+            row.management_number += digits
+            row.workplace_name += rest
+            management_clean &= clean
         elif anchors["management"] <= word.x0 < anchors["workplace"]:
             cell = _normalize_cell(word.text)
             if cell and re.search(r"\d", cell):
                 row.management_number += re.sub(r"\D", "", cell)
+            elif (cell and not portal and word.x0 >= (anchors["management"] + anchors["workplace"]) / 2
+                  and cell not in CATEGORY_NAMES):
+                # Header words mark where a label starts, not where its column starts: a name cell
+                # can begin a little left of the 사업장명칭 label. A digit-free fragment past the
+                # midpoint between the two labels belongs to the name (11-18); digits stay 관리번호.
+                row.workplace_name += cell
         elif anchors["workplace"] <= word.x0 < anchors["date"]:
             cell = _normalize_cell(word.text)
             if cell and cell not in CATEGORY_NAMES and not re.search(r"\d{4}[.\-/]", cell):
@@ -396,6 +453,7 @@ def _parse_row(insurance: str, lines: list[list[Word]], anchors: dict[str, float
         row.subscriber_name = cells["name"] if name_valid else ""
         row.subscriber_category = cells["category"] if category_valid else ""
         row.management_number = cells["management"] if management_valid else ""
+        row.management_uncertain = bool(cells["management"]) and not management_valid
         row.workplace_name = cells["workplace"] if workplace_valid else ""
         acquired, received, row.receipt_date_present, row.date_cells_complete = _portal_dates(row.date_column_words)
         if len(acquired) == 1:
@@ -403,6 +461,9 @@ def _parse_row(insurance: str, lines: list[list[Word]], anchors: dict[str, float
         if len(received) == 1:
             row.received, row.received_words = received[0]
     else:
+        if not management_clean or (row.management_number and
+                                    len(row.management_number) != MANAGEMENT_DIGITS):
+            row.management_number, row.management_uncertain = "", True
         row_text = " ".join(line_text([word]) for word in words)
         row.receipt_date_present = bool(re.search(r"\(\s*[^)]*\d", row_text))
         date_hits = _dates(words)
@@ -600,6 +661,9 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
             "상태": row.status, "bbox": row.bbox.model_dump(mode="json") if row.bbox else None,
             "신뢰도": row.confidence,
         })
+        if row.management_uncertain:
+            # Display-only column (no decision reads it); a doubtful reading is left blank.
+            rows_data[-1]["사업장관리번호상태"] = "불확실"
     if all_rows:
         rows_json = json.dumps(rows_data, ensure_ascii=False, separators=(",", ":"))
         fields["가입내역"] = _field(rows_json, table_words, page_map, sources,

@@ -18,6 +18,7 @@ from .api import applications, criteria, documents, files, forms, officer, revie
 from .applicant_access import ApplicantAccess
 from .engine_adapter import apply_runtime_overrides
 from .models import init_db
+from .ocr.localocr import preload_own
 from .officer_auth import OfficerAccess
 from .officer_auth import router as officer_auth_router
 from .officer_summary import SummaryWorker, worker_enabled
@@ -31,6 +32,8 @@ async def lifespan(app: FastAPI):
     # 엔진 config를 공고문 실제값으로 덮어쓴다. 엔진 파일은 건드리지 않는다.
     apply_runtime_overrides()
     init_db()
+    # own OCR 모델을 미리 불러 첫 업로드의 모델 로드 지연을 없앤다. 실패하면 첫 호출 때 불러온다.
+    preload_own()
     # 담당자 화면 AI 종합의견을 접수 순서대로 미리 만들어 둔다(전북AI가 켜져 있을 때만).
     worker = SummaryWorker() if worker_enabled() else None
     if worker is not None:

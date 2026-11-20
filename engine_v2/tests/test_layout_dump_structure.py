@@ -138,7 +138,8 @@ def test_split_month_routes_to_legacy_and_counts_actual_months():
     assert diagnostic["reader"] == "legacy_payment"
     assert diagnostic["month_count"] == 12
     assert diagnostic["month_count_scope"] == "LEGACY_TABLE"
-    assert "monthly_total_matches" in diagnostic["failed_validations"]
+    # 11-19 T3: the legacy 합계 row is read from the 건강 column and agrees with the months.
+    assert "monthly_total_matches" not in diagnostic["failed_validations"]
     no_leak(diagnostic)
 
 

@@ -7,7 +7,7 @@ added later is checked without editing this file. See
 import re
 
 import pytest
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, iter_route_contexts
 from fastapi.testclient import TestClient
 from sqlmodel import create_engine
 
@@ -25,8 +25,9 @@ _SAMPLE_VALUES = {"document_id": "1", "form_no": "서식1", "page_no": "1", "cod
 
 def _routes(prefix):
     found = []
-    for route in app.routes:
-        if isinstance(route, APIRoute) and (route.path == prefix or route.path.startswith(prefix + "/")):
+    # FastAPI 0.162.2 keeps included routers grouped; contexts expose their effective paths.
+    for route in iter_route_contexts(app.routes):
+        if isinstance(route.original_route, APIRoute) and (route.path == prefix or route.path.startswith(prefix + "/")):
             found.extend((method, route.path) for method in sorted(route.methods))
     return found
 

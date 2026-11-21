@@ -18,6 +18,7 @@ from pydantic import TypeAdapter, ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from .application_writes import application_write_async
 from .models import Application, Document, get_session
 from .officer_auth import is_officer
 
@@ -84,5 +85,11 @@ class ApplicantAccess:
             response = JSONResponse({"detail": DENIED}, status_code=403,
                                     headers={"Cache-Control": "private, no-store"})
             await response(scope, receive, send)
+            return
+        if parts[2] == "applications" and scope.get("method") in {"POST", "PUT", "PATCH", "DELETE"}:
+            # Include signature scans/consents and written-form changes so an
+            # earlier request cannot finish after the submission snapshot.
+            async with application_write_async(_route_id(parts[3])):
+                await self.app(scope, receive, send)
             return
         await self.app(scope, receive, send)

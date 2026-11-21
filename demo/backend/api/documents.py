@@ -8,16 +8,19 @@
 """
 
 import re
+import logging
 from datetime import date, datetime
 from pathlib import Path
+from uuid import uuid4
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlmodel import select
 
+from ..application_writes import serialized_application_write
 from ..upload_assessment import assess_nhis_identity, assess_upload
-from ..models import UNASSIGNED_SLOT, Application, Document, SubsidyItem, get_session
+from ..models import UNASSIGNED_SLOT, Application, Document, SubsidyItem, get_session, session_transaction, STATUS_DRAFT
 from ..ocr import read_document, split_pdf_pages
 from ..rules.identity import identity_of
 from ..ocr.base import OcrResult
@@ -216,6 +219,15 @@ def _ocr_json(ocr: OcrResult) -> dict[str, Any]:
     })
 
 
+def _require_draft(application_id: int) -> Application:
+    # Read the current row, not an Application detached before lock acquisition.
+    app = _load(application_id)
+    if app.status != STATUS_DRAFT:
+        raise HTTPException(409, "제출한 신청서의 서류는 변경하거나 삭제할 수 없습니다.")
+    return app
+
+
+@serialized_application_write
 def _save_row(
     app: Application,
     req: DocRequirement | None,
@@ -229,6 +241,7 @@ def _save_row(
     page_index: int | None = None,
     source_file_path: str | None = None,
 ) -> Document:
+    _require_draft(app.id or 0)
     row = Document(
         application_id=app.id or 0,
         slot_key=slot_key,
@@ -250,8 +263,10 @@ def _save_row(
         return row
 
 
+@serialized_application_write
 def _refresh_nhis_identity(application_id: int, app: Application, checklist: list[DocRequirement]) -> None:
     """건강보험 납부·자격확인서는 짝 서류가 도착할 때마다 함께 다시 대조한다."""
+    _require_draft(application_id)
     all_rows = _list_documents(application_id)
     for row, result in assess_nhis_identity(identity_of(app.identity_json), checklist, all_rows):
         with get_session() as session:
@@ -263,8 +278,10 @@ def _refresh_nhis_identity(application_id: int, app: Application, checklist: lis
                 session.commit()
 
 
+@serialized_application_write
 def _replace_existing(application_id: int, slot_key: str) -> None:
     """같은 슬롯에 다시 올리면 이전 것을 지운다. 재업로드가 기본 동선이다."""
+    _require_draft(application_id)
     with get_session() as s:
         for old in s.exec(
             select(Document)
@@ -276,6 +293,7 @@ def _replace_existing(application_id: int, slot_key: str) -> None:
 
 
 @router.post("/{application_id}/documents")
+@serialized_application_write
 async def upload_document(
     application_id: int,
     file: UploadFile = File(...),
@@ -307,11 +325,15 @@ async def upload_document(
     if req is None or not req.upload:
         raise HTTPException(400, f"업로드 대상이 아닌 슬롯입니다: {target_slot}")
 
+    _require_draft(application_id)
     declared = _parse_date(declared_issue_date)
-    dest_dir = DOCUMENTS / app.application_no / req.slot_key
+    # Keep the original basename for the fixture/reader contract, but stage
+    # each version in a unique directory so existing bytes are never overwritten.
+    content = await file.read()
+    _require_draft(application_id)
+    dest_dir = DOCUMENTS / app.application_no / req.slot_key / uuid4().hex
     dest_dir.mkdir(parents=True, exist_ok=True)
     path = dest_dir / _safe_name(file.filename or "upload")
-    path.write_bytes(await file.read())
 
     def receipt_amount_loader() -> int | None:
         parts = req.slot_key.split("_")
@@ -326,36 +348,45 @@ async def upload_document(
                                 .where(SubsidyItem.count_index == index)).first()
         return item.receipt_amount if item is not None else None
 
-    ocr, result = assess_upload(
-        path, req,
-        identity=identity_of(app.identity_json),
-        declared=declared,
-        checklist=checklist,
-        uploaded_loader=lambda: _list_documents(application_id),
-        paper_admin_consent=bool(((app.doc_context_json or {}).get("paper_forms") or {}).get("서식5")),
-        receipt_amount_loader=receipt_amount_loader,
-        reader=read_document,
-    )
+    try:
+        path.write_bytes(content)
+        ocr, result = assess_upload(
+            path, req,
+            identity=identity_of(app.identity_json),
+            declared=declared,
+            checklist=checklist,
+            uploaded_loader=lambda: _list_documents(application_id),
+            paper_admin_consent=bool(((app.doc_context_json or {}).get("paper_forms") or {}).get("서식5")),
+            receipt_amount_loader=receipt_amount_loader,
+            reader=read_document,
+        )
 
-    _replace_existing(application_id, req.slot_key)
-    row = _save_row(
-        app,
-        req,
-        req.slot_key,
-        path,
-        ocr,
-        declared,
-        [f.as_dict() for f in result.findings],
-        result.status,
-    )
-    if req.doc_type in (DocType.NHIS_PAYMENT, DocType.NHIS_QUALIFICATION) or ocr.detected_doc_type in (
-        DocType.NHIS_PAYMENT, DocType.NHIS_QUALIFICATION,
-    ):
-        _refresh_nhis_identity(application_id, app, checklist)
-        row = next((d for d in _list_documents(application_id) if d.id == row.id), row)
-    return _document_dict(row)
+        with session_transaction(join_existing=True):
+            _require_draft(application_id)
+            _replace_existing(application_id, req.slot_key)
+            row = _save_row(
+                app,
+                req,
+                req.slot_key,
+                path,
+                ocr,
+                declared,
+                [f.as_dict() for f in result.findings],
+                result.status,
+            )
+            if req.doc_type in (DocType.NHIS_PAYMENT, DocType.NHIS_QUALIFICATION) or ocr.detected_doc_type in (
+                DocType.NHIS_PAYMENT, DocType.NHIS_QUALIFICATION,
+            ):
+                _refresh_nhis_identity(application_id, app, checklist)
+                row = next((d for d in _list_documents(application_id) if d.id == row.id), row)
+            return _document_dict(row)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        dest_dir.rmdir()
+        raise
 
 
+@serialized_application_write
 async def _upload_merged(
     app: Application, checklist: list[DocRequirement], file: UploadFile
 ) -> dict[str, Any]:
@@ -365,6 +396,7 @@ async def _upload_merged(
     올린 신청자도 그대로 받되, 페이지별 판별 결과로 슬롯을 채운다. 배정되지 않은
     페이지만 신청자에게 되묻는다.
     """
+    _require_draft(app.id or 0)
     if not (file.filename or "").lower().endswith(".pdf"):
         raise HTTPException(400, "여러 서류를 한 파일로 올리는 기능은 pdf만 지원합니다.")
 
@@ -477,21 +509,40 @@ def list_documents(application_id: int) -> list[dict[str, Any]]:
 
 
 @router.delete("/{application_id}/documents/{document_id}")
+@serialized_application_write
 def delete_document(application_id: int, document_id: int) -> dict[str, str]:
     """재업로드를 위한 삭제. 파일도 같이 지운다."""
-    app = _load(application_id)
+    app = _require_draft(application_id)
     checklist = _checklist(app)
     nhis_types = {str(DocType.NHIS_PAYMENT), str(DocType.NHIS_QUALIFICATION)}
     refresh_nhis = False
-    with get_session() as s:
-        row = s.get(Document, document_id)
-        if row is None or row.application_id != application_id:
-            raise HTTPException(404, "서류를 찾을 수 없습니다.")
-        refresh_nhis = row.doc_type in nhis_types or row.expected_doc_type in nhis_types
-        target = STORAGE.parent / row.file_path
-        target.unlink(missing_ok=True)
-        s.delete(row)
-        s.commit()
-    if refresh_nhis:
-        _refresh_nhis_identity(application_id, app, checklist)
+    target = None
+    staged = None
+    try:
+        with session_transaction():
+            _require_draft(application_id)
+            with get_session() as s:
+                row = s.get(Document, document_id)
+                if row is None or row.application_id != application_id:
+                    raise HTTPException(404, "서류를 찾을 수 없습니다.")
+                refresh_nhis = row.doc_type in nhis_types or row.expected_doc_type in nhis_types
+                target = STORAGE.parent / row.file_path
+                if target.exists():
+                    staged = target.with_name(target.name + ".deleting-" + uuid4().hex)
+                    target.rename(staged)
+                s.delete(row)
+                s.commit()
+            if refresh_nhis:
+                _refresh_nhis_identity(application_id, app, checklist)
+    except BaseException:
+        if staged is not None and staged.exists():
+            staged.rename(target)
+        raise
+    if staged is not None:
+        try:
+            staged.unlink(missing_ok=True)
+        except OSError:
+            # The logical deletion has committed. Retain the tombstone for
+            # operational cleanup; do not turn a committed delete into a 500.
+            logging.getLogger(__name__).warning("문서 삭제 후 임시 파일 정리를 완료하지 못했습니다.")
     return {"deleted": str(document_id)}

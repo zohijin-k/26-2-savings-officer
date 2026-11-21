@@ -88,7 +88,7 @@ Test helpers (`demo/backend/tests/security_support.py`, identical to youth):
 
 ## 6. Tests Required
 
-- `tests/test_access_control.py` (59 cases on 2026-11-19) enumerates routes from `app.routes`:
+- `tests/test_access_control.py` (59 cases on 2026-11-19) enumerates routes with `fastapi.routing.iter_route_contexts(app.routes)` (FastAPI 0.137.2+), which yields each included route with its served path. Since FastAPI 0.137 an included router stays a single `app.routes` entry, so looping over `app.routes` alone misses every route added with `include_router`. The enumeration guard fails when either list comes back short, so a FastAPI upgrade cannot silently drop the per-route cases:
   - every applicant route rejects no cookie, another application's cookie and another owner's token under the target name with 403, `DENIED` and `private, no-store`;
   - every officer route, `/api/officer` and an unknown officer path return 401 without a session and with a forged role header;
   - the owner cookie is `Path=/api`, HttpOnly, SameSite=Lax and `Secure` on https; private columns stay out of responses;

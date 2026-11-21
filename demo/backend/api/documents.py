@@ -284,9 +284,14 @@ async def upload_document(
 ) -> dict[str, Any]:
     """파일 1개를 받아 즉시 1단계 판정을 돌려준다 (R2.1).
 
-    `slot_key`를 비우거나 `auto`로 주면 병합 PDF로 보고 페이지별로 쪼개
-    슬롯에 자동 배정한다 (R3.5).
+    자동 분류 업로드는 지원하지 않으므로 서류 종류에 맞는 슬롯을 명시해야 한다.
     """
+    if not slot_key or slot_key == AUTO_SLOT:
+        raise HTTPException(
+            400,
+            "자동 서류 분류 업로드는 현재 지원하지 않습니다. 서류 종류에 맞는 업로드 항목을 선택해 다시 제출해 주세요.",
+        )
+
     app = _load(application_id)
     checklist = _checklist(app)
 
@@ -297,10 +302,7 @@ async def upload_document(
             f"pdf, jpg, png 파일만 올릴 수 있습니다. (올리신 형식: {suffix or '알 수 없음'})",
         )
 
-    target_slot = slot_key or AUTO_SLOT
-    if target_slot == AUTO_SLOT:
-        return await _upload_merged(app, checklist, file)
-
+    target_slot = slot_key
     req = find_slot(checklist, target_slot)
     if req is None or not req.upload:
         raise HTTPException(400, f"업로드 대상이 아닌 슬롯입니다: {target_slot}")

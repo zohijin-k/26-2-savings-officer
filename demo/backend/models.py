@@ -241,15 +241,21 @@ def get_session() -> Session:
 
 
 @contextmanager
-def session_transaction():
+def session_transaction(*, join_existing: bool = False):
     """Atomically compose existing service handlers without changing their API.
 
     A context-local connection keeps unrelated sessions on their normal engine.
     No SAVEPOINT is used: SQLite must retain the real outer transaction until
     all handler calls have succeeded.
     """
-    if _session_bind.get() is not None:
-        raise RuntimeError("Nested service transactions are unsupported")
+    existing = _session_bind.get()
+    if existing is not None:
+        if not join_existing:
+            raise RuntimeError("Nested service transactions are unsupported")
+        # A composed service already owns commit/rollback. It must propagate
+        # failures; never commit or close that caller's connection here.
+        yield existing
+        return
     with engine.begin() as connection:
         token = _session_bind.set(connection)
         try:

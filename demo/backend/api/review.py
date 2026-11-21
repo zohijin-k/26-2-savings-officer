@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException
 from sqlmodel import select
 from engine_v2.pipeline.privacy import mask_data
 
+from ..application_writes import serialized_application_write
 from ..engine_adapter import (
     electronic_consent_row,
     inject_file_refs,
@@ -769,6 +770,7 @@ def _link_overlapping_households(app: Application, current_review: Review) -> No
 
 
 @router.post("/{application_id}/submit")
+@serialized_application_write
 def submit(application_id: int) -> dict[str, Any]:
     """최종 제출 → 전체 파이프라인 + 채점 → `review` 저장.
 

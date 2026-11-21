@@ -17,3 +17,63 @@ Both preparation and direct submission use the same blocker function. A previous
 
 ## Verification
 Use synthetic documents and temporary databases only. Cover each allowlist code in FAIL and NEEDS_REVIEW, hidden/unknown/legacy/mixed findings, identity masking, immutable original data, direct-API required-field/consent/document/work checks, readiness-to-submit changes, and real submission of hidden failures with unchanged Review/officer outcomes. Record every changed existing expectation with file, test, before/after and reason; delete no tests.
+
+## Unsupported auto uploads
+
+### 1. Scope / trigger
+
+`api.documents.upload_document` rejects unsupported automatic document classification
+at the API boundary. This is an input restriction only; explicit-slot extraction,
+OCR, document checks, submission policy and historical reviews remain unchanged.
+
+### 2. Signatures
+
+`POST /api/applications/{application_id}/documents` accepts multipart `file`,
+`slot_key: str = Form(AUTO_SLOT)` and `declared_issue_date: str | None = Form(None)`.
+The retained default is rejected; callers must supply an explicit upload slot.
+
+### 3. Contracts
+
+After the existing authentication middleware, reject `not slot_key` or exact
+`slot_key == "auto"` before application/checklist loading, file reads, permanent
+storage, OCR, assessment, document replacement or review recalculation. Return
+HTTP 400 with the standard `{"detail": str}` body and this guidance:
+
+`자동 서류 분류 업로드는 현재 지원하지 않습니다. 서류 종류에 맞는 업로드 항목을 선택해 다시 제출해 주세요.`
+
+Keep the existing local PP-OCRv5/ONNX path and explicit-slot `assess_upload` call.
+Starlette owns multipart temporary files and closes them on rejected requests,
+including files rolled to disk. Temporary parsing is not permanent storage.
+
+### 4. Validation & error matrix
+
+| Input | Result |
+|---|---|
+| `auto`, omitted Form field, empty Form field, multipart `None` encoded empty | 400 unsupported-auto guidance |
+| Query `slot_key` with no/empty Form slot | Same 400; Query cannot supply Form data |
+| Whitespace, literal `null`/`None`, `AUTO`, padded ` auto `, unknown slot | Existing 400 invalid-slot error; no trimming/case folding |
+| Explicit current checklist slot with `upload=True` | Existing format/date/assessment behavior |
+| Missing required file | Existing framework validation error |
+
+### 5. Good / base / bad cases
+
+Good: the applicant explicitly uploads a PDF to `work_proof`. Base: image and text
+PDFs use their existing ordinary-slot paths. Bad: assuming an omitted slot is a
+valid default or enabling the private merged helper from another public route.
+
+### 6. Tests required
+
+`test_auto_upload_rejection.py` covers image/text PDFs, identity mismatch, workplace
+conflict, implicit-auto forms and other invalid slots. Compare every DB table,
+permanent file hashes, stored FAIL/NEEDS_REVIEW and officer PASS queue; assert zero
+OCR, assessment, merged processing or review calls and closed multipart handles.
+The synthetic historical-risk test demonstrates that stored unassigned documents
+can coexist with PASS and remain excluded by a fresh review. This restriction
+performs no migration or historical reassessment; remediation requires separate work.
+
+### 7. Wrong vs correct
+
+Wrong: disable the frontend button or reject only after writing/assessing a file.
+Correct: reject at the input boundary and prove permanent state remains unchanged.
+Wrong: claim existing auto documents are repaired. Correct: report their remaining
+risk separately without changing stored data or engine rules.

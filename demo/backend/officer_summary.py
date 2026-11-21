@@ -34,7 +34,7 @@ from .llm_client import TextProvider, configured_provider
 from .models import ReviewSummary, get_session
 
 #: 프롬프트·투영 규칙이 바뀌면 올린다. 해시에 들어가 기존 캐시가 다시 생성된다.
-SUMMARY_VERSION = 3
+SUMMARY_VERSION = 4
 LABEL = "AI 종합의견(참고용)"
 MAX_CHECK_POINTS = 4
 #: 같은 입력으로 방금 실패했다면 이 시간 동안은 다시 부르지 않는다(화면 반복 열기 대비).
@@ -193,7 +193,13 @@ def _document_facts(fields: Mapping[str, Any], names: set[str], birth: str | Non
         if iso and birth:
             facts[f"{key} 대조"] = "신청서와 일치" if iso == birth else "신청서와 다름"
     workplaces = _json_list(fields.get(WORKPLACE_LIST_FIELD))
-    if workplaces:
+    count_state = fields.get("사업장수상태")
+    if count_state == "미확정":
+        facts["사업장 수 확인"] = "명칭 불일치로 미확정"
+    elif count_state == "명칭목록기준" and WORKPLACE_LIST_FIELD in fields:
+        facts["판독된 사업장 명칭 수"] = len(workplaces)
+    elif "사업장수상태" not in fields and workplaces:
+        # Preserve markerless historical payloads; no backfill/rejudging.
         facts["사업장 수"] = len(workplaces)
     return facts
 
@@ -376,6 +382,7 @@ def short_doc_label(label: str) -> str:
 
 #: 화면에는 코드 대신 이 문구를 보인다. 없는 코드는 저장된 사유 문장에서 만든다.
 CODE_LABELS: dict[str, str] = {
+    "INSURANCE_WORKPLACE_NAME_INCONSISTENT": "같은 관리번호의 사업장 명칭 불일치",
     "LOW_OCR_CONFIDENCE": "자동 판독 신뢰도 낮음",
     "LOW_IMAGE_QUALITY": "화질이 낮음",
     "IMAGE_RESOLUTION_TOO_LOW": "해상도가 낮음",
@@ -440,6 +447,7 @@ _FIELD_WORDS = {**{key: "성명" for key in NAME_FIELDS}, **{key: "생년월일"
                 "전입일": "전입일", "취업일": "취업일"}
 #: 원본에서 강조할 판독 항목. 규칙 사유 코드 → 후보 필드(앞에서부터).
 CODE_FIELDS: dict[str, tuple[str, ...]] = {
+    "INSURANCE_WORKPLACE_NAME_INCONSISTENT": ("사업장명칭상태", "사업장명칭목록"),
     "DECLARED_DATE_MISMATCH": ("발급일",), "DECLARED_DATE_UNCERTAIN": ("발급일",),
     "DOCUMENT_ISSUED_TOO_EARLY": ("발급일",), "DOCUMENT_ISSUED_AFTER_APPLICATION": ("발급일",),
     "IDENTITY_MISMATCH": NAME_FIELDS, "IDENTITY_UNCERTAIN": NAME_FIELDS,

@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from datetime import date
 import json
 
+from engine_v2.extractors import insurance_workplace
+
 from ..engine_adapter import (IMAGE_QUALITY_REVIEW_MESSAGE, engine_check_single_document,
                               engine_config, engine_image_quality_status, engine_models)
 from ..ocr.base import OcrResult
@@ -1002,7 +1004,8 @@ def _check_document(
             how_to_fix="그대로 두셔도 담당자가 원본을 확인합니다. 주소 이력이 모든 쪽에 선명하게 보이는 초본 전체를 다시 올리면 더 빨리 확인됩니다.",
             severity="NEEDS_REVIEW",
             detail=f"세부 사유: {ocr.fields.get('주소이력불확실사유') or '미상'} "
-                   "(NUMBER_GAP 번호 누락, NUMBER_UNREADABLE 번호 판독 실패, EMPTY_PAGE 표 머리글만 읽힌 쪽).",
+                   "(NUMBER_GAP 번호 누락, NUMBER_UNREADABLE 번호 판독 실패, EMPTY_PAGE 표 머리글만 읽힌 쪽, "
+                   "TABLE_NOT_FOUND 후속 표 미확인, ROWS_UNREADABLE 후속 이력 판독 불완전).",
         ))
 
     if (ocr.detected_doc_type is DocType.NHIS_PAYMENT and req.accepts(ocr.detected_doc_type)
@@ -1094,6 +1097,16 @@ def check_document(
     for finding in _check_payment_paging(ocr, req):
         if not any(f.code == finding.code and f.severity == finding.severity for f in result.findings):
             result.findings.append(finding)
+    if (not ocr.is_encrypted and ocr.detected_doc_type is DocType.INSURANCE_4
+            and req.accepts(ocr.detected_doc_type) and insurance_workplace.name_review(ocr.fields)):
+        result.findings.append(CheckFinding(
+            insurance_workplace.CODE,
+            "같은 관리번호의 사업장 명칭이 서로 다르게 판독되었습니다. 담당자가 원본 명칭 칸을 확인합니다.",
+            how_to_fix="그대로 제출해도 담당자가 원본을 확인합니다. 사업장 명칭이 선명한 전체 서류를 올리면 확인에 도움이 됩니다.",
+            severity="NEEDS_REVIEW", detail=insurance_workplace.REASON,
+        ))
+        if result.status == "PASS":
+            result.status = "NEEDS_REVIEW"
     _review_uncertain_absence(result)
     if (not ocr.is_encrypted and req.accepts(ocr.detected_doc_type)
             and ocr.fields.get("열람용표시") == "있음"):

@@ -278,6 +278,8 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
             ("NUMBER_UNREADABLE", getattr(ex, "history_numbers", "NA") == "UNREADABLE"),
             ("EMPTY_PAGE", getattr(ex, "history_empty_page", False)),
         ) if hit]
+        table_issues = getattr(ex, "history_table_issues", [])
+        uncertain.extend(table_issues)
         if uncertain:
             fields["주소이력상태"] = "불확실"
             fields["주소이력불확실사유"] = ",".join(uncertain)
@@ -285,6 +287,10 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
                 if label in fields:
                     fields[label] = "불확실"
                 bboxes.pop(label, None)
+            if table_issues:
+                for label in ("현주소시도", "주소변동내역"):
+                    if label in fields:
+                        fields[label] = "불확실"
 
     passed = sum(v.passed for v in ex.validations)
     fields["판독검증"] = f"{passed}/{len(ex.validations)} 통과"
@@ -296,6 +302,7 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
     key = [f[k].confidence for k in ("issue_date", "name", "birth_date") if k in f]
     confidence = min([ex.type_confidence, *key]) if "issue_date" in f else 0.5
     if any(not validation.passed and validation.name.startswith(("history", "occurred"))
+           and validation.name != "history_tables_readable"
            for validation in ex.validations):
         confidence = min(confidence, .4)
         fields["판독경고"] = "주소 이력의 순번 또는 날짜를 완전히 확인하지 못했습니다."
@@ -579,11 +586,14 @@ def _from_nhis(ex, pages, v2types, classification_evidence: str = "",
 
 def _from_insurance4(ex, pages, classification_evidence: str = "") -> OcrResult:
     """4대보험 결과를 데모 필드 계약으로 변환한다."""
+    from engine_v2.extractors import insurance_workplace as workplace, nhis_common
+
     fields: dict[str, str] = {}
     bboxes: dict[str, BBox] = {}
     for key in ("성명", "생년월일", "발급일", "문서확인번호", "발급번호",
                 "가입내역", "보험별가입여부", "보험별가입자종별", "근로관련가입여부",
-                "근로관련최초취득일", "근로관련최근취득일", "사업장명칭목록", "추가첨부쪽"):
+                "근로관련최초취득일", "근로관련최근취득일", "사업장명칭목록", "추가첨부쪽",
+                workplace.COUNT_FIELD, workplace.STATE_FIELD, workplace.REASON_FIELD, workplace.PROOF_FIELD):
         extracted = ex.fields.get(key)
         if extracted is None:
             continue
@@ -604,8 +614,11 @@ def _from_insurance4(ex, pages, classification_evidence: str = "") -> OcrResult:
         row_box = _demo_bbox(row.bbox)
         for key, value in row_values.items():
             fields[key] = value
-            if row_box is not None:
-                bboxes[key] = row_box
+            box = row_box
+            if key == f"{prefix} 사업장명칭" and row.workplace_words:
+                box = _demo_bbox(nhis_common.bbox(row.workplace_words, {page.page: page for page, _ in pages}))
+            if box is not None:
+                bboxes[key] = box
     validations = list(ex.validations)
     structure_complete = getattr(ex, "structure_complete", None)
     if getattr(ex, "form_kind", None) == "portal":

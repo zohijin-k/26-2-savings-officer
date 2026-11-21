@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/index.md","reason":"Full affected-package review scope"}
+{"file":".trellis/spec/backend/document-form-contracts.md","reason":"No guessed values or weakened independent failures"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Local-only OCR and generated artifact boundaries"}
+{"file":".trellis/tasks/11-20-post-freeze-resident-history/research/code-paths.md","reason":"Synthetic regression and compatibility review evidence"}

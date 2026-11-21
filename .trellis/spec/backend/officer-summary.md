@@ -74,3 +74,16 @@ Correct:
 payload = summary_payload(detail, app.form1_json, app.identity_json)
 messages = build_messages(payload)
 ```
+
+
+## 8. Fresh insurance name/count review
+
+Scope: fresh insurance results and the existing summary projection; no historical backfill. Signatures of `summary_payload`, `summarize` and responses are unchanged; `SUMMARY_VERSION=4` invalidates previous projection caches.
+
+Contracts: `사업장수상태=미확정` suppresses numeric workplace counts and emits only `사업장 수 확인=명칭 불일치로 미확정`. Fresh `명칭목록기준` emits `판독된 사업장 명칭 수`; this is a distinct observed-name count, never a unique real-business count. Unknown present markers cannot fall back to a historical asserted count. Markerless historical payloads retain the old `사업장 수` behavior and its explicit limitation.
+
+The grounded new code `INSURANCE_WORKPLACE_NAME_INCONSISTENT` has a Korean label and jumps to original `사업장명칭상태`/`사업장명칭목록` name evidence. New state reasons/proof hashes, names, numbers, rows and OCR text are not projected to a provider. No verdict is changed.
+
+Validation/error matrix: unresolved conflict -> count uncertain; ordinary fresh list -> qualified name count; absent historical marker -> old behavior; unknown marker -> omit numeric count. Good/base/bad: a two-spelling list under one number requests review / ordinary fresh names are qualified / declaring two actual businesses from two spellings is forbidden.
+
+Required tests: new `test_insurance_workplace_summary.py` verifies count suppression/qualification, markerless compatibility, unknown markers, grounding/original jump, cache version/hash changes and mocked transport privacy including proof digest and serialized rows. Existing summary expectations stay unchanged. Wrong: send a proof envelope or infer actual-business identity from names. Correct: send only the fixed nonidentifying count/review facts and grounded finding.

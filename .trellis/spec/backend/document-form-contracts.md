@@ -246,3 +246,89 @@ Good: a markerless balanced table with confirmed range and source issue date ret
 ### Wrong versus correct
 
 Wrong: aggregate unrelated batch-folder files into an upload slot. Correct: the explicit-slot replacement contract makes its retained file the complete received set; require reliable consistent printed excess before FAIL. Wrong: existing arithmetic_complete=True survives changed monthly fields. Correct: validate and bind original source-derived monthly values and issue date before excluding paging review.
+
+## 17. Resident continuation table recovery
+
+### Scope / trigger
+
+Resident abstracts whose continuation headers are separated into nearby OCR lines. Preserve shared OCR grouping, local model assets, legacy same-line tables and existing page policy.
+
+### Signatures
+
+`resident_abstract._table_bounds(lines, *, allow_split=True, corroborated=False)` retains the default callable contract. `ResidentAbstractResult.history_table_issues` is a default-empty list of fixed reason codes. No API/DB migration.
+
+### Contracts
+
+- Recovery requires observed number/address/date-or-holder header categories in ordered column regions, bounded vertical distance (at most 3.5 page-height points and three median glyph heights, adjacent relevant lines at most 1.5 heights), and matching independent ordinal/address/report-date rows. Two complete rows are required by default; one requires an immediately preceding read table and compatible consecutive markers with the same total.
+- Parse candidate pages into temporary state before merging. Match observed ordinals and date cells to the parsed rows; do not append an unread candidate to the prior address. Preserve existing memo numbering and blank-page exclusions. `_table_end` shares the established military-section/blank-space/footer boundary between detection, split-header search and omission-risk evidence; later unrelated sections cannot support recovery or review.
+- Unrecovered structured evidence emits `TABLE_NOT_FOUND`; an otherwise consistent legacy continuation with unread date-cell evidence emits `ROWS_UNREADABLE`. Header-free suspicion requires multiple aligned regional-address/ordinal/date rows. A compact partial header plus an aligned regional-address row supports review only.
+- `history_tables_readable=False` is added for new issues or an existing counted empty-table page. Exclude this new check from the legacy global confidence cap; cap history/count/current-address fields instead. The direct engine consumes its accompanying warning; the adapter retains the exact existing `EMPTY_PAGE` reason for already detected empty tables. Existing number/date defects retain their established global confidence policy.
+- `_from_resident` extends `주소이력불확실사유`, sets `주소이력상태=불확실`, and suppresses residence-derived transfer/count/region/history-presence values. Independently verified identity, issue-date and page FAIL evidence remains usable. The existing `ADDRESS_HISTORY_INCOMPLETE` finding is review-only; FAIL retains precedence.
+- Date-value concatenation is not introduced. Fragmented/conflicting/unread report-date cells are uncertainty; never substitute lookalike characters or invent missing components.
+- Diagnostic observers must preserve public extractor `*args, **kwargs`, record invocation before calling and re-raise failures. Do not wrap private bounds/row helpers with fixed signatures or equate their call counts with pages/committed rows: split recovery performs internal probes. Count committed entries by `HistoryEntry.page`; keep telemetry errors distinct from engine errors and retain closed, value-free output schemas.
+
+### Validation / error matrix
+
+| Evidence | Outcome |
+|---|---|
+| Compact ordered split header and complete aligned rows | Recover observed entries; retain ordinary assessment |
+| Structured continuation but failed recovery / unexplained date cells | No speculative page merge; scoped history uncertainty and review |
+| Independent confirmed identity/date/page failure plus new history issue | Preserve FAIL and its code |
+| Unrelated prose/table, scattered labels or dates without address-row geometry | No new history issue; retain existing page assessment |
+
+### Good / base / bad cases
+
+Good: eight entries plus two recovered continuation entries. Base: normal one/two-page same-line tables keep their previous results. Bad: concatenate whole-page prose to find labels, treat every extra page as incomplete, or globally lower identity confidence because the address table is unread.
+
+### Required tests
+
+New engine/backend `test_resident_history_continuation.py` covers 8+2, single corroborated row, split labels, proximity boundaries/scaling, ambiguous/partial tables, date fragments/lookalikes, attachments, old ordinal/page protections and combined independent failures. Keep previous expectations unchanged; run full suites/scenarios/frontend and identical synthetic before/after measurement, reporting all status transitions without document keys.
+
+### Wrong versus correct
+
+Wrong: eight sequential parsed rows establish completeness after an unread second table. Correct: independent continuation evidence requires recovery or explicit review. Wrong: new uncertainty globally caps issue-date confidence. Correct: scope the cap to history and preserve independent FAIL precedence, including the existing history-limited page-confidence exception.
+
+
+## 18. Insurance workplace-name consistency
+
+### Scope / trigger
+
+Fresh government24/portal insurance extraction, its local adapter, document review and independent work-evidence trust. No production name correction, OCR retry, shared layout change, database migration or historical-result backfill.
+
+### Signatures
+
+`insurance_4.extract(pages, today=None)` and `InsuranceRow` retain existing constructor behavior with default-empty internal provenance. `insurance_workplace.comparison_key(str)` is comparison-only NFC plus collapsed whitespace. `proof(rows_json, groups)` and `name_review(fields)` own the local typed review envelope shared by document assessment and work trust.
+
+### Contracts
+
+- Keep selected name/management words and actual transformed name fragments/join internally. Preserve existing per-form fragment selection, normalization and stored strings. Per-row name confidence/position precision never caps independent identity/date confidence. Exact name-word boxes are preferred; fused observations remain coarse.
+- Compare active nonempty names only under an exact observed 11-ASCII-digit management key. Require clean allowed source separators, finite non-boolean minimum management score >= .85, unique confident ordered observed headers and independent bounded number/name allocation. Exclude fused number/name observations, crossing/ambiguous cells, fallback coordinates alone and unsupported forms. Taller text-layer glyphs use an observed-header band scaled to glyph height; retain legacy parsing anchors and prove comparison allocation independently from observed labels. No majority, similarity, punctuation removal or Hangul correction.
+- Add `사업장명칭상태=불확실`, `사업장명칭불확실사유=SAME_MANAGEMENT_NAME_CONFLICT`, `사업장수상태=미확정` on reliable conflicts; otherwise fresh count state is `명칭목록기준`. Preserve exact first-occurrence name-list contents. The direct engine receives the fixed reason as a warning; no structural validation is added.
+- `사업장명칭불확실근거` is local JSON `{version:1,rows_sha256:<byte-separated SHA-256 hex>,groups:[[row indices],...]}`. Bind the existing exact serialized membership payload, active same-number/non-equivalent-name relation and current first-occurrence list. Reject malformed/duplicate/bool/out-of-range indices, stale digests, missing/unknown states and mismatching lists. Byte-separated hex cannot resemble an RRN and survives existing `mask_data`; it is never external summary input. This is observational binding, not authoritative spelling proof.
+- Accepted insurance documents with a valid envelope receive review-only `INSURANCE_WORKPLACE_NAME_INCONSISTENT`. Independent confirmed FAIL retains precedence. Never trigger from warning text alone or emit an unrelated generic LOW_OCR finding.
+- The work-trust exception requires an actual insurance type, stored NEEDS_REVIEW, matching valid proof and a nonempty list of complete string-typed findings whose every code is the new code and every severity is NEEDS_REVIEW. Retain all identity, birth, confidence, quality, structure, validation, issue-date and acquired-row guards. MET/NOT_MET may remain independently established; stored document review is unchanged. Keep existing applicant submission policy: hidden internal work FAIL does not itself block submission, and must remain FAIL in the stored review/officer result afterward.
+- Production path adds zero OCR calls. The standalone synthetic crop tool has no document-path input; four authored rows, original and predeclared 2x/1.1-contrast variants, <=1 MP each, eight serial region calls with a five-second call budget. Record every correct/wrong/empty/error/timeout/high-score error, disagreement and cold/warm latency; never apply candidates or remove review.
+
+### Validation / error matrix
+
+| Evidence | Result |
+|---|---|
+| Reliable same number + substantive different names | Scoped review; original names retained |
+| NFC/collapsed-space equivalents | No new spelling conflict |
+| Weak/invalid/fused/ambiguous/missing number or observed columns | No inferred group; existing checks retained |
+| Name-only typed review + independently complete work evidence | Preserve MET or NOT_MET and overall review/FAIL |
+| Mixed/malformed findings, stale proof, weak identity/date/quality/structure | No work-trust exception |
+| Certain independent failure plus name conflict | Keep FAIL |
+| All rows share the same plausible wrong spelling | Undetectable by this consistency check |
+
+### Good / base / bad cases
+
+Good: three active rows share a trusted number but differ in one Hangul character; request original-cell review without selecting a majority. Base: ordinary matching government24/portal names keep old membership/date/validation behavior. Bad: repair a high-score spelling guess or treat equal numbers as a proven business identity.
+
+### Tests required
+
+New engine/backend `test_insurance_workplace_consistency.py`, engine `test_insurance_workplace_crop_study.py`, backend work-continuity, summary and submission suites cover A–N, exact score boundaries/nonfinite/bool scores, ASCII/separators, observed versus fallback columns, source stages, fused exclusion, actual synthetic PDFs, direct-engine/adapter findings, confirmed FAIL, document_fact, officer review and real submission, stale state, scoped confidence and zero added OCR. Include a constructed digest/RRN collision through mask_data. Keep all old expectations, frozen refs and synthetic corpus truth unchanged; compare 410 original pairs and both G sets before/after.
+
+### Wrong versus correct
+
+Wrong: any one allowed review finding bypasses all other findings; a plain hash happens to be redacted, silently losing work evidence. Correct: every complete finding is name-only, current source proof matches and survives masking, and all independent trust guards still apply.

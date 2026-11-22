@@ -136,7 +136,7 @@ const entries = new Map<number, MockEntry>(SEEDS.map((seed, index) => {
       recommended_action: ai === 'PASS' ? '서류 적합' : ai === 'FAIL' ? '선발 제외 검토' : '담당자 원본 확인',
       reasons: missing ? [{ code: 'MISSING_REQUIRED', message: '필수 서류(건강보험료 납부확인서)가 제출되지 않았습니다.', doc_type: null }] : [],
     },
-    score_sheet: sheet, documents, decision: { decision: null, label: '미처리', memo: null }, role: ROLES.province,
+    score_sheet: sheet, documents, forms: [], decision: { decision: null, label: '미처리', memo: null }, role: ROLES.province,
   }
   return [id, { row, detail }]
 }))

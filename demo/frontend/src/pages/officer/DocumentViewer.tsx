@@ -22,6 +22,8 @@ import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 import type { BBox, OfficerDocument } from '../../api.ts'
+import { officerSessionResponse } from '../../officer-session.ts'
+import { pdfLoadError } from './pdf-error.ts'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -36,8 +38,10 @@ const ZOOM_STEPS = [0.6, 0.8, 1, 1.25, 1.5, 2, 2.5, 3]
 /** `.viewer__stage`의 padding과 같아야 쪽 이동 시 위 여백이 맞는다. */
 const STAGE_PADDING = 12
 
+type ViewerDocument = Pick<OfficerDocument, 'file_url' | 'file_name' | 'file_format' | 'label'>
+
 interface Props {
-  doc: OfficerDocument
+  doc: ViewerDocument
   /** 심사표 항목 클릭이 채우는 하이라이트 위치. */
   highlight: BBox | null
   /** 하이라이트 옆에 띄울 설명 (어느 항목의 근거인지). */
@@ -107,6 +111,7 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
   const [rotation, setRotation] = useState<Rotation>(0)
   const [imageSize, setImageSize] = useState<Size>({ width: 0, height: 0 })
   const [error, setError] = useState('')
+  const [retry, setRetry] = useState(0)
 
   const scale = ZOOM_STEPS[zoomIndex]
   const isPdf = doc.file_format === 'pdf'
@@ -116,9 +121,9 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
 
   // 서류 탭이 바뀌면 배율·회전은 유지하고 쪽 표시만 1쪽으로 되돌린다.
   // effect가 아니라 렌더 중에 조정해 이전 서류 상태로 한 번 그려지는 깜빡임을 막는다.
-  const [prevDocId, setPrevDocId] = useState(doc.document_id)
-  if (prevDocId !== doc.document_id) {
-    setPrevDocId(doc.document_id)
+  const [prevDocUrl, setPrevDocUrl] = useState(doc.file_url)
+  if (prevDocUrl !== doc.file_url) {
+    setPrevDocUrl(doc.file_url)
     setCurrentPage(1)
     setError('')
   }
@@ -127,12 +132,15 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
   useEffect(() => {
     if (!isPdf) return
     let cancelled = false
+    setError('')
+    setLoaded(null)
     // 실제 발급 서류는 JBIG2 스캔 이미지가 많아 wasm 디코더가 없으면 흰 페이지가
     // 된다. 경로는 vite.config.ts의 pdfjsAssets 플러그인이 제공한다.
     const base = import.meta.env.BASE_URL
     const url = doc.file_url
     const task = pdfjs.getDocument({
       url,
+      withCredentials: true,
       wasmUrl: `${base}pdfjs/wasm/`,
       cMapUrl: `${base}pdfjs/cmaps/`,
       cMapPacked: true,
@@ -153,13 +161,17 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
         setLoaded({ url, pdf, sizes })
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+        if (!cancelled) {
+          const failure = pdfLoadError(e)
+          if (failure.status !== null) officerSessionResponse(url, { status: failure.status })
+          setError(failure.message)
+        }
       })
     return () => {
       cancelled = true
       void task.destroy()
     }
-  }, [doc.file_url, isPdf])
+  }, [doc.file_url, isPdf, retry])
 
   // --- 탭이 바뀌면 맨 위부터 본다.
   useLayoutEffect(() => {
@@ -297,7 +309,10 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
         </span>
       </div>
 
-      {error && <p className="viewer__error">원본을 열지 못했습니다: {error}</p>}
+      {error && <p className="viewer__error" role="alert">{error}{' '}
+        <button type="button" className="btn btn--sm" onClick={() => setRetry((value) => value + 1)}>다시 시도</button>
+      </p>}
+      {isPdf && !pdfDoc && !error && <p role="status">서류를 불러오는 중입니다.</p>}
 
       <div className="viewer__stage" ref={stageRef} onScroll={onScroll}>
         {isPdf ? (
@@ -424,9 +439,9 @@ function PdfPage({
       holder.replaceChildren(canvas)
     }
 
-    draw().catch((e: unknown) => {
+    draw().catch(() => {
       if (cancelled) return
-      onError(e instanceof Error ? e.message : String(e))
+      onError('PDF를 표시하지 못했습니다. 다시 시도해 주세요.')
     })
     return () => {
       cancelled = true
@@ -458,7 +473,7 @@ function ImagePage({
   rotation,
   onSize,
 }: {
-  doc: OfficerDocument
+  doc: ViewerDocument
   scale: number
   rotation: Rotation
   onSize: (size: Size) => void

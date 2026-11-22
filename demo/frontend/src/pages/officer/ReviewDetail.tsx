@@ -35,6 +35,7 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
   const [focus, setFocus] = useState<{ documentId: number; bbox: BBox; label: string; scoreKey: string | null } | null>(null)
+  const [formNo, setFormNo] = useState<string | null>(null)
   useEffect(() => {
     let active = true
     fetchReviewDetail(applicationId, role).then((data) => {
@@ -51,7 +52,13 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
     return () => { active = false }
   }, [applicationId, role])
 
-  const activeDoc = detail ? selectOfficerDocument(detail.documents, documentId, slotKey) : null
+  const activeDoc = detail && formNo === null ? selectOfficerDocument(detail.documents, documentId, slotKey) : null
+  const activeForm = detail?.forms.find((form) => form.form_no === formNo)
+  const viewerDoc = activeForm ? { ...activeForm, file_format: 'pdf' } : activeDoc
+  const selectOriginal = (id: number, slot: string) => {
+    setFormNo(null)
+    onSelect(id, slot)
+  }
   const decide = async (decision: DecisionKey) => {
     setSaving(true)
     setNotice('')
@@ -70,7 +77,7 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
     setFocus(item.bbox ? {
       documentId: doc.document_id, bbox: item.bbox, label: item.label, scoreKey: item.key,
     } : null)
-    onSelect(doc.document_id, doc.slot_key)
+    selectOriginal(doc.document_id, doc.slot_key)
   }
   // AI 종합의견의 확인 포인트 → 원본. 같은 서류가 이미 열려 있어도 반응이 보이도록
   // 위치가 있으면 강조하고, 없으면 원본 영역을 잠깐 표시한다.
@@ -81,7 +88,7 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
     setFocus(bbox ? { documentId: doc.document_id, bbox, label, scoreKey: null } : null)
     setPulse((n) => n + 1)
     leftRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    onSelect(doc.document_id, doc.slot_key)
+    selectOriginal(doc.document_id, doc.slot_key)
   }
   const tiebreak = detail ? tiebreakParts(detail.score_sheet) : null
   // 서류 버튼 줄: ←/→로 이전·다음 서류, Home/End로 처음·마지막 서류를 연다. 포커스도 함께 옮긴다.
@@ -94,7 +101,7 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
         : event.key === 'Home' ? 0 : event.key === 'End' ? docs.length - 1 : null
     if (next === null) return
     event.preventDefault()
-    onSelect(docs[next].document_id, docs[next].slot_key)
+    selectOriginal(docs[next].document_id, docs[next].slot_key)
     event.currentTarget.querySelectorAll<HTMLButtonElement>('.review__tab')[next]?.focus()
   }
 
@@ -110,19 +117,26 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
           const on = activeDoc?.document_id === doc.document_id
           return <button key={doc.document_id} type="button" aria-current={on ? 'true' : undefined}
             className={`review__tab review__tab--${doc.status?.toLowerCase() ?? 'none'}${on ? ' review__tab--on' : ''}`}
-            onClick={() => onSelect(doc.document_id, doc.slot_key)}>
+            onClick={() => selectOriginal(doc.document_id, doc.slot_key)}>
             <span className={`review__tab-status review__tab-status--${doc.status?.toLowerCase() ?? 'none'}`} aria-hidden="true">{status?.icon ?? '–'}</span>
             {doc.label}
             <span className="sr-only">({status?.label ?? '판정 없음'})</span>
           </button>
         })}
       </nav>
+      {detail.forms.length > 0 && <nav className="review__tabs" aria-label="작성서식">
+        <strong>작성서식</strong>
+        {detail.forms.map((form) => <button key={form.form_no} type="button"
+          className={`review__tab${formNo === form.form_no ? ' review__tab--on' : ''}`}
+          aria-current={formNo === form.form_no ? 'true' : undefined}
+          onClick={() => { setFormNo(form.form_no); setFocus(null) }}>{form.label}</button>)}
+      </nav>}
       <div className="review__split">
         <section className="review__left" aria-label="신청자 원본 서류" ref={leftRef}>
           {pulse > 0 && <div key={pulse} className="review__pulse" aria-hidden="true" />}
-          {activeDoc ? <DocumentViewer doc={activeDoc}
-            highlight={focus?.documentId === activeDoc.document_id ? focus.bbox : null}
-            highlightLabel={focus?.documentId === activeDoc.document_id ? focus.label : undefined} /> : <p className="empty-state">
+          {viewerDoc ? <DocumentViewer doc={viewerDoc}
+            highlight={activeDoc && focus?.documentId === activeDoc.document_id ? focus.bbox : null}
+            highlightLabel={activeDoc && focus?.documentId === activeDoc.document_id ? focus.label : undefined} /> : <p className="empty-state">
             {slotKey ? '이 항목은 원본 서류가 없습니다. 미제출 또는 삭제 여부를 확인해 주세요.' : '확인할 서류를 선택해 주세요.'}
           </p>}
         </section>
@@ -175,7 +189,7 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
               <dl className="fields">{Object.entries(activeDoc.extracted).map(([key, value]) => <div key={key}>
                 <dt>{key}</dt><dd><span>{value}</span>{activeDoc.bboxes[key] && <button type="button" className="btn btn--sm" onClick={() => setFocus({ documentId: activeDoc.document_id, bbox: activeDoc.bboxes[key], label: key, scoreKey: null })}>원본 위치</button>}</dd>
               </div>)}</dl>
-            </> : <p className="muted">원본 없는 항목의 기존 저장 사유는 위 신청 전체 사유에서 확인할 수 있습니다.</p>}
+            </> : <p className="muted">{activeForm ? '작성서식의 입력 내용은 왼쪽 PDF에서 확인해 주세요.' : '원본 없는 항목의 기존 저장 사유는 위 신청 전체 사유에서 확인할 수 있습니다.'}</p>}
           </section>
 
           <section className="panel decision" aria-labelledby="panel-decision">

@@ -310,7 +310,15 @@ def test_actual_upload_final_check_submission_and_officer_quality_agree(client, 
         stored = session.get(models.Document, body["document_id"])
         quality = next(f for f in stored.findings_json if f["code"] == "LOW_IMAGE_QUALITY")
         assert quality["severity"] == "NEEDS_REVIEW"  # 11-18 S5: was FAIL for unreadable/unknown
-        assert officer._document_view(stored, {})["findings"] == stored.findings_json
+        titles = {
+            "LOW_IMAGE_QUALITY": "화질이 낮음",
+            "RESIDENT_APPLICANT_UNREADABLE": "초본 신청인 판독 안 됨",
+            "UNKNOWN_DOCUMENT_TYPE": "서류 종류를 알 수 없음",
+            "MISSING_ADDRESS_DATES": "주소 변동 날짜 누락",
+        }
+        assert officer._document_view(stored, {})["findings"] == [
+            {**finding, "title": titles[finding["code"]]} for finding in stored.findings_json
+        ]
     rerun = _run_review(app)
     assert rerun.stage1_status == rerun.final_status == expected
     submitted = client.post(f"/api/applications/{app.id}/submit")

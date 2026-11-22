@@ -58,7 +58,7 @@ def test_owner_views_exclude_telemetry_keep_evidence_and_reject_other_owner(secu
         assert stored.ocr_json == ocr and stored.findings_json == findings
         internal = officer._document_view(stored, {})
         assert internal['ocr_confidence'] == .37
-        assert internal['findings'] == findings
+        assert internal['findings'] == [{**findings[0], 'title': '자동 판독 신뢰도 낮음'}]
         assert internal['extracted']['건강보험료'] == 'SYNTHETIC_INTERNAL'
 
 @pytest.mark.parametrize('program', ['job_package', 'double_savings'])

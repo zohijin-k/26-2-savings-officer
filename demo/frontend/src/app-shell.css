@@ -1,6 +1,6 @@
 /* 담당자 머리글: 맨 위 강조 띠 · 흰 바탕 · 두배적금 로고(jb-banner.png에서 배경만 투명하게 뺀 jb-logo.png). */
-.app-shell { min-height: 100dvh; background: var(--color-surface); }
-.shell { border-bottom: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); }
+.app-shell { min-height: 100dvh; background: var(--ui-color-surface); }
+.shell { border-bottom: 1px solid var(--ui-color-border); background: var(--ui-color-surface); color: var(--ui-color-text); }
 
 /* 맨 위 강조 띠: 로고의 주 색 · 청록 · 자홍. 경계를 끊어서 나누는 장식이며 뜻을 전하지 않는다. */
 .shell::before {
@@ -14,19 +14,19 @@
 }
 
 /* 머리글 안쪽은 본문(.officer)과 같은 최대 폭 · 좌우 여백을 써서 로고 왼쪽 끝을 본문 여백 선에 맞춘다. */
-.shell__inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; max-width: 1440px; min-height: 72px; margin: 0 auto; padding: 8px 24px; }
+.shell__inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--ui-space-4); max-width: var(--ui-content-max-width); min-height: 72px; margin: 0 auto; padding: var(--ui-space-2) var(--ui-gutter); }
 /* 로고 = 처음으로 버튼. 안쪽 여백만큼 왼쪽으로 당겨 로고 왼쪽 끝을 여백 선에 맞춘다. */
-.shell__home { display: block; flex: none; line-height: 0; cursor: pointer; margin-left: -8px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; transition: background-color 160ms ease; }
+.shell__home { display: block; flex: none; line-height: 0; cursor: pointer; margin-left: -8px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; transition: background-color var(--ui-transition); }
 .shell__home:hover { background: var(--brand-5); }
 .shell__logo { display: block; width: auto; height: 36px; }
 /* 역할 표시는 로고 바로 옆에 둔다. 오른쪽 자리에는 로그인 상태 줄(로그아웃)이 온다(OfficerSession). */
-.shell__role { margin-right: auto; padding-left: var(--space-4); border-left: 1px solid var(--color-border); color: #33363d; font-size: var(--fs-15); font-weight: 700; line-height: 24px; white-space: nowrap; }
+.shell__role { margin-right: auto; padding-left: var(--ui-space-4); border-left: 1px solid var(--ui-color-border); color: #33363d; font-size: var(--ui-fs-15); font-weight: var(--ui-font-weight-bold); line-height: 24px; white-space: nowrap; }
 .shell__session { display: flex; align-items: center; }
 
 /* 본문 좌우 여백이 16px로 줄어드는 폭에서 머리글도 같이 줄인다. */
-@media (max-width: 800px) { .shell__inner { padding-inline: 16px; } }
+@media (max-width: 800px) { .shell__inner { padding-inline: var(--ui-gutter-mobile); } }
 @media (max-width: 600px) {
-  .shell__inner { gap: 8px; min-height: 64px; padding-inline: 16px; }
+  .shell__inner { gap: var(--ui-space-2); min-height: 64px; padding-inline: var(--ui-gutter-mobile); }
   .shell__home { margin-left: -4px; padding: 4px; }
   .shell__logo { height: 28px; }
 }
@@ -34,5 +34,5 @@
 /* 넓은 화면: 바깥은 옅은 회색, 화면 전체를 가운데 박스 하나로 묶는다. */
 @media (min-width: 1540px) {
   html:has(.app-shell), body:has(.app-shell) { background: #e8ecf1; }
-  .app-shell { max-width: 1440px; min-height: calc(100dvh - 48px); margin: 24px auto; overflow: clip; border: 1px solid #d6dce4; border-radius: var(--radius-12); box-shadow: var(--shadow-2); }
+  .app-shell { max-width: var(--ui-content-max-width); min-height: calc(100dvh - 48px); margin: 24px auto; overflow: clip; border: 1px solid #d6dce4; border-radius: var(--ui-radius-12); box-shadow: var(--shadow-2); }
 }

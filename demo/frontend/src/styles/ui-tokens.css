@@ -1,0 +1,77 @@
+/* Phase 6A compatibility contract: retain the current officer theme in index.css.
+ * Dependency direction: UI alias -> existing theme token (or current literal).
+ * Never point a legacy source back at its UI alias: that would create a cycle.
+ * This file declares values only; selectors, state mappings and media-query
+ * thresholds stay in their existing stylesheets. Native media queries cannot
+ * consume custom properties. PDF ink/coordinates and logo accents stay separate.
+ * Other frontends must bind these names in their own theme scope (e.g. .om).
+ */
+:root {
+  --ui-color-primary: var(--color-primary);
+  --ui-color-primary-hover: var(--color-primary-hover);
+  --ui-color-primary-tint: var(--color-primary-tint);
+  --ui-color-page: var(--color-page);
+  --ui-color-surface: var(--color-surface);
+  --ui-color-text: var(--color-text);
+  --ui-color-text-muted: var(--color-text-muted);
+  --ui-color-border: var(--color-border);
+  --ui-color-border-strong: var(--color-border-strong);
+  --ui-color-divider: var(--color-divider);
+  --ui-color-head: var(--color-head);
+  --ui-color-success-bg: var(--success-5);
+  --ui-color-success-border: var(--success-10);
+  --ui-color-success-strong: var(--success-50);
+  --ui-color-success-text: var(--success-60);
+  --ui-color-warning-bg: var(--warning-5);
+  --ui-color-warning-border: var(--warning-10);
+  --ui-color-warning-strong: var(--warning-50);
+  --ui-color-warning-text: var(--warning-60);
+  --ui-color-danger-bg: var(--danger-5);
+  --ui-color-danger-border: var(--danger-10);
+  --ui-color-danger-strong: var(--danger-50);
+  --ui-color-danger-text: var(--danger-60);
+  --ui-color-info-bg: var(--info-5);
+  --ui-color-info-border: var(--info-10);
+  --ui-color-info-strong: var(--info-50);
+  --ui-color-info-text: var(--info-60);
+  --ui-fs-13: var(--fs-13);
+  --ui-fs-15: var(--fs-15);
+  --ui-fs-16: var(--fs-16);
+  --ui-fs-17: var(--fs-17);
+  --ui-fs-19: var(--fs-19);
+  --ui-fs-22: var(--fs-22);
+  --ui-fs-24: var(--fs-24);
+  --ui-fs-28: var(--fs-28);
+  --ui-space-1: var(--space-1);
+  --ui-space-2: var(--space-2);
+  --ui-space-3: var(--space-3);
+  --ui-space-4: var(--space-4);
+  --ui-space-5: var(--space-5);
+  --ui-space-6: var(--space-6);
+  --ui-space-8: var(--space-8);
+  --ui-radius-4: var(--radius-4);
+  --ui-radius-6: var(--radius-6);
+  --ui-radius-8: var(--radius-8);
+  --ui-radius-12: var(--radius-12);
+  --ui-control-height: var(--control-40);
+  --ui-transition: var(--ease);
+  --ui-font-family: 'Pretendard GOV', 'Pretendard',
+    'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
+  --ui-font-weight-medium: 500;
+  --ui-font-weight-bold: 700;
+  --ui-line-height-body: 1.6;
+  --ui-line-height-heading: 1.35;
+  --ui-line-height-compact: 1.5;
+  --ui-focus-width: 3px;
+  --ui-color-focus: var(--info-50);
+  --ui-focus-offset: 2px;
+  --ui-radius-pill: 999px;
+  --ui-content-max-width: 1440px;
+  --ui-gutter: var(--space-6);
+  --ui-gutter-mobile: var(--space-4);
+  --ui-disabled-opacity: .55;
+  --ui-loading-opacity: .6;
+  --ui-pdf-disabled-opacity: 0.4;
+  --ui-pdf-stage-min-height: 240px;
+  --ui-control-touch-size: 44px;
+}

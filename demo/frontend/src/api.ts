@@ -6,7 +6,10 @@ export type DecisionKey = 'approve' | 'reject' | 'hold'
 export type RoleKey = 'town' | 'city' | 'province'
 export const ROLE_KEYS: RoleKey[] = ['town', 'city', 'province']
 export interface Finding {
+  /** 화면 로직용. 담당자에게는 보이지 않는다. */
   code: string
+  /** 담당자용 짧은 제목 (백엔드 code_label). 코드 대신 이 값을 보인다. */
+  title?: string
   message: string
   how_to_fix: string
   link: string
@@ -144,7 +147,7 @@ export interface ReviewDetailData {
   ai: {
     final_status: DocStatus | null
     recommended_action: string
-    reasons: { code: string; message: string; doc_type: string | null }[]
+    reasons: { code: string; title?: string; message: string; doc_type: string | null }[]
   }
   score_sheet: ScoreSheetData
   documents: OfficerDocument[]

@@ -433,7 +433,9 @@ def extract_town(address: str, region: str = "") -> str:
     tail = (address or "").strip()
     if region and region in tail:
         tail = tail.split(region, 1)[1]
-    tokens = tail.split()
+    # 도로명주소는 법정동을 "(인후동1가)"처럼 괄호 안 참고항목으로 적는다.
+    # 괄호·쉼표를 구분자로 보지 않으면 "(인후동"이 읍면동으로 잡힌다.
+    tokens = re.sub(r"[()\[\],]", " ", tail).split()
 
     for token in tokens:
         if len(token) >= 2 and token.endswith(_TOWN_SUFFIXES):

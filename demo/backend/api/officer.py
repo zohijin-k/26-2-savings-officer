@@ -27,7 +27,7 @@ from sqlmodel import select
 from engine_v2.pipeline.privacy import mask_data
 
 from ..models import transactional_write
-from ..officer_summary import summarize
+from ..officer_summary import readable_reason, summarize
 from ..models import (
     STATUS_DECIDED,
     STATUS_DRAFT,
@@ -670,7 +670,7 @@ def _document_view(d: Document, labels: dict[str, str]) -> dict[str, Any]:
         "detected_doc_type": d.doc_type,
         "classification_evidence": ocr.get("classification_evidence", ""),
         "status": d.stage1_status,
-        "findings": mask_data(d.findings_json or []),
+        "findings": [readable_reason(f) for f in mask_data(d.findings_json or [])],
         "file_url": f"/api/files/{d.id}",
         "file_name": file_name,
         "file_format": (d.file_format or "").lower(),
@@ -906,7 +906,7 @@ def review_detail(application_id: int, role: str = Query(ROLE_PROVINCE)) -> dict
             "stage1_status": review.stage1_status if review else None,
             "stage2_status": review.stage2_status if review else None,
             "recommended_action": payload.get("recommended_action", ""),
-            "reasons": payload.get("reasons", []),
+            "reasons": [readable_reason(r) for r in payload.get("reasons", [])],
         },
         "score_sheet": score,
         # 선발 방식이 갈리는 지점. 점수제는 심사표가, 선착순은 접수 순번과 보완

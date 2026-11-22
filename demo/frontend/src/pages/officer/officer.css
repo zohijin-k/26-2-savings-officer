@@ -248,14 +248,27 @@
 /* 3. 판독 결과 */
 .reasons { margin: var(--ui-space-3) 0 0; padding: 0; list-style: none; display: grid; gap: var(--ui-space-2); }
 .reasons li { padding: var(--ui-space-2) var(--ui-space-3); border-left: 3px solid var(--ui-color-warning-strong); background: var(--ui-color-warning-bg); border-radius: 0 var(--ui-radius-6) var(--ui-radius-6) 0; overflow-wrap: anywhere; font-size: var(--ui-fs-15); }
-.reasons code { color: var(--ui-color-warning-text); font-size: var(--ui-fs-13); font-weight: var(--ui-font-weight-bold); margin-right: var(--ui-space-1); }
+/* 사유 제목: 영문 코드 대신 백엔드 code_label 한글 제목을 굵게 보인다. */
+.reasons__title { color: var(--ui-color-warning-text); font-weight: var(--ui-font-weight-bold); margin-right: var(--ui-space-1); }
 .reasons p { margin: var(--ui-space-1) 0 0; font-size: var(--ui-fs-13); color: var(--ui-color-text-muted); }
 .reasons a { font-size: var(--ui-fs-13); color: var(--ui-color-info-text); }
 .ocr-note { margin: var(--ui-space-2) 0 0; font-size: var(--ui-fs-13); color: var(--ui-color-text-muted); }
 .fields { margin: var(--ui-space-4) 0 0; font-size: var(--ui-fs-15); border-top: 1px solid var(--ui-color-border); }
 .fields > div { display: grid; grid-template-columns: minmax(96px, 32%) 1fr; gap: var(--ui-space-3); padding: var(--ui-space-2) 0; border-bottom: 1px solid var(--ui-color-border); }
-.fields dt { color: var(--ui-color-text-muted); font-size: var(--ui-fs-13); padding-top: 2px; }
-.fields dd { margin: 0; overflow-wrap: anywhere; display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-2); }
+.fields > div > dt { color: var(--ui-color-text-muted); font-size: var(--ui-fs-13); padding-top: 2px; }
+.fields > div > dd { margin: 0; overflow-wrap: anywhere; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--ui-space-2); }
+/* 판독 값: JSON으로 저장된 값을 문장·목록·표로 풀어 보인다 (field-format.ts). */
+.field-value { flex: 1 1 auto; min-width: 0; }
+.field-value__list { margin: 0; padding-left: 1.1em; }
+.field-value__pairs { margin: 0; display: grid; grid-template-columns: max-content 1fr; column-gap: var(--ui-space-3); row-gap: 2px; }
+.field-value__pairs > div { display: contents; }
+.field-value__pairs dt { color: var(--ui-color-text-muted); font-size: var(--ui-fs-13); padding-top: 2px; }
+.field-value__pairs dd { margin: 0; }
+.field-value__scroll { overflow-x: auto; }
+.field-value__table { border-collapse: collapse; font-size: var(--ui-fs-13); width: 100%; }
+.field-value__table th, .field-value__table td { padding: 3px var(--ui-space-2); border-bottom: 1px solid var(--ui-color-divider); text-align: left; white-space: nowrap; }
+.field-value__table th { color: var(--ui-color-text-muted); font-weight: var(--ui-font-weight-medium); background: var(--ui-color-page); }
+.field-value__notes { margin: var(--ui-space-1) 0 0; padding: 0; list-style: none; font-size: var(--ui-fs-13); color: var(--ui-color-text-muted); }
 
 /* 4. 담당자 처리 */
 .decision label { display: grid; gap: var(--ui-space-1); font-size: var(--ui-fs-13); font-weight: var(--ui-font-weight-medium); color: var(--ui-color-text-muted); }

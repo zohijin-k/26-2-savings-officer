@@ -4,6 +4,7 @@ import StatusBadge from '../../components/StatusBadge.tsx'
 import AiSummaryCard from './AiSummaryCard.tsx'
 import DocumentViewer from './DocumentViewer.tsx'
 import ScoreSheet6 from './ScoreSheet6.tsx'
+import { fieldLabel, formatField, plainText, reasonTitle, type FieldView } from './field-format.ts'
 import { selectOfficerDocument } from './list-model.ts'
 import { tiebreakParts } from './tiebreak.ts'
 
@@ -26,6 +27,23 @@ const BUTTON_TONE: Record<string, string> = {
   primary: 'btn btn--primary',
   danger: 'btn btn--danger',
   neutral: 'btn',
+}
+
+/** 판독 결과 한 칸. JSON 값은 field-format에서 문장·목록·표로 풀어 온다. */
+function FieldValue({ view }: { view: Exclude<FieldView, { kind: 'hidden' }> }) {
+  const notes = view.notes?.length ? <ul className="field-value__notes">{view.notes.map((note) => <li key={note}>{note}</li>)}</ul> : null
+  if (view.kind === 'text') return <div className="field-value"><span>{view.text}</span>{notes}</div>
+  if (view.kind === 'list') return <div className="field-value"><ul className="field-value__list">{view.items.map((item, index) => <li key={index}>{item}</li>)}</ul>{notes}</div>
+  if (view.kind === 'pairs') return <div className="field-value"><dl className="field-value__pairs">{view.rows.map(([name, value], index) => <div key={index}>
+    <dt>{name}</dt><dd>{value}</dd>
+  </div>)}</dl>{notes}</div>
+  return <div className="field-value">
+    <div className="field-value__scroll"><table className="field-value__table">
+      <thead><tr>{view.head.map((head) => <th key={head} scope="col">{head}</th>)}</tr></thead>
+      <tbody>{view.rows.map((row, index) => <tr key={index}>{row.map((cell, column) => <td key={column}>{cell}</td>)}</tr>)}</tbody>
+    </table></div>
+    {notes}
+  </div>
 }
 
 export default function ReviewDetail({ role, applicationId, documentId, slotKey, onBack, onSelect }: Props) {
@@ -161,7 +179,8 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
             <details className="verdict__reasons" open={detail.ai.reasons.length > 0}>
               <summary>신청 전체 사유 {detail.ai.reasons.length}건</summary>
               {detail.ai.reasons.length ? <ul className="reasons">{detail.ai.reasons.map((reason, index) => <li key={index}>
-                <code>{reason.code}</code> {reason.message}{reason.doc_type && <em> ({reason.doc_type})</em>}
+                {reasonTitle(reason) && <strong className="reasons__title">{reasonTitle(reason)}</strong>}{' '}
+                {plainText(reason.message)}{reason.doc_type && <em> ({reason.doc_type})</em>}
               </li>)}</ul> : <p className="muted">저장된 신청 전체 사유가 없습니다.</p>}
             </details>
           </section>
@@ -183,15 +202,21 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
             </div>
             {activeDoc ? <>
               {activeDoc.findings.length ? <ul className="reasons">{activeDoc.findings.map((finding, index) => <li key={index}>
-                <code>{finding.code}</code> {finding.message}
-                {finding.how_to_fix && <p>{finding.how_to_fix}</p>}
+                {reasonTitle(finding) && <strong className="reasons__title">{reasonTitle(finding)}</strong>}{' '}
+                {plainText(finding.message)}
+                {finding.how_to_fix && <p>{plainText(finding.how_to_fix)}</p>}
                 {finding.link && /^https?:\/\//.test(finding.link) && <a href={finding.link} target="_blank" rel="noreferrer">기존 안내 보기</a>}
               </li>)}</ul> : <p className="muted">이 서류에 저장된 확인 사유가 없습니다.</p>}
               {activeDoc.ocr_quality_note && <p className="ocr-note">{activeDoc.ocr_quality_note}</p>}
               {activeDoc.ocr_fallback_reason && <p className="ocr-note">{activeDoc.ocr_fallback_reason}</p>}
-              <dl className="fields">{Object.entries(activeDoc.extracted).map(([key, value]) => <div key={key}>
-                <dt>{key}</dt><dd><span>{value}</span>{activeDoc.bboxes[key] && <button type="button" className="btn btn--sm" onClick={() => setFocus({ documentId: activeDoc.document_id, bbox: activeDoc.bboxes[key], label: key, scoreKey: null })}>원본 위치</button>}</dd>
-              </div>)}</dl>
+              <dl className="fields">{Object.entries(activeDoc.extracted).map(([key, value]) => {
+                const view = formatField(key, value)
+                if (view.kind === 'hidden') return null
+                const label = fieldLabel(key)
+                return <div key={key}>
+                  <dt>{label}</dt><dd><FieldValue view={view} />{activeDoc.bboxes[key] && <button type="button" className="btn btn--sm" onClick={() => setFocus({ documentId: activeDoc.document_id, bbox: activeDoc.bboxes[key], label, scoreKey: null })}>원본 위치</button>}</dd>
+                </div>
+              })}</dl>
             </> : <p className="muted">{activeForm ? '작성서식의 입력 내용은 원본 열람 영역의 PDF에서 확인해 주세요.' : '원본 없는 항목의 기존 저장 사유는 위 신청 전체 사유에서 확인할 수 있습니다.'}</p>}
           </section>
 

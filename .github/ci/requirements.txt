@@ -1,0 +1,3 @@
+-r ../../demo/backend/requirements.txt
+pytest==9.2.0
+numpy==2.5.4

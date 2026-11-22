@@ -1,0 +1,101 @@
+name: Review safety CI
+on:
+  pull_request:
+    branches: [main, feat/phase6d-review-cas]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: review-safety-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  critical:
+    name: ${{ matrix.target }} / ${{ matrix.layer }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [event, pr-head, latest-main]
+        layer: [backend, frontend]
+    env:
+      JBAI_ALLOW_REAL_DOCS: 'false'
+      JBAI_ENABLED: '0'
+      JBAI_LLM_PROVIDER: 'off'
+      OFFICER_SUMMARY_PROVIDER: 'rules'
+      ENGINE_V2_OCR: 'off'
+      ENGINE_V2_OWN_ENABLED: '0'
+      PYTHONDONTWRITEBYTECODE: '1'
+      TZ: Asia/Seoul
+    steps:
+      - name: Checkout CI harness
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+      - name: Resolve immutable subject HEAD
+        id: subject
+        env:
+          CI_USE_CAS_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 38 }}
+          CI_EVENT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 harness/.github/ci/resolve_subject.py
+      - name: Checkout exact subject
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ matrix.target == 'event' && github.sha || steps.subject.outputs.head }}
+          fetch-depth: 0
+          path: subject
+          persist-credentials: false
+      - name: Resolve event HEAD and latest-main tree
+        working-directory: subject
+        env:
+          CI_LANE: ${{ matrix.target }}
+          CI_EVENT: ${{ github.event_name }}
+          CI_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          CI_EVENT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          CI_SUBJECT_HEAD: ${{ steps.subject.outputs.head }}
+          CI_SUBJECT_BRANCH: ${{ steps.subject.outputs.branch }}
+          CI_EVENT_BASE: ${{ github.event.pull_request.base.sha || '' }}
+          CI_EVENT_MERGE: ${{ github.sha }}
+        run: python3 ../harness/.github/ci/source.py
+      - name: Record actual source and scan tracked files
+        run: |
+          git -C subject rev-parse HEAD
+          python3 harness/.github/ci/security.py harness
+          python3 harness/.github/ci/security.py subject
+          python3 -m compileall -q harness/.github/ci
+      - name: Set up Python
+        if: matrix.layer == 'backend'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.14'
+      - name: Install backend test dependencies
+        if: matrix.layer == 'backend'
+        run: python -m pip install --index-url https://pypi.org/simple -r harness/.github/ci/requirements.txt
+      - name: Critical synthetic backend regression
+        if: matrix.layer == 'backend'
+        working-directory: subject
+        env:
+          PYTHONPATH: ${{ github.workspace }}/harness/.github/ci/safety:${{ github.workspace }}/subject
+          CI_SYNTHETIC_ROOT: ${{ runner.temp }}/review-synthetic
+          REQUIRE_CAS: ${{ github.event_name == 'pull_request' && (github.event.pull_request.number == 37 || github.event.pull_request.number == 39 || (github.event.pull_request.number == 38 && matrix.target != 'event')) }}
+        run: python ../harness/.github/ci/backend.py
+      - name: Set up Node
+        if: matrix.layer == 'frontend'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26'
+      - name: Install locked frontend dependencies
+        if: matrix.layer == 'frontend'
+        working-directory: subject/demo/frontend
+        run: npm ci --ignore-scripts --registry=https://registry.npmjs.org/
+      - name: Types, production build, lint and all Node tests
+        if: matrix.layer == 'frontend'
+        working-directory: subject/demo/frontend
+        run: |
+          node node_modules/typescript/bin/tsc -b
+          npm run build
+          npm run lint
+          node ../../../harness/.github/ci/frontend.mjs

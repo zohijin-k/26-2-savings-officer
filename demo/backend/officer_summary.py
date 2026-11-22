@@ -467,6 +467,20 @@ def code_label(code: str, about: str = "") -> str:
     return _cut(sentence, 40) if sentence else "규칙 엔진 확인 사유"
 
 
+def readable_reason(item: Mapping[str, Any]) -> dict[str, Any]:
+    """저장된 사유 한 건에 담당자용 제목(title)을 붙이고, 문장에 섞인 코드를 문구로 바꾼다.
+
+    `code`는 그대로 둔다(화면 로직용). 담당자 화면은 code 대신 title을 보인다.
+    """
+    out = dict(item)
+    message = str(item.get("message") or "")
+    out["title"] = code_label(str(item.get("code") or ""), message)
+    for key in ("message", "how_to_fix"):
+        if isinstance(out.get(key), str):
+            out[key] = _humanize(out[key], CODE_LABELS)
+    return out
+
+
 def _cut(text: str, limit: int) -> str:
     text = text.strip()
     return text if len(text) <= limit else text[: limit - 1].rstrip(" ,·(") + "…"

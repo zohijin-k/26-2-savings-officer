@@ -542,7 +542,8 @@ def _run_review(app: Application) -> Review:
         income_percent=sheet.income_percent if sheet and program.has_income_requirement else None,
         income_over_limit=sheet.income_over_limit if sheet and program.has_income_requirement else None,
     )
-    result = run_pipeline(applicant, to_engine_documents(rows), checklist_for(app))
+    requirements = checklist_for(app)
+    result = run_pipeline(applicant, to_engine_documents(rows, requirements), requirements)
     payload = inject_file_refs(result.review_payload, rows)
 
     if payload is None:

@@ -18,6 +18,7 @@ from engine_v2.extractors import insurance_workplace
 from ..engine_adapter import (IMAGE_QUALITY_REVIEW_MESSAGE, engine_check_single_document,
                               engine_config, engine_image_quality_status, engine_models)
 from ..ocr.base import OcrResult
+from .document_dates import DATE_FIELDS, document_date, requires_date
 from .doc_types import DocType
 from .identity import Identity, compare, nhis_subscriber_assessment
 from .months import format_month_ranges
@@ -248,25 +249,14 @@ def to_engine_document(
     ocr: OcrResult,
     declared_issue_date: date | None,
     file_format: str,
-    date_basis: str = "issue_date",
+    date_basis: str | None = None,
 ):
     """판독 결과 → 엔진 `Document`.
 
     `doc_type`에는 **요구된 서류 종류**를 넣는다. 엔진의 단건 검사는 doc_type을
     메시지 렌더링에만 쓰고, 오분류 판정은 데모 쪽에서 별도로 하기 때문이다.
     """
-    basis_field = {
-        "issue_date": "발급일", "payment_date": "결제일",
-        "interview_date": "면접일", "exam_date": "응시일",
-    }.get(date_basis)
-    effective_date = ocr.issue_date
-    if basis_field:
-        try:
-            effective_date = date.fromisoformat(str(ocr.fields.get(basis_field) or "")[:10])
-        except ValueError:
-            effective_date = None
-    elif date_basis == "none":
-        effective_date = None
+    effective_date = document_date(ocr.fields, req.date_basis if date_basis is None else date_basis)
     return engine_models.Document(
         doc_type=str(req.doc_type),
         file_format=file_format,
@@ -691,13 +681,13 @@ def _check_document(
 
     # 2) 엔진 단건 검사 — 암호/화질/서명/발급일/입력일 대조/신뢰도.
     engine_doc = to_engine_document(req, ocr, declared_issue_date, file_format, req.date_basis)
-    if (not ocr.is_encrypted and ocr.tier == "pdftext" and req.date_basis == "issue_date"
+    if (not ocr.is_encrypted and ocr.tier != "fixture" and requires_date(req, declared_issue_date)
             and engine_doc.issue_date is None
-            and (req.check_declared_date or req.min_issue_date is not None or req.max_issue_date is not None)):
+            and ocr.confidence >= engine_config.OCR_CONFIDENCE_THRESHOLD):
         findings.append(_finding(
             CODE_REQUIRED_FIELD_UNREADABLE,
-            "서류의 발급일 라벨과 날짜를 확인하지 못했습니다. 담당자가 원본을 확인합니다.",
-            req, field="발급일",
+            f"서류의 {DATE_FIELDS.get(req.date_basis, '기준 날짜')} 라벨과 날짜를 확인하지 못했습니다. 담당자가 원본을 확인합니다.",
+            req, field=DATE_FIELDS.get(req.date_basis, "기준 날짜"),
         ))
     # PdfText's missing label date is already REQUIRED_FIELD_UNREADABLE above.
     if (not ocr.is_encrypted and ocr.tier not in ("fixture", "pdftext")

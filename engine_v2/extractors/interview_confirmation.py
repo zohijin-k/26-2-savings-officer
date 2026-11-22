@@ -29,6 +29,7 @@ BIRTH_LABELS = ("생년월일",)
 COMPANY_LABELS = ("회사명", "기업명", "업체명", "사업장명", "상호")
 INDUSTRY_LABELS = ("업태/업종", "업태업종", "업종", "업태")
 INTERVIEW_DATE_LABELS = ("면접일시", "면접일자", "면접일")
+ISSUE_DATE_LABELS = ("발급일자", "발급일")
 TIME_LABELS = ("면접시간",)
 PLACE_LABELS = ("면접장소",)
 JOB_LABELS = ("응시직군", "응시분야", "지원분야", "모집분야", "지원직무", "직무")
@@ -37,7 +38,7 @@ CONFIRM_HINTS = ("확인합니다", "확인함", "확인하였", "참석하였�
 OTHER_LABELS = ("주소", "소재지", "연락처", "이메일", "담당자", "면접자", "면접기업", "면접현황",
                 "대표자", "전화")
 STOP = job.stop_pattern(NAME_LABELS + BIRTH_LABELS + COMPANY_LABELS + INDUSTRY_LABELS
-                        + INTERVIEW_DATE_LABELS + TIME_LABELS + PLACE_LABELS + JOB_LABELS + OTHER_LABELS)
+                        + INTERVIEW_DATE_LABELS + ISSUE_DATE_LABELS + TIME_LABELS + PLACE_LABELS + JOB_LABELS + OTHER_LABELS)
 
 
 @dataclass
@@ -102,6 +103,13 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
     place = job.find(lines, PLACE_LABELS, job.parse_text, stop=STOP, below=False)
     applied = job.find(lines, JOB_LABELS, job.parse_text, stop=STOP, below=False)
     confirmed = _confirm_date(lines)
+    issued = job.find_all(lines, ISSUE_DATE_LABELS, job.parse_date, stop=STOP, below=False)
+    issue_values = {hit.value for hit in issued}
+    if len(issue_values) == 1:
+        hit = issued[0]
+        fields["발급일"] = job.to_field(hit, [job.ocr_ok(hit)], page_map, sources)
+    elif len(issue_values) > 1:
+        warnings.append("명시된 발급일들이 달라 담당자 확인이 필요합니다.")
 
     not_future = None if interview is None else interview.value <= today
     in_order = None if interview is None or confirmed is None else interview.value <= confirmed.value

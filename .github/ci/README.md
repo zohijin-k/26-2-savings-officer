@@ -1,14 +1,15 @@
 # Synthetic Review safety CI
 
-PRODUCTION_NOT_READY. No deployment, production database, production secrets, external OCR/LLM, or real documents.
+PRODUCTION_NOT_READY. No deployment, environment binding, production DB, secrets or real documents. External OCR/LLM is disabled; Python tests block network and SQLite outside the synthetic root. Official Actions are pinned to full commit SHAs; contents read, persist-credentials false and npm lifecycle scripts disabled. Python transitive dependency hash locking and mature secret/dependency scans remain Phase 6E work.
 
-This independent CI PR targets main and does not modify CAS PR #37 (901690fe685c7b050d3d8a6405dbcd6a68c797be).
-The event lane tests the exact event HEAD. The phase6d-cas lane tests the fixed CAS HEAD above; a missing CAS regression file fails closed. Both lanes print the actual source SHA and run critical repository-owned backend tests plus types/build/lint/all discovered Node tests.
+Results are three separate lanes, each with backend and frontend jobs:
 
-CI PR checks belong to the CI PR and do **not** populate the CAS PR's required check contexts. Never manufacture a CAS status or bypass rules. Review and merge this CI PR separately through normal protection/review gates (this task does not authorize merging other PRs); after it reaches main, refresh/rerun the CAS PR through an authorized integration step and verify the actual checked SHA/context before merging CAS. Passing the fixed-head lane is related SHA-specific CI evidence only.
+- `event`: actual GitHub PR merge ref (`github.sha`), or exact push SHA. Prints PR number, event head/base/merge, tested SHA/tree/parents. This is CI-PR evidence while the workflow PR remains open.
+- `contract-candidate`: immutable contract-inclusive candidate e96afc7a46d65024852a2761d12c7b0b574ef17c. This is not an advanced remote CAS branch HEAD until the contract PR is approved and merged.
+- `candidate-main`: latest fetched main plus that immutable candidate, using a normal local merge. Prints the main SHA and tested merge tree. Merge commit SHAs may differ across jobs because local commit metadata varies; source trees and parents identify the integration.
 
-The pinned Phase 6D lane must be retired/updated during Phase 6E after both CAS and CI integration. Phase 6E must add preview E2E, browser/accessibility, complete suites, dependency locks and mature secret/dependency scanning. The value-free signature/path scanner here is a minimum gate, not comprehensive secret/PII or vulnerability certification.
+Original CAS source 901690fe685c7b050d3d8a6405dbcd6a68c797be was tested by earlier runs; those successes do not prove these new candidates. Current lanes deliberately stop when CAS source lacks its bulk 422 correction or required CAS tests. Existing CAS PR checks remain independent: these workflow PR results never manufacture or replace them. After authorized main integration, verify actual CAS PR check attribution and source SHA anew. Required-check/protection settings are not changed.
 
-Backend installs use repository requirements plus explicit test/numeric dependencies from PyPI. Frontend uses npm ci, lock integrity and registry.npmjs.org, without lifecycle scripts. Python test sockets and non-synthetic SQLite are blocked, including spawned workers. Tests generate temporary synthetic fixtures only. Hosted logs contain no production secrets by design; do not attach DB/PDF/cookies.
+Bulk regression validates every map value and complete Review/Application invariance for rejected input: 428 missing preconditions, 422 strict types/ranges, 409 stale valid tokens, and successful positive tokens. Migration, writer compatibility, authorization and P0 tests remain repository-owned.
 
-Actions use verified full commit SHAs, contents read, no persisted git credentials, no privileged PR trigger, no deployment command, no environment binding. Default repo permissions/protection are not changed by this PR.
+Minimum CI is not browser E2E, own OCR evaluation, preview deployment, real device/screenreader testing, production migration rehearsal or distributed server safety. Independent review and verified absence of automatic production deployment remain mandatory merge gates.

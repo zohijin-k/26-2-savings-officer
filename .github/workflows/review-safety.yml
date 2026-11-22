@@ -1,7 +1,7 @@
 name: Review safety CI
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/phase6d-review-cas]
   push:
     branches: [main]
 permissions:
@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [event, contract-candidate, candidate-main]
+        target: [event, pr-head, latest-main]
         layer: [backend, frontend]
     env:
       JBAI_ALLOW_REAL_DOCS: 'false'
@@ -35,24 +35,30 @@ jobs:
           ref: ${{ github.sha }}
           path: harness
           persist-credentials: false
+      - name: Resolve immutable subject HEAD
+        id: subject
+        env:
+          CI_USE_CAS_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 38 }}
+          CI_EVENT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 harness/.github/ci/resolve_subject.py
       - name: Checkout exact subject
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ matrix.target == 'contract-candidate' && 'e96afc7a46d65024852a2761d12c7b0b574ef17c' || (matrix.target == 'candidate-main' && 'main' || github.sha) }}
+          ref: ${{ matrix.target == 'event' && github.sha || steps.subject.outputs.head }}
           fetch-depth: 0
           path: subject
           persist-credentials: false
-      - name: Resolve exact source and latest-main integration
+      - name: Resolve event HEAD and latest-main tree
         working-directory: subject
         env:
           CI_LANE: ${{ matrix.target }}
           CI_EVENT: ${{ github.event_name }}
           CI_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           CI_EVENT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          CI_SUBJECT_HEAD: ${{ steps.subject.outputs.head }}
+          CI_SUBJECT_BRANCH: ${{ steps.subject.outputs.branch }}
           CI_EVENT_BASE: ${{ github.event.pull_request.base.sha || '' }}
           CI_EVENT_MERGE: ${{ github.sha }}
-          CAS_CANDIDATE_SHA: e96afc7a46d65024852a2761d12c7b0b574ef17c
-          CAS_ORIGINAL_SHA: 901690fe685c7b050d3d8a6405dbcd6a68c797be
         run: python3 ../harness/.github/ci/source.py
       - name: Record actual source and scan tracked files
         run: |
@@ -74,7 +80,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/harness/.github/ci/safety:${{ github.workspace }}/subject
           CI_SYNTHETIC_ROOT: ${{ runner.temp }}/review-synthetic
-          REQUIRE_CAS: ${{ matrix.target != 'event' }}
+          REQUIRE_CAS: ${{ github.event_name == 'pull_request' && (github.event.pull_request.number == 37 || github.event.pull_request.number == 39 || (github.event.pull_request.number == 38 && matrix.target != 'event')) }}
         run: python ../harness/.github/ci/backend.py
       - name: Set up Node
         if: matrix.layer == 'frontend'

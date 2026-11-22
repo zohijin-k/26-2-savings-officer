@@ -135,7 +135,14 @@ def test_upload_list_final_and_officer_keep_reference_but_hide_only_review(
         assert stored.stage1_status == result.status
         assert stored.findings_json == [f.as_dict() for f in source]
         officer_document = officer._document_view(stored, {})
-        assert officer_document["findings"] == stored.findings_json
+        titles = {
+            "LOW_OCR_CONFIDENCE": "자동 판독 신뢰도 낮음",
+            "FAKE_REFERENCE": "가짜 체크 표시 미확인 참고",
+            "MISSING_ADDRESS_DATES": "주소 변동 날짜 누락",
+            "LOW_IMAGE_QUALITY": "화질이 낮음",
+        }
+        expected_officer = [{**f.as_dict(), "title": titles[f.code]} for f in source]
+        assert officer_document["findings"] == expected_officer
         # Explicit synthetic historical state only for officer route coverage.
         # This does not turn the rejected applicant submit into a success.
         application = session.get(models.Application, aid)
@@ -145,7 +152,7 @@ def test_upload_list_final_and_officer_keep_reference_but_hide_only_review(
     authenticate_officer(client, monkeypatch)
     detail = client.get(f"/api/officer/applications/{aid}")
     assert detail.status_code == 200
-    assert detail.json()["documents"][0]["findings"] == [f.as_dict() for f in source]
+    assert detail.json()["documents"][0]["findings"] == expected_officer
 
 
 @pytest.mark.parametrize("partial", [False, True])

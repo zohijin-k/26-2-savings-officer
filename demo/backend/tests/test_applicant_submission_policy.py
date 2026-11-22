@@ -102,7 +102,30 @@ def test_hidden_outcomes_submit_and_preserve_stored_and_officer_decisions(client
     authenticate_officer(client, monkeypatch)
     detail = client.get(f"/api/officer/applications/{app.id}").json()
     found = next(document for document in detail["documents"] if document["document_id"] == document_id)
-    assert found["findings"] == original
+    # PR35 decorates the officer response; stored evidence above stays exact.
+    # Keep literal expectations so the serializer cannot validate itself.
+    titles = {
+        "DAILY_RECORDS_PARTIALLY_SELECTED": "가상 공개 사유",
+        "PAGES_DUPLICATED": "중복된 쪽 있음",
+        "UNKNOWN_DOCUMENT_TYPE": "서류 종류를 알 수 없음",
+        "MISSING_ADDRESS_HISTORY": "주소 변동 이력 누락",
+        "MISSING_SIGNATURE": "서명 없음",
+        "DOCUMENT_ISSUED_AFTER_APPLICATION": "신청일 이후에 발급됨",
+        "DOCUMENT_ISSUED_TOO_EARLY": "인정 기준일 이전에 발급됨",
+        "IDENTITY_MISMATCH": "서류 명의가 신청자와 다름",
+        "IMAGE_RESOLUTION_TOO_LOW": "해상도가 낮음",
+        "LOW_IMAGE_QUALITY": "화질이 낮음",
+        "MISSING_ADDRESS_DATES": "주소 변동 날짜 누락",
+        "MISSING_BILLING_MONTHS": "고지 월 누락",
+        "PAGES_INCOMPLETE": "빠진 쪽 있음",
+        "UNREADABLE_FILE": "파일을 열 수 없음",
+        "WRONG_DOCUMENT_TYPE": "요구한 서류와 종류가 다름",
+    }
+    assert found["findings"] == [
+        {**original[0], "title": titles[code]},
+        {**original[1], "title": "가상 숨김 사유"},
+        {**original[2], "title": "서류 명의 판독 불확실"},
+    ]
 
 
 @pytest.mark.parametrize("missing", ["name", "birth", "address", "mobile", "email", "savingPurpose",

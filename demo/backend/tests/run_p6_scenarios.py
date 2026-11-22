@@ -53,6 +53,14 @@ _passed = 0
 _failed: list[str] = []
 
 
+def _stored_ocr(document: dict[str, Any]) -> dict[str, Any]:
+    """Scenario diagnostics read internal storage, never the applicant contract."""
+    with models.get_session() as session:
+        row = session.get(models.Document, document["document_id"])
+        assert row is not None
+        return dict(row.ocr_json or {})
+
+
 def check(name: str, actual: object, expected: object) -> None:
     global _passed
     if actual == expected:
@@ -390,7 +398,7 @@ def s2_perfect(client, app_id: int) -> dict[str, Any]:
     return {
         "application_no": body["application_no"],
         "document_statuses": [d["status"] for d in documents],
-        "slowest_upload_ms": max(d["elapsed_ms"] for d in documents),
+        "slowest_upload_ms": max(_stored_ocr(d).get("elapsed_ms", 0) for d in documents),
         "can_submit": final["can_submit"],
         "blockers": final["blockers"],
         "final_status": review.final_status,
@@ -468,7 +476,7 @@ def s6_encrypted(client, app_id: int) -> dict[str, Any]:
         "status": doc["status"],
         "codes": _codes(doc),
         "detected_doc_type": doc["detected_doc_type"],
-        "ocr_confidence": doc.get("ocr_confidence"),
+        "ocr_confidence": _stored_ocr(doc).get("confidence"),
         "message": _finding(doc, "message"),
         "how_to_fix": _finding(doc, "how_to_fix"),
     }
@@ -543,7 +551,7 @@ def s8_needs_review(client) -> dict[str, Any]:
     return {
         "upload_status": abstract["status"],
         "upload_codes": _codes(abstract),
-        "ocr_confidence": abstract.get("ocr_confidence"),
+        "ocr_confidence": _stored_ocr(abstract).get("confidence"),
         "how_to_fix": _finding(abstract, "how_to_fix"),
         "can_submit": final["can_submit"],
         "final_status": review.final_status,

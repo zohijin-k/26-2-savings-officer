@@ -309,6 +309,20 @@ def test_fixture_schema_matches_actual_repository_model(fixture_root):
     assert not any('hash' in name or 'version' in name for name in models.Document.model_fields)
 
 
+def test_legacy_review_history_does_not_weaken_production_uniqueness(fixture_root):
+    from sqlalchemy import UniqueConstraint
+    from demo.backend import models
+
+    assert any(isinstance(constraint, UniqueConstraint)
+               and tuple(column.name for column in constraint.columns) == ('application_id',)
+               for constraint in models.Review.__table__.constraints)
+    application_id = SCENARIOS.index('normal_rereview') + 1
+    with readonly_connection(fixture_root) as conn:
+        rows = conn.execute('SELECT final_status,revision FROM review WHERE application_id=? ORDER BY id',
+                            (application_id,)).fetchall()
+    assert [tuple(row) for row in rows] == [('NEEDS_REVIEW', 1), ('PASS', 1)]
+
+
 def test_generic_optional_documents_preserve_all_document_contract():
     app = base()
     result = classify(replace(app, requirements=(Requirement('proof', required=False),),

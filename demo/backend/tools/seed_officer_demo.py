@@ -273,7 +273,6 @@ def seed():
     allocated = []
     try:
         with models.session_transaction() as connection:
-            connection.exec_driver_sql("BEGIN IMMEDIATE")
             before = _snapshot()
             with models.get_session() as session:
                 apps = session.exec(select(models.Application)).all()
@@ -306,7 +305,6 @@ def clean():
     if not database.is_file():
         return {"deleted_applications": 0, "deleted_rows": 0, "deleted_files": 0}
     with models.session_transaction() as connection:
-        connection.exec_driver_sql("BEGIN IMMEDIATE")
         with models.get_session() as session:
             apps = session.exec(select(models.Application)).all()
             marked = [app for app in apps if _scenario(app)]

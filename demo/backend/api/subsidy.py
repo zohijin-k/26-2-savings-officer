@@ -11,6 +11,7 @@
 하나"가 한 화면에서 즉시 보여야 하기 때문이다.
 """
 
+
 from datetime import datetime
 from typing import Any
 
@@ -18,6 +19,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlmodel import select
 
+from ..models import transactional_write
 from ..models import STATUS_DRAFT, Application, SubsidyItem, get_session
 from ..rules.criteria import for_application, read_criteria
 from ..rules.identity import norm_name
@@ -96,6 +98,7 @@ def read_subsidy_items(application_id: int) -> dict[str, Any]:
 
 
 @router.post("/{application_id}/subsidy-items")
+@transactional_write
 def save_subsidy_items(application_id: int, body: SubsidyRequest) -> dict[str, Any]:
     """고른 항목을 통째로 갈아끼운다. 부분 수정이 아니라 화면 상태 그대로 저장한다."""
     app = load_application(application_id)

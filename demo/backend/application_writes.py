@@ -38,6 +38,11 @@ def _open(key: str) -> int:
 
 @contextmanager
 def application_write(application_id: int):
+    if models._session_bind.get() is not None:
+        # An outer SQLite writer already serializes this service composition.
+        # Never acquire a file guard in DB -> file order.
+        yield
+        return
     key = _key(application_id)
     if key in _held.get():
         yield
@@ -56,6 +61,11 @@ def application_write(application_id: int):
 
 @asynccontextmanager
 async def application_write_async(application_id: int):
+    if models._session_bind.get() is not None:
+        # An outer SQLite writer already serializes this service composition.
+        # Never acquire a file guard in DB -> file order.
+        yield
+        return
     key = _key(application_id)
     if key in _held.get():
         yield

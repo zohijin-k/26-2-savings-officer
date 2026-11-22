@@ -28,7 +28,6 @@ jobs:
       ENGINE_V2_OWN_ENABLED: '0'
       PYTHONDONTWRITEBYTECODE: '1'
       TZ: Asia/Seoul
-      CI_SYNTHETIC_ROOT: ${{ runner.temp }}/review-synthetic
     steps:
       - name: Checkout CI harness
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -61,6 +60,7 @@ jobs:
         working-directory: subject
         env:
           PYTHONPATH: ${{ github.workspace }}/harness/.github/ci/safety:${{ github.workspace }}/subject
+          CI_SYNTHETIC_ROOT: ${{ runner.temp }}/review-synthetic
           REQUIRE_CAS: ${{ matrix.target == 'phase6d-cas' }}
         run: python ../harness/.github/ci/backend.py
       - name: Set up Node

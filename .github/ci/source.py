@@ -50,7 +50,7 @@ source = {
     'integration_parents': [latest_main, subject_head] if latest_main else [],
     'workflow_run_id': os.environ.get('GITHUB_RUN_ID'),
     'workflow_run_attempt': os.environ.get('GITHUB_RUN_ATTEMPT'),
-    'check_owner_sha': event_merge,
+    'check_owner_sha': head,
 }
 Path('source-provenance.json').write_text(json.dumps(source, indent=2) + '\n')
 print('SOURCE_PROVENANCE=' + json.dumps(source, sort_keys=True), flush=True)

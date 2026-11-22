@@ -116,7 +116,7 @@ body {
   font-family: 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
 }
 
-:where(button, a, summary, textarea, [tabindex]):focus-visible {
+:where(button, a, summary, input, select, textarea, [tabindex]):focus-visible {
   outline: 3px solid var(--info-50);
   outline-offset: 2px;
 }

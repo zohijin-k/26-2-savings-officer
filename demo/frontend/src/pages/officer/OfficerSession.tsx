@@ -126,8 +126,9 @@ export default function OfficerSession({ children, headerHost }: { children: Rea
           {view.notice && !error && <p className="officer-login__status" role="status">{view.notice}</p>}
           <label htmlFor="officer-password">담당자 비밀번호</label>
           <input id="officer-password" type="password" autoComplete="current-password" required autoFocus
+            aria-invalid={Boolean(error)} aria-describedby={error ? 'officer-login-error' : undefined}
             value={password} disabled={busy} onChange={(event) => setPassword(event.target.value)} />
-          {error && <p role="alert">{error}</p>}
+          {error && <p id="officer-login-error" role="alert">{error}</p>}
           <button className="btn btn--primary" type="submit" disabled={busy}>{busy ? '확인 중' : '로그인'}</button>
         </form>}
       </section>

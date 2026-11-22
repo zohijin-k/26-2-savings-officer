@@ -5,7 +5,15 @@
 값만 P3에서 별도 컬럼으로 승격한다.
 """
 
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
+import asyncio
+import sys
+import time
+from functools import wraps
+import sqlite3
+
+from fastapi import HTTPException
+from sqlalchemy.exc import DBAPIError, TimeoutError as PoolTimeoutError
 from contextvars import ContextVar
 from datetime import date, datetime
 from pathlib import Path
@@ -16,7 +24,10 @@ from sqlmodel import Field, Session, SQLModel, create_engine
 
 DB_PATH = Path(__file__).resolve().parents[1] / "demo.db"
 engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
+SQLITE_BUSY_TIMEOUT_MS = 5000
 _session_bind = ContextVar("demo_session_bind", default=None)
+_file_backups = ContextVar("demo_transaction_file_backups", default=None)
+_staged_deletes = ContextVar("demo_transaction_staged_deletes", default=None)
 
 
 class Application(SQLModel, table=True):
@@ -235,30 +246,149 @@ def _add_missing_columns() -> None:
 def get_session() -> Session:
     connection = _session_bind.get()
     if connection is not None:
-        # Handler commits flush into the caller's transaction, never commit it.
-        return Session(connection, join_transaction_mode="rollback_only")
+        # Each ORM session has a savepoint inside the real BEGIN IMMEDIATE.
+        # A failed flush must not release the outer writer before file restore.
+        return Session(connection, join_transaction_mode="create_savepoint")
     return Session(engine)
 
 
 @contextmanager
-def session_transaction(*, join_existing: bool = False):
-    """Atomically compose existing service handlers without changing their API.
+def session_transaction(*, join_existing: bool = False, busy_timeout_ms: int | None = None):
+    """Own the actual SQLite writer reservation until outer commit/rollback.
 
-    A context-local connection keeps unrelated sessions on their normal engine.
-    No SAVEPOINT is used: SQLite must retain the real outer transaction until
-    all handler calls have succeeded.
+    Inner ORM commits release only their savepoint, never the writer. Explicitly joined
+    service calls must propagate errors to this owner. Session savepoints retain
+    the outer reservation even on flush errors. No row-lock claims or unsupported
+    dialect fallback. OCR preparation stays outside.
     """
     existing = _session_bind.get()
     if existing is not None:
         if not join_existing:
             raise RuntimeError("Nested service transactions are unsupported")
-        # A composed service already owns commit/rollback. It must propagate
-        # failures; never commit or close that caller's connection here.
         yield existing
         return
-    with engine.begin() as connection:
-        token = _session_bind.set(connection)
+    if engine.dialect.name != "sqlite":
+        raise HTTPException(503, "지원하지 않는 데이터베이스 설정입니다.")
+    try:
+        with engine.connect() as connection:
+            # Applied per reservation (including test/CLI engines), not only at
+            # import time. SQLite manages real-file aliases independently of flock.
+            previous_timeout = connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one()
+            timeout = SQLITE_BUSY_TIMEOUT_MS if busy_timeout_ms is None else busy_timeout_ms
+            connection.exec_driver_sql(f"PRAGMA busy_timeout={int(timeout)}")
+            try:
+                connection.exec_driver_sql("BEGIN IMMEDIATE")
+            except BaseException:
+                connection.exec_driver_sql(f"PRAGMA busy_timeout={int(previous_timeout)}")
+                raise
+            token = _session_bind.set(connection)
+            backups = {}
+            backup_token = _file_backups.set(backups)
+            staged_deletes = []
+            delete_token = _staged_deletes.set(staged_deletes)
+            try:
+                yield connection
+                connection.commit()
+            except BaseException:
+                # Restore while the writer is still reserved: releasing it first
+                # would let another process write before stale bytes are restored.
+                try:
+                    for original, staged in reversed(staged_deletes):
+                        if staged.exists():
+                            staged.rename(original)
+                    for path, content in reversed(list(backups.items())):
+                        if content is None:
+                            path.unlink(missing_ok=True)
+                        else:
+                            path.write_bytes(content)
+                finally:
+                    connection.rollback()
+                raise
+            finally:
+                _staged_deletes.reset(delete_token)
+                _file_backups.reset(backup_token)
+                _session_bind.reset(token)
+                # PRAGMA is connection-local; busy=0 must not leak to normal
+                # pooled read/editor sessions after an async reservation.
+                if not connection.invalidated:
+                    connection.exec_driver_sql(f"PRAGMA busy_timeout={int(previous_timeout)}")
+    except (DBAPIError, PoolTimeoutError) as exc:
+        # Busy/locked are retryable. Other operational failures stay sanitized,
+        # but do not advertise retries for corruption/schema/read-only errors.
+        original = getattr(exc, "orig", None)
+        code = getattr(original, "sqlite_errorcode", 0) & 0xff
+        if code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            raise DatabaseBusy() from None
+        if isinstance(exc, PoolTimeoutError):
+            raise HTTPException(503, "일시적으로 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+                                headers={"Retry-After": "1"}) from None
+        if isinstance(original, sqlite3.OperationalError):
+            raise HTTPException(503, "데이터 저장소에 연결할 수 없습니다.") from None
+        raise
+
+
+class DatabaseBusy(HTTPException):
+    def __init__(self):
+        super().__init__(503, "일시적으로 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+                         headers={"Retry-After": "1"})
+
+
+@asynccontextmanager
+async def async_session_transaction():
+    """Cancellable SQLite writer acquisition without a background lock waiter.
+
+    Busy attempts release their connection before yielding to the event loop.
+    After acquisition, finalization contains no await except the explicit
+    cancellation checkpoint, so cancellation rolls back before any mutation.
+    """
+    deadline = time.monotonic() + SQLITE_BUSY_TIMEOUT_MS / 1000
+    while True:
+        transaction = session_transaction(join_existing=True, busy_timeout_ms=0)
         try:
-            yield connection
-        finally:
-            _session_bind.reset(token)
+            connection = transaction.__enter__()
+            break
+        except DatabaseBusy:
+            if time.monotonic() >= deadline:
+                raise
+            await asyncio.sleep(.01)
+    try:
+        await asyncio.sleep(0)
+        yield connection
+    except BaseException:
+        transaction.__exit__(*sys.exc_info())
+        raise
+    else:
+        transaction.__exit__(None, None, None)
+
+
+def transactional_write(handler):
+    """Short synchronous mutation; acquisition precedes every state/policy read.
+
+    Use explicit session_transaction around async upload finalization so byte
+    and image preparation do not occupy SQLite's single writer reservation.
+    """
+    @wraps(handler)
+    def wrapped(*args, **kwargs):
+        with session_transaction(join_existing=True):
+            return handler(*args, **kwargs)
+    return wrapped
+
+
+def preserve_file_on_rollback(path: Path) -> None:
+    """Remember generated output bytes for normal exceptions, never crash recovery.
+
+    Only called for small generated signatures/form archives, under the writer
+    reservation. Upload originals retain their UUID/staging rollback protocol.
+    """
+    backups = _file_backups.get()
+    if backups is not None and path not in backups:
+        backups[path] = path.read_bytes() if path.exists() else None
+
+
+def stage_file_deletion(original: Path, staged: Path) -> None:
+    """Keep reversible rename restoration inside the reserved DB transaction."""
+    staged_deletes = _staged_deletes.get()
+    if staged_deletes is None:
+        raise RuntimeError("File deletion requires an owned write transaction")
+    staged_deletes.append((original, staged))
+    original.rename(staged)

@@ -18,6 +18,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlmodel import select
 
+from ..models import transactional_write, async_session_transaction, stage_file_deletion
 from ..application_writes import serialized_application_write
 from ..upload_assessment import assess_nhis_identity, assess_upload
 from ..models import UNASSIGNED_SLOT, Application, Document, SubsidyItem, get_session, session_transaction, STATUS_DRAFT
@@ -149,6 +150,7 @@ def required_documents(application_id: int) -> dict[str, Any]:
 
 
 @router.put("/{application_id}/doc-context")
+@transactional_write
 def set_doc_context(application_id: int, body: DocContextRequest) -> dict[str, Any]:
     """근로유형 등을 저장하고, 바뀐 체크리스트를 바로 돌려준다."""
     if body.work_category:
@@ -228,6 +230,7 @@ def _require_draft(application_id: int) -> Application:
 
 
 @serialized_application_write
+@transactional_write
 def _save_row(
     app: Application,
     req: DocRequirement | None,
@@ -264,6 +267,7 @@ def _save_row(
 
 
 @serialized_application_write
+@transactional_write
 def _refresh_nhis_identity(application_id: int, app: Application, checklist: list[DocRequirement]) -> None:
     """건강보험 납부·자격확인서는 짝 서류가 도착할 때마다 함께 다시 대조한다."""
     _require_draft(application_id)
@@ -279,6 +283,7 @@ def _refresh_nhis_identity(application_id: int, app: Application, checklist: lis
 
 
 @serialized_application_write
+@transactional_write
 def _replace_existing(application_id: int, slot_key: str) -> None:
     """같은 슬롯에 다시 올리면 이전 것을 지운다. 재업로드가 기본 동선이다."""
     _require_draft(application_id)
@@ -350,6 +355,11 @@ async def upload_document(
 
     try:
         path.write_bytes(content)
+        prepared_inputs = app.model_dump()
+        with get_session() as session:
+            prepared_items = [item.model_dump() for item in session.exec(
+                select(SubsidyItem).where(SubsidyItem.application_id == application_id)
+                .order_by(SubsidyItem.id)).all()]
         ocr, result = assess_upload(
             path, req,
             identity=identity_of(app.identity_json),
@@ -361,7 +371,15 @@ async def upload_document(
             reader=read_document,
         )
 
-        with session_transaction(join_existing=True):
+        async with async_session_transaction():
+            current = _require_draft(application_id)
+            with get_session() as session:
+                current_items = [item.model_dump() for item in session.exec(
+                    select(SubsidyItem).where(SubsidyItem.application_id == application_id)
+                    .order_by(SubsidyItem.id)).all()]
+            if current.model_dump() != prepared_inputs or current_items != prepared_items:
+                raise HTTPException(409, "신청 내용이 바뀌었습니다. 서류를 다시 업로드해 주세요.")
+            app = current
             _require_draft(application_id)
             _replace_existing(application_id, req.slot_key)
             row = _save_row(
@@ -520,7 +538,8 @@ def delete_document(application_id: int, document_id: int) -> dict[str, str]:
     staged = None
     try:
         with session_transaction():
-            _require_draft(application_id)
+            app = _require_draft(application_id)
+            checklist = _checklist(app)
             with get_session() as s:
                 row = s.get(Document, document_id)
                 if row is None or row.application_id != application_id:
@@ -529,7 +548,7 @@ def delete_document(application_id: int, document_id: int) -> dict[str, str]:
                 target = STORAGE.parent / row.file_path
                 if target.exists():
                     staged = target.with_name(target.name + ".deleting-" + uuid4().hex)
-                    target.rename(staged)
+                    stage_file_deletion(target, staged)
                 s.delete(row)
                 s.commit()
             if refresh_nhis:

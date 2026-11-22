@@ -37,7 +37,10 @@ from ..forms.render import (
 )
 from ..forms.values import BUILDERS, FilledForm, available_forms, form_date
 from ...form_numbers import public_form_no
-from ..models import Document, get_session
+from ..models import (
+    Document, async_session_transaction, get_session,
+    preserve_file_on_rollback, transactional_write,
+)
 from ..forms.email import is_valid_email, normalize_email
 from .common import STORAGE, list_consents, load_application, subsidy_rows
 
@@ -164,22 +167,33 @@ async def upload_signature_scan(application_id: int, file: UploadFile = File(...
         processed = process_signature_scan(raw)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    original_base, processed_path = signature_scan_paths(STORAGE, app.application_no)
-    original_base.parent.mkdir(parents=True, exist_ok=True)
-    delete_signature_scan(STORAGE, app.application_no)
-    suffix = ".jpg" if file.content_type == "image/jpeg" else ".png"
-    original_base.with_suffix(suffix).write_bytes(raw)
-    processed_path.write_bytes(processed)
-    return {"uploaded": True}
+    async with async_session_transaction():
+        app = load_application(application_id)
+        if app.status != STATUS_DRAFT:
+            raise HTTPException(409, "제출한 신청서는 수정할 수 없습니다.")
+        original_base, processed_path = signature_scan_paths(STORAGE, app.application_no)
+        original_base.parent.mkdir(parents=True, exist_ok=True)
+        for candidate in [*original_base.parent.glob("scan-original.*"),
+                          original_base.with_suffix(".jpg"), original_base.with_suffix(".png"), processed_path]:
+            preserve_file_on_rollback(candidate)
+        delete_signature_scan(STORAGE, app.application_no)
+        suffix = ".jpg" if file.content_type == "image/jpeg" else ".png"
+        original_base.with_suffix(suffix).write_bytes(raw)
+        processed_path.write_bytes(processed)
+        return {"uploaded": True}
 
 
 @router.delete("/{application_id}/forms/signature-scan")
+@transactional_write
 def delete_signature_scan_route(application_id: int) -> dict[str, bool]:
     app = load_application(application_id)
     from ..models import STATUS_DRAFT
 
     if app.status != STATUS_DRAFT:
         raise HTTPException(409, "제출한 신청서는 수정할 수 없습니다.")
+    original_base, processed_path = signature_scan_paths(STORAGE, app.application_no)
+    for candidate in [*original_base.parent.glob("scan-original.*"), processed_path]:
+        preserve_file_on_rollback(candidate)
     delete_signature_scan(STORAGE, app.application_no)
     return {"uploaded": False}
 
@@ -563,6 +577,8 @@ def snapshot_written_pdf(app: Any) -> tuple[str | None, int]:
     folder.mkdir(parents=True, exist_ok=True)
     target = folder / f"{app.application_no}.pdf"
     temporary = target.with_suffix(".pdf.tmp")
+    preserve_file_on_rollback(target)
+    preserve_file_on_rollback(temporary)
     temporary.write_bytes(payload)
     temporary.replace(target)
     return str(target.relative_to(STORAGE.parent)), count

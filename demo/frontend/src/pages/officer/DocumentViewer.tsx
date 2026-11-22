@@ -24,6 +24,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { BBox, OfficerDocument } from '../../api.ts'
 import { officerSessionResponse } from '../../officer-session.ts'
 import { pdfLoadError } from './pdf-error.ts'
+import { fitDocumentScale } from './viewer-layout.ts'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -112,12 +113,24 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
   const [imageSize, setImageSize] = useState<Size>({ width: 0, height: 0 })
   const [error, setError] = useState('')
   const [retry, setRetry] = useState(0)
+  const [stageWidth, setStageWidth] = useState(0)
 
-  const scale = ZOOM_STEPS[zoomIndex]
   const isPdf = doc.file_format === 'pdf'
   // 탭을 바꾼 직후엔 이전 서류의 PDF가 아직 상태에 남아 있다. url이 다르면 없는 셈 친다.
   const pdfDoc = isPdf && loaded?.url === doc.file_url ? loaded : null
   const pageCount = pdfDoc?.sizes.length ?? 1
+  // 100% means fit to the available width, capped at the original size.
+  // The same scale drives canvas geometry and the evidence overlay.
+  const fitScale = fitDocumentScale(pdfDoc?.sizes ?? [imageSize], stageWidth, rotation)
+  const scale = fitScale * ZOOM_STEPS[zoomIndex]
+
+  useLayoutEffect(() => {
+    const stage = stageRef.current
+    if (!stage) return
+    const observer = new ResizeObserver(([entry]) => setStageWidth(entry.contentRect.width))
+    observer.observe(stage)
+    return () => observer.disconnect()
+  }, [])
 
   // 서류 탭이 바뀌면 배율·회전은 유지하고 쪽 표시만 1쪽으로 되돌린다.
   // effect가 아니라 렌더 중에 조정해 이전 서류 상태로 한 번 그려지는 깜빡임을 막는다.
@@ -125,6 +138,7 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
   if (prevDocUrl !== doc.file_url) {
     setPrevDocUrl(doc.file_url)
     setCurrentPage(1)
+    setImageSize({ width: 0, height: 0 })
     setError('')
   }
 
@@ -132,8 +146,6 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
   useEffect(() => {
     if (!isPdf) return
     let cancelled = false
-    setError('')
-    setLoaded(null)
     // 실제 발급 서류는 JBIG2 스캔 이미지가 많아 wasm 디코더가 없으면 흰 페이지가
     // 된다. 경로는 vite.config.ts의 pdfjsAssets 플러그인이 제공한다.
     const base = import.meta.env.BASE_URL
@@ -280,19 +292,21 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
             </button>
           </span>
         )}
-        <span className="viewer__spacer" />
+        <span className="viewer__tools" role="group" aria-label="문서 배율과 회전">
         <button
           type="button"
           onClick={() => setZoomIndex((i) => Math.max(0, i - 1))}
           aria-label="축소"
+          disabled={zoomIndex === 0}
         >
           −
         </button>
-        <span className="viewer__zoom">{Math.round(scale * 100)}%</span>
+        <span className="viewer__zoom" title="너비 맞춤 기준 배율">{Math.round(ZOOM_STEPS[zoomIndex] * 100)}%</span>
         <button
           type="button"
           onClick={() => setZoomIndex((i) => Math.min(ZOOM_STEPS.length - 1, i + 1))}
           aria-label="확대"
+          disabled={zoomIndex === ZOOM_STEPS.length - 1}
         >
           ＋
         </button>
@@ -303,6 +317,8 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
         >
           ↻
         </button>
+        <button type="button" onClick={() => setZoomIndex(2)}>너비 맞춤</button>
+        </span>
         {/* 저장 버튼을 두지 않는 것이 이 화면의 요구사항이다 (R4.1). */}
         <span className="viewer__inline-badge" title="원본은 브라우저 안에서만 열립니다">
           브라우저 인라인 열람
@@ -310,11 +326,12 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
       </div>
 
       {error && <p className="viewer__error" role="alert">{error}{' '}
-        <button type="button" className="btn btn--sm" onClick={() => setRetry((value) => value + 1)}>다시 시도</button>
+        <button type="button" className="btn btn--sm" onClick={() => { setError(''); setLoaded(null); setRetry((value) => value + 1) }}>다시 시도</button>
       </p>}
       {isPdf && !pdfDoc && !error && <p role="status">서류를 불러오는 중입니다.</p>}
 
-      <div className="viewer__stage" ref={stageRef} onScroll={onScroll}>
+      <div className="viewer__stage" ref={stageRef} onScroll={onScroll}
+        tabIndex={0} role="region" aria-label={`${doc.label} 원본 열람 · 확대 시 가로 스크롤`}>
         {isPdf ? (
           <div className="viewer__doc">
             {pdfDoc?.sizes.map((size, i) => (
@@ -338,7 +355,10 @@ export default function DocumentViewer({ doc, highlight, highlightLabel }: Props
             ))}
           </div>
         ) : (
-          <div className="viewer__paper">
+          <div className="viewer__paper" style={(() => {
+            const shown = displaySize(imageSize, scale, rotation)
+            return { width: shown.width, height: shown.height }
+          })()}>
             <ImagePage doc={doc} scale={scale} rotation={rotation} onSize={setImageSize} />
             {highlight &&
               imageSize.width > 0 &&
@@ -458,7 +478,7 @@ function PdfPage({
       }}
       className="viewer__page"
       style={{ width: `${shown.width}px`, height: `${shown.height}px` }}
-      aria-label={`${pageNo}쪽`}
+      role="img" aria-label={`PDF ${pageNo}쪽`}
     >
       <div ref={holderRef} className="viewer__page-canvas" />
       {children}
@@ -478,18 +498,20 @@ function ImagePage({
   rotation: Rotation
   onSize: (size: Size) => void
 }) {
+  const [size, setSize] = useState<Size>({ width: 0, height: 0 })
+  const x = rotation === 90 ? size.height : rotation === 180 ? size.width : 0
+  const y = rotation === 180 ? size.height : rotation === 270 ? size.width : 0
   return (
     <img
       className="viewer__image"
       src={doc.file_url}
       alt={`${doc.label} 원본`}
-      style={{ transform: `rotate(${rotation}deg) scale(${scale})` }}
-      onLoad={(e) =>
-        onSize({
-          width: e.currentTarget.naturalWidth,
-          height: e.currentTarget.naturalHeight,
-        })
-      }
+      style={{ position: 'absolute', maxWidth: 'none', transform: `scale(${scale}) translate(${x}px, ${y}px) rotate(${rotation}deg)` }}
+      onLoad={(e) => {
+        const next = { width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight }
+        setSize(next)
+        onSize(next)
+      }}
     />
   )
 }

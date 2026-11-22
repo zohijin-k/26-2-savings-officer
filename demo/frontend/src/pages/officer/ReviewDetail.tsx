@@ -34,6 +34,7 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
   const [memo, setMemo] = useState('')
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
+  const [saveFailed, setSaveFailed] = useState(false)
   const [focus, setFocus] = useState<{ documentId: number; bbox: BBox; label: string; scoreKey: string | null } | null>(null)
   const [formNo, setFormNo] = useState<string | null>(null)
   useEffect(() => {
@@ -61,12 +62,14 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
   }
   const decide = async (decision: DecisionKey) => {
     setSaving(true)
+    setSaveFailed(false)
     setNotice('')
     try {
       await postDecision(applicationId, decision, memo, role)
       setDetail(await fetchReviewDetail(applicationId, role))
       setNotice('담당자 판단을 저장했습니다.')
     } catch (reason) {
+      setSaveFailed(true)
       setNotice(reason instanceof Error ? reason.message : String(reason))
     } finally { setSaving(false) }
   }
@@ -155,7 +158,7 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
               <span className="notice__icon" aria-hidden="true">!</span>
               <span>보완 요청이 없는 사업입니다. 서류가 미비하면 보완 없이 선발에서 제외됩니다.</span>
             </p>
-            <details className="verdict__reasons">
+            <details className="verdict__reasons" open={detail.ai.reasons.length > 0}>
               <summary>신청 전체 사유 {detail.ai.reasons.length}건</summary>
               {detail.ai.reasons.length ? <ul className="reasons">{detail.ai.reasons.map((reason, index) => <li key={index}>
                 <code>{reason.code}</code> {reason.message}{reason.doc_type && <em> ({reason.doc_type})</em>}
@@ -189,7 +192,7 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
               <dl className="fields">{Object.entries(activeDoc.extracted).map(([key, value]) => <div key={key}>
                 <dt>{key}</dt><dd><span>{value}</span>{activeDoc.bboxes[key] && <button type="button" className="btn btn--sm" onClick={() => setFocus({ documentId: activeDoc.document_id, bbox: activeDoc.bboxes[key], label: key, scoreKey: null })}>원본 위치</button>}</dd>
               </div>)}</dl>
-            </> : <p className="muted">{activeForm ? '작성서식의 입력 내용은 왼쪽 PDF에서 확인해 주세요.' : '원본 없는 항목의 기존 저장 사유는 위 신청 전체 사유에서 확인할 수 있습니다.'}</p>}
+            </> : <p className="muted">{activeForm ? '작성서식의 입력 내용은 원본 열람 영역의 PDF에서 확인해 주세요.' : '원본 없는 항목의 기존 저장 사유는 위 신청 전체 사유에서 확인할 수 있습니다.'}</p>}
           </section>
 
           <section className="panel decision" aria-labelledby="panel-decision">
@@ -197,11 +200,12 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
               <h2 id="panel-decision"><span className="panel__step">4</span>담당자 처리</h2>
               <span className="muted">현재 상태: {detail.decision.label}</span>
             </div>
-            <label>검토 메모<textarea value={memo} onChange={(event) => setMemo(event.target.value)} /></label>
+            <label>검토 메모<textarea aria-describedby={notice ? 'decision-notice' : undefined} value={memo} onChange={(event) => setMemo(event.target.value)} /></label>
             <div className="decision__actions">{detail.role.actions.map((action) => <button key={action.key} type="button"
               className={BUTTON_TONE[action.tone] ?? 'btn'} disabled={saving}
               onClick={() => { void decide(action.key) }}>{action.label}</button>)}</div>
-            {notice && <p className="decision__notice" role="status">{notice}</p>}
+            {saving && <p role="status">담당자 판단을 저장하고 있습니다.</p>}
+            {notice && <p id="decision-notice" className="decision__notice" role={saveFailed ? 'alert' : 'status'}>{notice}</p>}
           </section>
         </section>
       </div>

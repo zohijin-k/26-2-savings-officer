@@ -156,7 +156,7 @@ export default function ApplicationList({
       </div>
     </div>
 
-    <div className="alist__panel" role="tabpanel" id={`${uid}-panel`} aria-labelledby={`${uid}-tab-${queue}`}>
+    <div className="alist__panel" tabIndex={0} role="tabpanel" id={`${uid}-panel`} aria-labelledby={`${uid}-tab-${queue}`}>
       <table className="alist__table">
         <colgroup>
           <col className="alist__col-check" />

@@ -126,6 +126,14 @@ export interface OfficerDocument {
 }
 
 
+export interface OfficerForm {
+  form_no: string
+  public_form: string
+  label: string
+  file_url: string
+  file_name: string
+}
+
 export interface ReviewDetailData {
   application_id: number
   application_no: string
@@ -140,6 +148,7 @@ export interface ReviewDetailData {
   }
   score_sheet: ScoreSheetData
   documents: OfficerDocument[]
+  forms: OfficerForm[]
   decision: { decision: DecisionKey | null; label: string; memo: string | null }
   role: OfficerRole
 }

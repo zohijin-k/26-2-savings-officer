@@ -207,7 +207,7 @@ def read_signature_scan(application_id: int) -> Response:
     return Response(processed.read_bytes(), media_type="image/png", headers={"Cache-Control": "private, no-store"})
 
 
-def form_links(application_id: int, *, include_paper_form: bool = False) -> list[dict[str, Any]]:
+def form_links(application_id: int, *, include_paper_form: bool = False, officer: bool = False) -> list[dict[str, Any]]:
     """담당자 화면 "작성 서식" 탭 목록.
 
     좌표 맵이나 템플릿이 없으면 목록에서 빠진다 — P7은 선택 기능이라, 준비가
@@ -229,7 +229,7 @@ def form_links(application_id: int, *, include_paper_form: bool = False) -> list
                 "public_form": screen_no,
                 "title": spec.title,
                 "label": f"{screen_no} {spec.title}" if screen_no else spec.title,
-                "file_url": f"/api/applications/{application_id}/forms/{form_no}.pdf",
+                "file_url": f"/api/{'officer/' if officer else ''}applications/{application_id}/forms/{form_no}.pdf",
                 "file_name": f"{app.application_no}_{screen_no or form_no}.pdf",
                 "hwp_available": _hwp_path(app.program_code, form_no) is not None,
             }

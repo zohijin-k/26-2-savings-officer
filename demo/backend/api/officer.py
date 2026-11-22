@@ -21,6 +21,7 @@ from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlmodel import select
 from engine_v2.pipeline.privacy import mask_data
@@ -67,7 +68,7 @@ from .common import (
     load_application,
     subsidy_estimate,
 )
-from .forms import form_links
+from .forms import export_form, form_links
 
 router = APIRouter(prefix="/api/officer", tags=["officer"])
 
@@ -821,6 +822,23 @@ def _supplement_view(
     }
 
 
+@router.get("/applications/{application_id}/forms/{form_no}.pdf")
+def read_authored_form(application_id: int, form_no: str) -> Response:
+    """OfficerAccess protects this read; drafts and applicant archives stay private.
+
+    Individual forms use the existing in-memory renderer, including its program
+    and paper-consent checks. No original, archive, or database row is written.
+    """
+    try:
+        application = load_application(application_id)
+        if application.status == STATUS_DRAFT:
+            raise HTTPException(404, "아직 제출되지 않은 신청 건입니다.")
+        return export_form(application_id, form_no)
+    except HTTPException as exc:
+        exc.headers = {**(exc.headers or {}), "Cache-Control": "private, no-store"}
+        raise
+
+
 @router.get("/applications/{application_id}")
 def review_detail(application_id: int, role: str = Query(ROLE_PROVINCE)) -> dict[str, Any]:
     """심사 상세 — 분할 뷰가 읽는 전부 (R4.2/R4.3).
@@ -901,7 +919,7 @@ def review_detail(application_id: int, role: str = Query(ROLE_PROVINCE)) -> dict
         "documents": documents,
         # 작성 서식(P7, 선택). 업로드 서류와 같은 뷰어에서 나란히 본다 — 여기도
         # 인라인이라 다운로드 0회가 유지된다. 준비가 안 됐으면 빈 목록이다.
-        "forms": form_links(application_id),
+        "forms": form_links(application_id, officer=True),
         "eligibility": _eligibility(entry, items),
         "exclusions": _exclusions(entry),
         "decision": {

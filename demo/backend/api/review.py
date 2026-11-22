@@ -809,11 +809,9 @@ def submit(application_id: int) -> dict[str, Any]:
         row.written_forms_archive_path = archive_path
         row.written_forms_archive_count = archive_count
         s.add(row)
-        # 데모는 재제출 시나리오를 다루지 않는다. 기존 심사 결과는 지우고 다시 쓴다.
-        for old in s.exec(
-            select(Review).where(Review.application_id == application_id)
-        ).all():
-            s.delete(old)
+        # A draft must never replace an existing review or reset its revision.
+        if s.exec(select(Review).where(Review.application_id == application_id)).first():
+            raise HTTPException(409, "이미 심사 기록이 있는 신청 건입니다.")
         s.add(review)
         s.commit()
         submitted_at = row.submitted_at

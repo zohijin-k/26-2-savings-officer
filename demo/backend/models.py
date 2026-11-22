@@ -19,7 +19,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from sqlalchemy import JSON, Column, UniqueConstraint
+from sqlalchemy import JSON, Column, Integer, UniqueConstraint, text
+from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import Field, Session, SQLModel, create_engine
 
 DB_PATH = Path(__file__).resolve().parents[1] / "demo.db"
@@ -146,6 +147,9 @@ class SubsidyItem(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now)
 
 
+_review_revision_column = Column("revision", Integer, nullable=False, default=1, server_default=text("1"))
+
+
 class Review(SQLModel, table=True):
     """제출 1건의 심사 결과.
 
@@ -157,6 +161,10 @@ class Review(SQLModel, table=True):
     마이페이지 응답(`/status`)은 이 테이블의 점수 컬럼을 절대 싣지 않는다.
     """
 
+    # All ORM updates (including system evidence changes) use SQLAlchemy's CAS.
+    __mapper_args__ = {"version_id_col": _review_revision_column}
+    __table_args__ = (UniqueConstraint("application_id", name="uq_review_application"),)
+    revision: int = Field(default=1, sa_column=_review_revision_column)
     id: Optional[int] = Field(default=None, primary_key=True)
     application_id: int = Field(index=True, foreign_key="application.id")
     #: PASS | FAIL | NEEDS_REVIEW (엔진 최종 판정)
@@ -229,6 +237,13 @@ def _add_missing_columns() -> None:
     from sqlalchemy import text
 
     with engine.connect() as conn:
+        # Reserve the writer before inspecting legacy rows; SQLite DDL rolls back
+        # with this explicit transaction. Never repair duplicate reviews by deletion.
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
+        if conn.exec_driver_sql("SELECT 1 FROM sqlite_master WHERE type='table' AND name='review'").first():
+            duplicate = conn.exec_driver_sql("SELECT application_id FROM review GROUP BY application_id HAVING COUNT(*) > 1 LIMIT 1").first()
+            if duplicate:
+                raise RuntimeError("Review migration stopped: duplicate application reviews require manual reconciliation")
         for table in SQLModel.metadata.sorted_tables:
             existing = {
                 row[1] for row in conn.execute(text(f"PRAGMA table_info({table.name})"))
@@ -238,8 +253,15 @@ def _add_missing_columns() -> None:
             for column in table.columns:
                 if column.name in existing:
                     continue
-                ddl = f"ALTER TABLE {table.name} ADD COLUMN {column.name} {column.type}"
+                ddl = ("ALTER TABLE review ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"
+                       if table.name == "review" and column.name == "revision"
+                       else f"ALTER TABLE {table.name} ADD COLUMN {column.name} {column.type}")
                 conn.execute(text(ddl))
+        if conn.exec_driver_sql("SELECT 1 FROM sqlite_master WHERE type='table' AND name='review'").first():
+            invalid = conn.exec_driver_sql("SELECT 1 FROM review WHERE revision IS NULL OR typeof(revision) != 'integer' OR revision < 1 LIMIT 1").first()
+            if invalid:
+                raise RuntimeError("Review migration stopped: invalid revision requires manual reconciliation")
+            conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS uq_review_application ON review(application_id)")
         conn.commit()
 
 
@@ -312,6 +334,9 @@ def session_transaction(*, join_existing: bool = False, busy_timeout_ms: int | N
                 # pooled read/editor sessions after an async reservation.
                 if not connection.invalidated:
                     connection.exec_driver_sql(f"PRAGMA busy_timeout={int(previous_timeout)}")
+    except StaleDataError:
+        raise HTTPException(409, {"code": "REVIEW_REVISION_CONFLICT",
+                                  "message": "심사 기록이 변경되었습니다. 최신 상태를 확인해 주세요."}) from None
     except (DBAPIError, PoolTimeoutError) as exc:
         # Busy/locked are retryable. Other operational failures stay sanitized,
         # but do not advertise retries for corruption/schema/read-only errors.

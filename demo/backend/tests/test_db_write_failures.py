@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlmodel import Session, create_engine
+from sqlmodel import Session, create_engine, select
 
 from demo.backend import models
 from demo.backend.api import applications, common, documents, forms
@@ -223,6 +223,12 @@ def test_generated_signature_originals_restored_if_outer_commit_fails(client, mo
 def test_submit_commit_failure_restores_prior_archive_and_all_review_state(client, monkeypatch):
     from demo.backend.api import review
     aid, _, _ = seed(client, monkeypatch)
+    # A valid first submission has no pre-existing Review. Keep this test on
+    # the actual commit-failure path; legacy-review rejection is tested separately.
+    with models.get_session() as session:
+        for previous in session.exec(select(models.Review).where(models.Review.application_id == aid)).all():
+            session.delete(previous)
+        session.commit()
     monkeypatch.setattr(forms, 'STORAGE', common.STORAGE)
     monkeypatch.setattr(forms, '_written_pdf_bytes', lambda row: (b'NEW SYNTHETIC ARCHIVE', 1))
     monkeypatch.setattr(review, '_blockers', lambda row: [])

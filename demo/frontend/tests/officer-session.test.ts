@@ -23,11 +23,11 @@ async function withFetch(reply: (path: string, init?: RequestInit) => Response, 
 
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
-test('only officer API 401 and 503 responses send the login screen back', () => {
+test('only officer API 401 responses send the login screen back', () => {
   withWindow((events) => {
     officerSessionResponse('/api/officer/applications?role=province&page=1', { status: 401 })
     officerSessionResponse('/api/officer/applications/7', { status: 503 })
-    assert.deepEqual(events, [OFFICER_SESSION_EXPIRED, OFFICER_SESSION_EXPIRED])
+    assert.deepEqual(events, [OFFICER_SESSION_EXPIRED])
   })
   withWindow((events) => {
     for (const status of [200, 403, 404, 422, 500]) officerSessionResponse('/api/officer/applications', { status })

@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
-import { fetchReviewDetail, postDecision, type BBox, type DecisionKey, type DocStatus, type OfficerDocument, type ReviewDetailData, type RoleKey, type ScoreItemRow } from '../../api.ts'
+import { useRef, useState } from 'react'
+import { fetchReviewDetail, postDecision, type BBox, type DecisionKey, type DocStatus, type OfficerDocument, type RoleKey, type ScoreItemRow } from '../../api.ts'
 import StatusBadge from '../../components/StatusBadge.tsx'
 import AiSummaryCard from './AiSummaryCard.tsx'
 import DocumentViewer from './DocumentViewer.tsx'
 import ScoreSheet6 from './ScoreSheet6.tsx'
 import { fieldLabel, formatField, plainText, reasonTitle, type FieldView } from './field-format.ts'
 import { selectOfficerDocument } from './list-model.ts'
+import { useReviewDraft } from './useReviewDraft.ts'
+import { reviewSaveError } from './review-save.ts'
+import ReviewSaveStatus from './ReviewSaveStatus.tsx'
 import { tiebreakParts } from './tiebreak.ts'
 
 interface Props {
@@ -47,29 +50,18 @@ function FieldValue({ view }: { view: Exclude<FieldView, { kind: 'hidden' }> }) 
 }
 
 export default function ReviewDetail({ role, applicationId, documentId, slotKey, onBack, onSelect }: Props) {
-  const [detail, setDetail] = useState<ReviewDetailData | null>(null)
-  const [error, setError] = useState('')
-  const [memo, setMemo] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [notice, setNotice] = useState('')
-  const [saveFailed, setSaveFailed] = useState(false)
+  const draft = useReviewDraft({
+    load: async () => {
+      const data = await fetchReviewDetail(applicationId, role)
+      if (data.program_code !== 'double_savings') throw new Error('두배적금 신청 건이 아닙니다.')
+      return data
+    },
+    write: (decision, memo, expectedRevision) => postDecision(applicationId, decision as DecisionKey, memo, role, expectedRevision),
+    errorText: reviewSaveError,
+  })
+  const { data: detail, memo, busy: saving, loadError: error, editor } = draft
   const [focus, setFocus] = useState<{ documentId: number; bbox: BBox; label: string; scoreKey: string | null } | null>(null)
   const [formNo, setFormNo] = useState<string | null>(null)
-  useEffect(() => {
-    let active = true
-    fetchReviewDetail(applicationId, role).then((data) => {
-      if (!active) return
-      if (data.program_code !== 'double_savings') {
-        setError('두배적금 신청 건이 아닙니다.')
-        return
-      }
-      setDetail(data)
-      setMemo(data.decision.memo ?? '')
-    }).catch((reason: unknown) => {
-      if (active) setError(reason instanceof Error ? reason.message : String(reason))
-    })
-    return () => { active = false }
-  }, [applicationId, role])
 
   const activeDoc = detail && formNo === null ? selectOfficerDocument(detail.documents, documentId, slotKey) : null
   const activeForm = detail?.forms.find((form) => form.form_no === formNo)
@@ -77,19 +69,6 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
   const selectOriginal = (id: number, slot: string) => {
     setFormNo(null)
     onSelect(id, slot)
-  }
-  const decide = async (decision: DecisionKey) => {
-    setSaving(true)
-    setSaveFailed(false)
-    setNotice('')
-    try {
-      await postDecision(applicationId, decision, memo, role)
-      setDetail(await fetchReviewDetail(applicationId, role))
-      setNotice('담당자 판단을 저장했습니다.')
-    } catch (reason) {
-      setSaveFailed(true)
-      setNotice(reason instanceof Error ? reason.message : String(reason))
-    } finally { setSaving(false) }
   }
   const focusScore = (item: ScoreItemRow) => {
     if (!detail || item.source_document_id === null) return
@@ -131,7 +110,7 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
       <button type="button" className="btn btn--sm" onClick={onBack}>← 신청 목록</button>
       {detail && <><strong>{detail.name}</strong><span>{detail.application_no}</span><span>{detail.region} {detail.town}</span></>}
     </header>
-    {error ? <p className="officer__error" role="alert">{error}</p> : !detail ? <p role="status">서류를 불러오는 중입니다.</p> : <>
+    {error ? <p className="officer__error" role="alert">{error} <button type="button" className="btn" onClick={() => void editor.check()}>다시 시도</button></p> : !detail ? <p role="status">서류를 불러오는 중입니다.</p> : <>
       <nav className="review__tabs" aria-label="신청 서류 (← → 키로 이동)" onKeyDown={moveTab}>
         {detail.documents.map((doc) => {
           const status = doc.status ? TAB_STATUS[doc.status] : null
@@ -225,12 +204,11 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
               <h2 id="panel-decision"><span className="panel__step">4</span>담당자 처리</h2>
               <span className="muted">현재 상태: {detail.decision.label}</span>
             </div>
-            <label>검토 메모<textarea aria-describedby={notice ? 'decision-notice' : undefined} value={memo} onChange={(event) => setMemo(event.target.value)} /></label>
+            <label>검토 메모<textarea value={memo} onChange={(event) => editor.edit(event.target.value)} /></label>
             <div className="decision__actions">{detail.role.actions.map((action) => <button key={action.key} type="button"
-              className={BUTTON_TONE[action.tone] ?? 'btn'} disabled={saving}
-              onClick={() => { void decide(action.key) }}>{action.label}</button>)}</div>
-            {saving && <p role="status">담당자 판단을 저장하고 있습니다.</p>}
-            {notice && <p id="decision-notice" className="decision__notice" role={saveFailed ? 'alert' : 'status'}>{notice}</p>}
+              className={BUTTON_TONE[action.tone] ?? 'btn'} disabled={saving || draft.needsCheck}
+              onClick={() => { void editor.save(action.key) }}>{action.label}</button>)}</div>
+            <ReviewSaveStatus editor={editor} state={draft} />
           </section>
         </section>
       </div>

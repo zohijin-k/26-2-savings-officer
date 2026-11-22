@@ -1,3 +1,4 @@
+import { confirmOfficerLeave } from './review-navigation.ts'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { isOfficerMockActive } from '../../api.ts'
@@ -20,6 +21,7 @@ const UNREACHABLE = '서버에 연결하지 못했습니다. 잠시 후 다시 �
  * 로그인하면 보던 주소(목록, 심사 상세)가 그대로 열린다. `?mock=1`은 확인 없이 그린다.
  */
 export default function OfficerSession({ children, headerHost }: { children: ReactNode; headerHost: HTMLElement | null }) {
+  const [hasSession, setHasSession] = useState(false)
   const [mock] = useState(isOfficerMockActive)
   const [view, setView] = useState<View>({ kind: 'checking' })
   const [check, setCheck] = useState(0)
@@ -34,7 +36,7 @@ export default function OfficerSession({ children, headerHost }: { children: Rea
     readOfficerSession().then((state) => {
       if (!active) return
       if (state.kind === 'signed-out') setView((current) => ({ kind: 'signed-out', notice: current.kind === 'signed-in' ? EXPIRED : '' }))
-      else setView(state)
+      else { if (state.kind === 'signed-in') setHasSession(true); setView(state) }
     }).catch(() => { if (active) setView({ kind: 'unreachable' }) })
     return () => { active = false }
   }, [mock, check])
@@ -71,7 +73,7 @@ export default function OfficerSession({ children, headerHost }: { children: Rea
       const result = await loginOfficer(password)
       setPassword('')
       if (result.kind === 'rejected') setError(result.detail)
-      else setView(result)
+      else { if (result.kind === 'signed-in') setHasSession(true); setView(result) }
     } catch {
       setError(UNREACHABLE)
     } finally {
@@ -80,7 +82,7 @@ export default function OfficerSession({ children, headerHost }: { children: Rea
   }
 
   const logout = async () => {
-    if (busy) return
+    if (busy || !confirmOfficerLeave()) return
     setBusy(true)
     let notice = '로그아웃했습니다.'
     try {
@@ -90,6 +92,7 @@ export default function OfficerSession({ children, headerHost }: { children: Rea
     } finally {
       setBusy(false)
     }
+    setHasSession(false)
     setView({ kind: 'signed-out', notice })
   }
 
@@ -100,7 +103,7 @@ export default function OfficerSession({ children, headerHost }: { children: Rea
         <button type="button" className="btn btn--sm" disabled={busy} onClick={() => void logout()}>로그아웃</button>
       </div>
     )
-    return <>{headerHost && createPortal(bar, headerHost)}{children}</>
+    return <><div key="review-session">{children}</div>{headerHost && createPortal(bar, headerHost)}</>
   }
 
   if (view.kind === 'checking') {
@@ -110,7 +113,7 @@ export default function OfficerSession({ children, headerHost }: { children: Rea
   }
 
   return (
-    <main className="officer-login">
+    <><div key="review-session" hidden inert>{hasSession && children}</div><main className="officer-login">
       <section className="officer-login__card" aria-labelledby="officer-login-title">
         <p className="officer-login__eyebrow">전북청년 함께 두배적금 · 담당자</p>
         <h1 id="officer-login-title">담당자 로그인</h1>
@@ -132,6 +135,6 @@ export default function OfficerSession({ children, headerHost }: { children: Rea
           <button className="btn btn--primary" type="submit" disabled={busy}>{busy ? '확인 중' : '로그인'}</button>
         </form>}
       </section>
-    </main>
+    </main></>
   )
 }

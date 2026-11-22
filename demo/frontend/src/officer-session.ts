@@ -17,10 +17,10 @@ export type OfficerLoginResult =
 
 const UNCONFIGURED_FALLBACK = '담당자 로그인 설정이 필요합니다. 관리자에게 문의해 주세요.'
 
-/** 담당자 API가 401·503을 내면 로그인 화면으로 돌아가라는 이벤트를 낸다. 로그인 요청 자체는 빼고 본다. */
+/** 담당자 API가 401을 내면 로그인 화면으로 돌아가라는 이벤트를 낸다. 로그인 요청 자체는 빼고 본다. */
 export function officerSessionResponse(path: string, response: Pick<Response, 'status'>): void {
   if (typeof window === 'undefined' || !path.startsWith('/api/officer/') || path.split('?')[0] === '/api/officer/login') return
-  if (response.status === 401 || response.status === 503) window.dispatchEvent(new Event(OFFICER_SESSION_EXPIRED))
+  if (response.status === 401) window.dispatchEvent(new Event(OFFICER_SESSION_EXPIRED))
 }
 
 async function detailOf(response: Response, fallback: string): Promise<string> {

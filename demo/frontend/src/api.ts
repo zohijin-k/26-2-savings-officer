@@ -1,3 +1,5 @@
+import { requireReviewRevision, requireReviewRevisions } from './lib/review-revision.ts'
+import { HttpError } from './lib/http-error.ts'
 import { officerSessionResponse } from './officer-session.ts'
 import { mockBulkDecision, mockDecision, mockOfficerList, mockOfficerSummary, mockReviewDetail, mockRoles } from './pages/officer/mock-data.ts'
 
@@ -38,6 +40,7 @@ export interface OfficerRowDoc {
   required: boolean
 }
 export interface OfficerRow {
+  revision?: number | null
   application_id: number
   application_no: string
   name: string
@@ -138,6 +141,7 @@ export interface OfficerForm {
 }
 
 export interface ReviewDetailData {
+  revision: number | null
   application_id: number
   application_no: string
   name: string
@@ -194,7 +198,7 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
   officerSessionResponse(path, response)
-  if (!response.ok) throw new Error(`요청을 처리하지 못했습니다 (${response.status})`)
+  if (!response.ok) throw await HttpError.fromResponse(response, `요청을 처리하지 못했습니다 (${response.status})`)
   return response.json() as Promise<T>
 }
 
@@ -212,20 +216,24 @@ export const fetchOfficerList = (query: OfficerListQuery, page: number): Promise
 }
 export const fetchReviewDetail = async (id: number, role: RoleKey = 'province'): Promise<ReviewDetailData> => isOfficerMockActive()
   ? Promise.resolve(mockReviewDetail(id, role))
-  : json(`/api/officer/applications/${id}?role=${role}`)
+  : json(`/api/officer/applications/${id}?role=${role}`, { signal: AbortSignal.timeout(15000), cache: 'no-store' })
 export const fetchOfficerSummary = (id: number, role: RoleKey = 'province'): Promise<OfficerSummary> => isOfficerMockActive()
   ? Promise.resolve(mockOfficerSummary(id))
   : json(`/api/officer/applications/${id}/summary?role=${role}`)
 export const regenerateOfficerSummary = (id: number, role: RoleKey = 'province'): Promise<OfficerSummary> => isOfficerMockActive()
   ? Promise.resolve(mockOfficerSummary(id))
   : json(`/api/officer/applications/${id}/summary?role=${role}`, { method: 'POST' })
-export const postDecision = (id: number, decision: DecisionKey, memo: string, role: RoleKey = 'province'): Promise<unknown> => isOfficerMockActive()
-  ? Promise.resolve(mockDecision(id, decision, memo, role))
-  : json(`/api/officer/applications/${id}/decision`, {
-    method: 'POST', body: JSON.stringify({ role, decision, memo }),
+export const postDecision = (id: number, decision: DecisionKey, memo: string, role: RoleKey, expectedRevision: number): Promise<unknown> => {
+  if (isOfficerMockActive()) return Promise.resolve(mockDecision(id, decision, memo, role))
+  requireReviewRevision(expectedRevision)
+  return json(`/api/officer/applications/${id}/decision`, {
+    method: 'POST', body: JSON.stringify({ role, decision, memo, expected_revision: expectedRevision }), signal: AbortSignal.timeout(15000),
   })
-export const postBulkDecision = (ids: number[], decision: DecisionKey, memo: string, role: RoleKey): Promise<{ processed: number }> => isOfficerMockActive()
-  ? Promise.resolve(mockBulkDecision(ids, decision, memo, role))
-  : json('/api/officer/applications/decisions', {
-    method: 'POST', body: JSON.stringify({ role, decision, memo, application_ids: ids }),
+}
+export const postBulkDecision = (ids: number[], decision: DecisionKey, memo: string, role: RoleKey, expectedRevisions: Record<number, number | null | undefined>): Promise<{ processed: number }> => {
+  if (isOfficerMockActive()) return Promise.resolve(mockBulkDecision(ids, decision, memo, role))
+  requireReviewRevisions(ids, expectedRevisions)
+  return json('/api/officer/applications/decisions', {
+    method: 'POST', body: JSON.stringify({ role, decision, memo, application_ids: ids, expected_revisions: expectedRevisions }),
   })
+}

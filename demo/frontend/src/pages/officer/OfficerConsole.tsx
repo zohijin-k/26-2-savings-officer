@@ -1,3 +1,4 @@
+import { confirmOfficerLeave, handleOfficerHistory } from './review-navigation.ts'
 import { useEffect, useState } from 'react'
 import {
   fetchOfficerList, fetchOfficerRoles, fetchReviewDetail, isOfficerMockActive, postBulkDecision,
@@ -47,13 +48,13 @@ export default function OfficerConsole() {
   const phase = programPhase(localDay())
 
   useEffect(() => {
-    const onHistory = () => setPage(readOfficerPage(new URL(window.location.href)))
+    const onHistory = (event: PopStateEvent) => { if (!handleOfficerHistory(event)) setPage(readOfficerPage(new URL(window.location.href))) }
     window.addEventListener('popstate', onHistory)
     return () => window.removeEventListener('popstate', onHistory)
   }, [])
   useEffect(() => {
     const url = officerPageUrl(page, mock)
-    if (`${window.location.pathname}${window.location.search}` !== url) window.history.replaceState(null, '', url)
+    if (`${window.location.pathname}${window.location.search}` !== url) window.history.replaceState({ ...window.history.state, officerIndex: Number(window.history.state?.officerIndex ?? 0) }, '', url)
   }, [page, mock])
   useEffect(() => {
     let active = true
@@ -73,12 +74,14 @@ export default function OfficerConsole() {
   }, [roleKey, scope, requestKey])
 
   const navigate = (next: OfficerPage) => {
-    window.history.pushState(null, '', officerPageUrl(next, mock))
+    if (next.applicationId !== page.applicationId && !confirmOfficerLeave()) return
+    window.history.pushState({ ...window.history.state, officerIndex: Number(window.history.state?.officerIndex ?? 0) + 1 }, '', officerPageUrl(next, mock))
     setPage(next)
+    window.dispatchEvent(new Event('officer:route'))
     window.scrollTo({ top: 0 })
   }
   const switchRole = (next: RoleKey) => {
-    if (next === roleKey) return
+    if (next === roleKey || !confirmOfficerLeave()) return
     try { window.sessionStorage.setItem(ROLE_STORAGE, next) } catch { /* 저장 못 해도 전환은 된다 */ }
     setRoleKey(next)
     setScope({})
@@ -88,7 +91,7 @@ export default function OfficerConsole() {
     setBusy(true)
     setNotice('')
     try {
-      const { processed } = await postBulkDecision(ids, decision, `${list?.role?.name ?? ''} 일괄 처리`.trim(), roleKey)
+      const { processed } = await postBulkDecision(ids, decision, `${list?.role?.name ?? ''} 일괄 처리`.trim(), roleKey, Object.fromEntries((list?.rows ?? []).filter((row) => ids.includes(row.application_id)).map((row) => [row.application_id, row.revision])))
       setNotice(`${processed}건을 처리했습니다.`)
       setReload((value) => value + 1)
     } catch (reason) {
@@ -115,7 +118,8 @@ export default function OfficerConsole() {
       applicationId={page.applicationId} documentId={page.documentId} slotKey={page.slotKey}
       onBack={() => { setReload((value) => value + 1); navigate({ applicationId: null, documentId: null, slotKey: null }) }}
       onSelect={(documentId, slotKey) => navigate({ ...page, documentId, slotKey })}
-    /> : <>
+    /> : null}
+    <div hidden={page.applicationId !== null} inert={page.applicationId !== null}>
       <div className="officer__role-bar">
         <div className="officer__roles" role="group" aria-label="역할 전환">
           {roleOptions.map((role) => <button key={role.key} type="button" aria-pressed={role.key === roleKey}
@@ -148,6 +152,6 @@ export default function OfficerConsole() {
           }}
         />
       </div>}
-    </>}
+    </div>
   </main>
 }

@@ -694,7 +694,7 @@ _JOB_ISSUE_FIELDS = {
     "receipt": ("발급일", "결제일"),
     "exam_admission": ("발급일", "응시일"),
     "exam_score": ("발급일", "응시일"),
-    "interview_confirm": ("확인일", "면접일"),
+    "interview_confirm": ("발급일", "확인일", "면접일"),
 }
 
 
@@ -738,6 +738,8 @@ def _from_job_doc(ex, pages, classification_evidence: str = "",
         # 글자층의 빈 항목은 확정된 부재이며, OCR의 빈 항목은 미판독일 수 있다.
         confidence = 0.9 if text_only else 0.5
     issue = next((ex.fields[name] for name in _JOB_ISSUE_FIELDS.get(v2type, ()) if name in ex.fields), None)
+    if v2type == "interview_confirm" and "발급일" in ex.fields:
+        confidence = min(confidence, ex.fields["발급일"].confidence)
     detected = detected_override or next((demo for demo, (_, value) in _JOB_DOCS.items() if value == v2type), None)
     return OcrResult(
         detected_doc_type=detected,

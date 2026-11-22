@@ -191,10 +191,12 @@ def _safe_name(name: str) -> str:
 def _parse_date(value: str | None) -> date | None:
     if not value:
         return None
-    try:
-        return date.fromisoformat(value)
-    except ValueError:
-        raise HTTPException(400, "발급일은 YYYY-MM-DD 형식으로 입력해 주세요.") from None
+    from ..rules.document_dates import document_date
+
+    parsed = document_date({"발급일": value}, "issue_date")
+    if parsed is None:
+        raise HTTPException(400, "발급일은 YYYY-MM-DD 형식으로 입력해 주세요.")
+    return parsed
 
 
 def _ocr_json(ocr: OcrResult) -> dict[str, Any]:

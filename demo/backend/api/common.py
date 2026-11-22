@@ -280,6 +280,7 @@ def document_fact(d: Document) -> dict[str, Any]:
         "image_quality": ocr.get("image_quality"),
         "has_signature": ocr.get("has_signature"),
         "issue_date": parsed_issue,
+        "ocr_tier": ocr.get("tier"),
         "declared_issue_date": d.declared_issue_date,
         "fields": ocr.get("fields") or {},
         "bboxes": ocr.get("bboxes") or {},

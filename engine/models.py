@@ -69,6 +69,8 @@ class Document:
     # Preserve a separately confirmed document defect when quality needs review.
     has_confirmed_document_failure: bool = False
 
+    slot_key: Optional[str] = None  # Repeated document types retain their own policy/date basis.
+
 
 @dataclass
 class RequiredDocumentSpec:
@@ -79,6 +81,8 @@ class RequiredDocumentSpec:
     min_issue_date: Optional[date] = None   # 이 날짜 '이후' 발급분만 인정 (예: 공고일/모집 시작일)
     max_issue_date: Optional[date] = None   # 신청일 기준 기간 조건에서 미래 발급일 제외
     check_declared_date: bool = False       # True면 사용자 직접입력 발급일과 OCR값 대조
+
+    slot_key: Optional[str] = None  # Absent for legacy type-only callers.
 
 
 @dataclass

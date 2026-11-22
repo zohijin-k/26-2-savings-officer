@@ -61,6 +61,8 @@ def make_application(*, a="확실한 공란", b="확실한 공란", premium=None
                          SimpleNamespace(doc_type=DocType.NHIS_PAYMENT, slot_key="FAKE_optional_payment")]
     with models.get_session() as session:
         for req in requirements:
+            if not getattr(req, "upload", True) and req.slot_key != "admin_info_consent":
+                continue  # These display placeholders share a type but are not uploaded documents.
             if str(req.doc_type) in seen:
                 continue
             seen.add(str(req.doc_type))

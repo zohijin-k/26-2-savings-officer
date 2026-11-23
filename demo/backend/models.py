@@ -149,6 +149,34 @@ class SubsidyItem(SQLModel, table=True):
 
 _review_revision_column = Column("revision", Integer, nullable=False, default=1, server_default=text("1"))
 
+# Mixed-version guard enforced by SQLite itself. Every current writer (ORM
+# version_id_col flushes and review_revision.update_review) advances revision by
+# exactly one. Writers that predate CAS (an old backend binary still running
+# against this file, ad-hoc SQL) never touch revision, so their UPDATE would
+# silently overwrite newer officer data; this trigger rejects it instead. It does
+# not cover separate DB copies/hosts, and anyone able to drop triggers bypasses it.
+REVIEW_WRITE_GUARD_NAME = "review_write_guard_update"
+REVIEW_WRITE_GUARD_MESSAGE = "REVIEW_WRITE_GUARD: review update must advance revision by exactly 1"
+REVIEW_WRITE_GUARD_DDL = (
+    f"CREATE TRIGGER {REVIEW_WRITE_GUARD_NAME} BEFORE UPDATE ON review FOR EACH ROW "
+    "WHEN NEW.revision IS NOT OLD.revision + 1 "
+    f"BEGIN SELECT RAISE(ABORT, '{REVIEW_WRITE_GUARD_MESSAGE}'); END"
+)
+# REPLACE/UPSERT/duplicate INSERT would delete or rewrite an existing review (and
+# reset revision) without firing the UPDATE guard. Creation stays allowed only
+# when the application has no review yet. DELETE is intentionally not guarded
+# here: operator deletion tools remove reviews explicitly (documented residual).
+REVIEW_INSERT_GUARD_NAME = "review_write_guard_insert"
+REVIEW_INSERT_GUARD_DDL = (
+    f"CREATE TRIGGER {REVIEW_INSERT_GUARD_NAME} BEFORE INSERT ON review FOR EACH ROW "
+    "WHEN EXISTS (SELECT 1 FROM review WHERE application_id = NEW.application_id OR id = NEW.id) "
+    "BEGIN SELECT RAISE(ABORT, 'REVIEW_WRITE_GUARD: review already exists for this application'); END"
+)
+REVIEW_WRITE_GUARDS = (
+    (REVIEW_WRITE_GUARD_NAME, REVIEW_WRITE_GUARD_DDL),
+    (REVIEW_INSERT_GUARD_NAME, REVIEW_INSERT_GUARD_DDL),
+)
+
 
 class Review(SQLModel, table=True):
     """제출 1건의 심사 결과.
@@ -262,6 +290,14 @@ def _add_missing_columns() -> None:
             if invalid:
                 raise RuntimeError("Review migration stopped: invalid revision requires manual reconciliation")
             conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS uq_review_application ON review(application_id)")
+            for name, ddl in REVIEW_WRITE_GUARDS:
+                guard = conn.exec_driver_sql(
+                    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?", (name,)
+                ).first()
+                if guard is None:
+                    conn.exec_driver_sql(ddl)
+                elif guard[0] != ddl:
+                    raise RuntimeError("Review migration stopped: unexpected review write guard requires manual reconciliation")
         conn.commit()
 
 

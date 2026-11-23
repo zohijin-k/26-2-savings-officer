@@ -14,6 +14,6 @@ CAS PR lanes and CI PR candidate lanes fail closed if required CAS or bulk 422 r
 
 The workflow runs on pull requests targeting main or the CAS feature branch and pushes to main. There are no path filters or deployment steps. No branch protection or required checks are changed. Zero teammate approvals is not a self-imposed gate; actual GitHub review requirements apply.
 
-This minimum CI does not replace full synthetic browser E2E, own OCR evaluation, device/screenreader checks, production migration rehearsal or deployment safety investigation. Main merge requires resolved production auto-deploy risk and all requested release gates. Never infer no external deployment from empty GitHub deployment history.
+This minimum CI does not replace full synthetic browser E2E, own OCR evaluation or device/screenreader checks. Final integration requires the requested source, CI and independent validation gates. Production DB migration and deployment are prohibited in this stabilization task. External deployment investigation is outside its scope and is not a merge gate. PRODUCTION_NOT_READY remains in force.
 
 CAS subjects must include mixed-writer SQLite guard and integrity-closure regressions. The backend lane fails closed if either required module is missing; integrity tests cover cross-application review preservation and DELETE/REPLACE ABA. Production migration and deployment are outside this workflow.

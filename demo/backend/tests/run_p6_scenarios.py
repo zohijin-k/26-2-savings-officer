@@ -533,14 +533,20 @@ def s8_needs_review(client) -> dict[str, Any]:
         "/api/officer/applications",
         params={"role": ROLE_PROVINCE, "ai_status": "NEEDS_REVIEW"},
     ).json()
-    decision = client.post(
+    from .run_p4_scenarios import current_revision
+    revision = current_revision(client, app_id, ROLE_PROVINCE)
+    decision_response = client.post(
         f"/api/officer/applications/{app_id}/decision",
         json={
             "role": ROLE_PROVINCE,
             "decision": "approve",
             "memo": "판독 신뢰도 낮아 원본 육안 확인함. 초본 주소이력 포함 확인 — 승인.",
+            "expected_revision": revision,
         },
-    ).json()
+    )
+    check("S8 CAS 결정 HTTP", decision_response.status_code, 200)
+    decision = decision_response.json()
+    check("S8 CAS revision 증가", decision["revision"], revision + 1)
 
     with models.get_session() as s:
         review = s.exec(

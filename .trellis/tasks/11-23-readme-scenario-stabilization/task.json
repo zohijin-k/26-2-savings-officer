@@ -1,0 +1,12 @@
+{
+  "id": "readme-scenario-stabilization",
+  "title": "Stabilize standalone scenarios and README facts",
+  "status": "in_progress",
+  "branch": "docs/phase8-readme-facts",
+  "base_branch": "main",
+  "meta": {
+    "execution_mode": "single-session-inline",
+    "authorization": "User explicitly requested reproduction, contract fixes, PR HEAD validation and merge commits on 2026-11-23",
+    "production": "PRODUCTION_NOT_READY"
+  }
+}

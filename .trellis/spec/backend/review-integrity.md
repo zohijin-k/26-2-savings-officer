@@ -27,3 +27,10 @@ Do not add an online bypass or remove guards for seed cleanup. Existing maintena
 Use synthetic temporary databases and block external network calls. Test full previous-record snapshots, no-overlap/scope/status/decision cases, multiple edges, rollback/retry, simultaneous submission, FAIL precedence and reverse officer warnings. Test all recursive_triggers and foreign_keys 0/1 combinations, Review/parent INSERT OR REPLACE, UPDATE OR REPLACE, UPSERT, rowid aliases, ORM delete/merge/bulk, actual cascade, normal CAS, stale 409, missing 428, invalid 422, and genuine legacy schema migration/reapplication/interruption. Real mixed-version HTTP must use real blockers, pipeline and DB writes; disclose any stubs separately. Official CI must include `test_integrity_closure.py`.
 
 Reference: https://www.sqlite.org/lang_conflict.html and https://www.sqlite.org/pragma.html#pragma_recursive_triggers.
+
+
+## Standalone scenario contracts
+
+Legacy P4/P6 scenario writes must send the exact revision from an authorized officer GET as `expected_revision`; bulk writes need `expected_revisions` keyed by every selected application ID. Assert successful status before reading response labels. Never hardcode a token or retry a stale decision. Preserve 428 (missing), 422 (invalid/boolean) and 409 (stale) with complete persisted Review/Application invariance. Source download scans remain strict; prose comments must not introduce forbidden source tokens.
+
+P16 must distinguish an observed issue-date field from receipt/interview event aliases: missing required issue labels remain NEEDS_REVIEW. Keep separate explicit-issue positive controls. P18 uncertain OCR dates produce LOW_OCR_CONFIDENCE review without fabricated definite date-bound violation codes; at the confidence threshold real bound violations still FAIL. Do not change runtime policies to satisfy obsolete scenarios.

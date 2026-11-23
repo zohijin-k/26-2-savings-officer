@@ -16,7 +16,7 @@
   "expect": {
     "upload_status": "UPLOADED",
     "upload_codes": [],
-    "ocr_confidence": null,
+    "ocr_confidence": 0.6,
     "how_to_fix": "",
     "can_submit": true,
     "final_status": "NEEDS_REVIEW",

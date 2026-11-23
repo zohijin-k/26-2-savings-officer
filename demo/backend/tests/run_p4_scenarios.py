@@ -768,15 +768,44 @@ def test_applicant_form_archive_access(client, ids) -> None:
 # ---------------------------------------------------------------- 7. 담당자 판단
 
 
+def current_revision(client, application_id: int, role: str) -> int:
+    """Use the revision actually observed by this officer; never retry a stale write."""
+    response = client.get(f"/api/officer/applications/{application_id}", params={"role": role})
+    assert response.status_code == 200, response.text
+    revision = response.json()["revision"]
+    assert type(revision) is int and revision >= 1
+    return revision
+
+
+def review_snapshot(application_id: int) -> tuple[dict, dict]:
+    with models.get_session() as session:
+        review = session.exec(select(models.Review).where(models.Review.application_id == application_id)).one()
+        application = session.get(models.Application, application_id)
+        assert application is not None
+        return review.model_dump(mode="json"), application.model_dump(mode="json")
+
+
 def test_decisions(client, ids) -> None:
     print("\n[8] 승인 / 반려 / 보류 + 담당자 메모")
 
     town_memo = "구비서류 5종 확인. 초본 주소이력 포함 확인함."
+    endpoint = f"/api/officer/applications/{ids['A']}/decision"
+    revision = current_revision(client, ids["A"], ROLE_TOWN)
+    before = review_snapshot(ids["A"])
+    body = {"role": ROLE_TOWN, "decision": "approve", "memo": town_memo}
+    check("revision 누락 차단", client.post(endpoint, json=body).status_code, 428)
+    check_true("revision 누락은 전체 심사/신청 불변", review_snapshot(ids["A"]) == before)
+    check("bool revision 차단", client.post(endpoint, json={**body, "expected_revision": True}).status_code, 422)
+    check_true("잘못된 revision은 전체 심사/신청 불변", review_snapshot(ids["A"]) == before)
     res = client.post(
         f"/api/officer/applications/{ids['A']}/decision",
-        json={"role": ROLE_TOWN, "decision": "approve", "memo": town_memo},
+        json={**body, "expected_revision": revision},
     )
     check("읍면동 승인", res.status_code, 200)
+    check("단건 revision 증가", res.json()["revision"], revision + 1)
+    saved = review_snapshot(ids["A"])
+    check("stale revision 차단", client.post(endpoint, json={**body, "expected_revision": revision}).status_code, 409)
+    check_true("stale revision은 저장된 판단 불변", review_snapshot(ids["A"]) == saved)
     check("읍면동 승인 표기", res.json()["label"], "서류 완비 확인")
 
     with models.get_session() as s:
@@ -793,14 +822,16 @@ def test_decisions(client, ids) -> None:
 
     rejected = client.post(
         f"/api/officer/applications/{ids['B']}/decision",
-        json={"role": ROLE_CITY, "decision": "reject", "memo": "중위소득 140% 초과."},
+        json={"role": ROLE_CITY, "decision": "reject", "memo": "중위소득 140% 초과.", "expected_revision": current_revision(client, ids["B"], ROLE_CITY)},
     )
+    check("시군 반려 HTTP", rejected.status_code, 200)
     check("시군 반려", rejected.json()["label"], "반려")
 
     held = client.post(
         f"/api/officer/applications/{ids['C']}/decision",
-        json={"role": ROLE_PROVINCE, "decision": "hold", "memo": "판독 신뢰도 낮음 — 육안 확인 필요."},
+        json={"role": ROLE_PROVINCE, "decision": "hold", "memo": "판독 신뢰도 낮음 — 육안 확인 필요.", "expected_revision": current_revision(client, ids["C"], ROLE_PROVINCE)},
     )
+    check("도 보류 HTTP", held.status_code, 200)
     check("도 보류", held.json()["label"], "보류")
     with models.get_session() as s:
         held_app = s.get(models.Application, ids["C"])
@@ -833,8 +864,10 @@ def test_decisions(client, ids) -> None:
             "decision": "approve",
             "memo": "2차 검증 완료.",
             "application_ids": [ids["D"]],
+            "expected_revisions": {str(ids["D"]): current_revision(client, ids["D"], ROLE_PROVINCE)},
         },
     )
+    check("일괄 승인 HTTP", bulk.status_code, 200)
     check("일괄 승인", bulk.json()["processed"], 1)
     check("일괄 승인 표기", bulk.json()["results"][0]["label"], "최종 선정")
     check("승인 건수", total(status="approve"), 2)

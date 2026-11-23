@@ -18,6 +18,7 @@ import os
 import random
 import shutil
 import tempfile
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -125,6 +126,18 @@ def codes(result) -> list[str]:
 
 # ------------------------------------------------------------------ 시나리오
 
+def check_issue_provenance(label, requirement, ocr, owner) -> None:
+    """An event-date alias cannot prove an unobserved issue-date label."""
+    result = check_document(requirement, ocr, None, "pdf", owner)
+    check(label + " 발급일 미판독 판정", result.status, "NEEDS_REVIEW")
+    check(label + " 발급일 미판독 사유", codes(result), ["REQUIRED_FIELD_UNREADABLE"])
+    check_true(label + " 실제 발급일 없음", "발급일" not in ocr.fields)
+    # Separately authored observed issue field: the same evidence can pass when
+    # the required label is present. Never substitute the event date in production.
+    issued = replace(ocr, fields={**ocr.fields, "발급일": "2026-04-30"})
+    check(label + " 명시적 발급일 판정", check_document(requirement, issued, None, "pdf", owner).status, "PASS")
+
+
 def test_text_pdfs(tmp: Path) -> None:
     from engine_v2.tools import make_job_docs
 
@@ -137,7 +150,7 @@ def test_text_pdfs(tmp: Path) -> None:
     check("결제일", ocr.fields.get("결제일"), gt["payment_date"])
     check("상호", ocr.fields.get("상호"), gt["store"])
     check_true("결제금액 원본 위치", ocr.bboxes.get("결제금액"))
-    check("영수증 판정", check_document(slots()["suit_1_receipt"], ocr, None, "pdf", IDENTITY).status, "PASS")
+    check_issue_provenance("영수증", slots()["suit_1_receipt"], ocr, IDENTITY)
 
     gt = save_generated(make_job_docs.interview_official, tmp / "interview.pdf")
     ocr = read_document(str(tmp / "interview.pdf"), DocType.INTERVIEW_CONFIRMATION)
@@ -146,7 +159,7 @@ def test_text_pdfs(tmp: Path) -> None:
     check("회사명", ocr.fields.get("회사명"), gt["company"])
     check_true("주소·연락처는 읽지 않음", not {"주소", "연락처", "이메일"} & set(ocr.fields))
     owner = Identity(gt["name"], date.fromisoformat(gt["birth_date"]))
-    check("면접확인서 판정", check_document(slots()["interview_1_confirmation"], ocr, None, "pdf", owner).status, "PASS")
+    check_issue_provenance("면접확인서", slots()["interview_1_confirmation"], ocr, owner)
 
     make_text_pdf(tmp / "exam_no_date.pdf", ["응 시 확 인 서", "성명 김가상", "종목명 정보처리기능사",
                                               "발급일자 2026. 4. 30.", "위 사실을 확인합니다."])
@@ -166,7 +179,7 @@ def test_image_receipt_without_title_word(tmp: Path) -> None:
     check("결제금액", ocr.fields.get("결제금액"), "45000")
     check("결제일 (26/03/15)", ocr.fields.get("결제일"), "2026-03-15")
     check("판독검증", ocr.fields.get("판독검증"), "9/9 통과")
-    check("판정", check_document(slots()["suit_1_receipt"], ocr, None, "pdf", IDENTITY).status, "PASS")
+    check_issue_provenance("이미지 영수증", slots()["suit_1_receipt"], ocr, IDENTITY)
 
 
 def test_lookalikes_are_wrong_documents(tmp: Path) -> None:

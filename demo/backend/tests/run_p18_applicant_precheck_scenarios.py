@@ -142,9 +142,15 @@ def test_uncertainty(complete):
             result = check_document(compared, ocr, identity=IDENTITY)
             code = "DOCUMENT_ISSUED_AFTER_APPLICATION" if future else "DOCUMENT_ISSUED_TOO_EARLY"
             check(f"날짜 {value} 신뢰도 {confidence}", result.status, status)
-            check("날짜 비교 코드", code in result.codes, True)
-            if status == "NEEDS_REVIEW":
-                review("낮은 날짜 판독", result, code)
+            # The engine compares bounds only for sufficiently readable dates.
+            # A low-confidence date yields LOW_OCR_CONFIDENCE, not a known violation.
+            certain = confidence >= threshold
+            check("확실한 날짜에만 범위 위반 코드", code in result.codes, certain)
+            if not certain:
+                review("낮은 날짜 판독", result, "LOW_OCR_CONFIDENCE")
+                check("불확실한 날짜는 확정 범위 위반 없음", bool({
+                    "DOCUMENT_ISSUED_TOO_EARLY", "DOCUMENT_ISSUED_AFTER_APPLICATION"
+                } & set(result.codes)), False)
         wrong = replace(complete, detected_doc_type=DocType.RESIDENT_CERTIFICATE, confidence=confidence, classification_confidence=confidence)
         result = check_document(req, wrong, identity=IDENTITY)
         check(f"종류 불일치 {confidence}", result.status, status)

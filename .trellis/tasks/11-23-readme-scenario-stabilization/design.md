@@ -1,0 +1,3 @@
+# Design
+
+Keep production CAS and date rules intact. P4/P6 observe authorized GET revisions and send exact single/bulk request tokens, checking successful writes and rejected-write invariance. P16 distinguishes missing observed issue labels from event aliases and retains explicit-label positive controls. P18 checks uncertain dates through LOW_OCR_CONFIDENCE, certain bounds through definite failures. P6 internal stored OCR assertions use internal fixture values while public projections stay hidden. Strict source scan remains unchanged. Use fresh isolated synthetic databases and sequential disk-guarded tests.

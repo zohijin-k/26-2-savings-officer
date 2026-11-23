@@ -27,6 +27,11 @@ function pdfjsAssets(): Plugin {
     name: 'pdfjs-assets',
     configureServer(server) {
       server.middlewares.use('/pdfjs', (req, res, next) => {
+        if ((req.url ?? '').split('?')[0] === '/LICENSE') {
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+          res.end(readFileSync(join(PDFJS_ROOT, 'LICENSE')))
+          return
+        }
         const [dir, file] = decodeURIComponent((req.url ?? '').split('?')[0]).replace(/^\//, '').split('/')
         if (!PDFJS_DIRS.includes(dir) || !file || file.includes('..')) return next()
         const path = join(PDFJS_ROOT, dir, file)
@@ -37,9 +42,13 @@ function pdfjsAssets(): Plugin {
       })
     },
     generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'pdfjs/LICENSE',
+        source: readFileSync(join(PDFJS_ROOT, 'LICENSE')),
+      })
       for (const dir of PDFJS_DIRS) {
         for (const file of readdirSync(join(PDFJS_ROOT, dir))) {
-          if (file.startsWith('LICENSE')) continue
           this.emitFile({
             type: 'asset',
             fileName: `pdfjs/${dir}/${file}`,

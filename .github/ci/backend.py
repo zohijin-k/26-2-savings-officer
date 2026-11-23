@@ -11,6 +11,8 @@ if revision.is_file():
     contract = root / 'demo/backend/tests/test_review_bulk_revision_contract.py'
     if not contract.is_file(): raise SystemExit('CAS source lacks bulk 422 contract correction')
     names += ['review_revision', 'review_bulk_revision_contract']
+    if not (root / 'demo/backend/tests/test_review_write_guard.py').is_file(): raise SystemExit('CAS source lacks mixed-writer SQLite guard tests')
+    names += ['review_write_guard', 'integrity_closure']
 paths = [f'demo/backend/tests/test_{name}.py' for name in names]
 for path in paths:
     if not (root / path).is_file(): raise SystemExit(f'Required test missing: {path}')

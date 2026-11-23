@@ -49,7 +49,7 @@ OCR은 서류 사진이나 PDF에서 글자를 읽는 기술입니다.
 
 ## 개발 환경과 실행
 
-Python 3.12 이상, Node.js 20.19 이상이 필요합니다. macOS와 Linux에서 백엔드·프론트엔드를 실행할 수 있습니다. 합성 담당자 시연은 시연 고정 응답을 사용합니다. 로컬 OCR 자체를 사용할 때는 `python engine_v2/tools/fetch_own_models.py`로 모델을 설치합니다.
+Python 3.12 이상, Node.js 22.13 이상(`npm test`는 22.18 이상)이 필요합니다. macOS와 Linux에서 백엔드·프론트엔드를 실행할 수 있습니다. 합성 담당자 시연은 시연 고정 응답을 사용합니다. 로컬 OCR 자체를 사용할 때는 `python engine_v2/tools/fetch_own_models.py`로 모델을 설치합니다.
 
 저장소 루트에서 설치하고 시연 샘플을 생성합니다.
 
@@ -81,7 +81,7 @@ cd demo/frontend
 npm run dev
 ```
 
-브라우저에서 <http://localhost:5173>을 열면 담당자 로그인 칸이 나오고, 로그인하면 두배적금 담당자 화면으로 들어갑니다. 신청 건을 확인 필요 · 적합 · 처리 완료 탭으로 나눈 표로 표시합니다. FastAPI 문서는 <http://localhost:8000/docs>입니다.
+브라우저에서 <http://localhost:5173>을 열면 담당자 로그인 칸이 나오고, 로그인하면 두배적금 담당자 화면으로 들어갑니다. 신청 건을 확인 필요 · 적합 · 처리 완료 · 반려 탭으로 나눈 표로 표시합니다. FastAPI 문서는 <http://localhost:8000/docs>입니다.
 
 합성 시연 데이터를 넣거나 그 데이터만 정리할 때는 저장소 루트에서 실행합니다.
 

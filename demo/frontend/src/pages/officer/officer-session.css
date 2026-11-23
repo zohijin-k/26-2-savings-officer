@@ -4,6 +4,8 @@
 .officer-login__eyebrow { margin: 0; color: var(--ui-color-text-muted); font-size: var(--ui-fs-13); font-weight: 600; }
 .officer-login h1 { margin: 0; color: var(--ui-color-text); font-size: var(--ui-fs-24); font-weight: var(--ui-font-weight-bold); line-height: var(--ui-line-height-heading); }
 .officer-login form { display: grid; gap: var(--ui-space-2); }
+/* Firefox·Safari는 비밀번호 입력의 기본 폭을 열 최소 폭으로 잡아 320px 화면에서 카드가 넘친다. 열이 줄어들 수 있게 한다. */
+.officer-login__card, .officer-login form { grid-template-columns: minmax(0, 1fr); }
 .officer-login p { margin: 0; font-size: var(--ui-fs-15); line-height: var(--ui-line-height-body); }
 .officer-login [role=alert] { color: var(--ui-color-danger-text); }
 .officer-login__status { color: var(--ui-color-text-muted); }

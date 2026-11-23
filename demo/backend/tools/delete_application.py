@@ -1,4 +1,6 @@
-"""신청 건 하나를 DB와 업로드 저장소에서 완전히 지운다. **파괴적 스크립트다.**
+"""심사 기록이 없는 신청 건을 DB와 업로드 저장소에서 지운다. **파괴적 스크립트다.**
+
+Review가 있는 신청은 보존 정책으로 거부한다. 승인된 오프라인 정비 절차는 별도다.
 
 저장소 루트에서:
 
@@ -130,6 +132,10 @@ def main(argv=None) -> int:
         if not args.yes:
             print("\n미리보기입니다. 실제로 지우려면 --yes 를 붙여 다시 실행하세요.")
             return 0
+
+        if any(isinstance(r, models.Review) for r in rows):
+            print("심사 기록 보존 정책으로 삭제할 수 없습니다. 별도 오프라인 정비 절차가 필요합니다.", file=sys.stderr)
+            return 2
 
         for r in rows:
             s.delete(r)

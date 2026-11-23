@@ -97,22 +97,18 @@ def test_repeat_does_not_change_existing_rows_or_files(isolated_demo, capsys):
     assert tool._snapshot() == before and stored_files(isolated_demo) == files_before
 
 
-def test_clean_removes_only_owned_rows_and_files_and_is_repeatable(isolated_demo, capsys):
+def test_clean_retains_reviewed_seed_records_and_seed_is_idempotent(isolated_demo, capsys):
     other_id = unrelated(isolated_demo)
-    before = tool._snapshot()
-    files_before = stored_files(isolated_demo)
     assert tool.main([]) == 0
     payload(capsys)
-    assert all(tool._snapshot().get(key) == value for key, value in before.items())
-    assert tool.main(["--clean"]) == 0
-    result = payload(capsys)
-    assert result["deleted_applications"] == 2 and result["deleted_files"] == 14
-    assert tool._snapshot() == before and stored_files(isolated_demo) == files_before
+    before, files_before = tool._snapshot(), stored_files(isolated_demo)
+    for _ in range(2):
+        assert tool.main(["--clean"]) == 2
+        assert capsys.readouterr().out == "error: REVIEW_RETENTION_REQUIRED\n"
+        assert tool._snapshot() == before and stored_files(isolated_demo) == files_before
     assert common.load_application(other_id).status == "submitted"
-    assert tool.main(["--clean"]) == 0
-    assert payload(capsys) == {"deleted_applications": 0, "deleted_rows": 0, "deleted_files": 0}
     assert tool.main([]) == 0
-    assert payload(capsys)["created"] == 2
+    assert payload(capsys)["created"] == 0
 
 
 def test_clean_preserves_shared_and_unrelated_storage_files(isolated_demo, capsys):
@@ -128,8 +124,8 @@ def test_clean_preserves_shared_and_unrelated_storage_files(isolated_demo, capsy
     original = shared.read_bytes()
     extra = isolated_demo / "storage" / "signatures" / "FAKE-untouched.png"
     extra.write_bytes(b"FAKE-unrelated-signature")
-    assert tool.main(["--clean"]) == 0
-    payload(capsys)
+    assert tool.main(["--clean"]) == 2
+    assert capsys.readouterr().out == "error: REVIEW_RETENTION_REQUIRED\n"
     assert shared.read_bytes() == original and extra.read_bytes() == b"FAKE-unrelated-signature"
 
 
@@ -147,7 +143,7 @@ def test_creation_failure_rolls_back_new_rows_and_files(isolated_demo, capsys, m
     assert tool._snapshot() == before and stored_files(isolated_demo) == files_before
 
 
-def test_clean_failure_restores_rows_and_files(isolated_demo, capsys, monkeypatch):
+def test_reviewed_cleanup_rejects_before_any_delete(isolated_demo, capsys, monkeypatch):
     assert tool.main([]) == 0
     payload(capsys)
     before, files_before = tool._snapshot(), stored_files(isolated_demo)
@@ -158,7 +154,7 @@ def test_clean_failure_restores_rows_and_files(isolated_demo, capsys, monkeypatc
         return original(self, instance)
     monkeypatch.setattr(models.Session, "delete", fail_delete)
     assert tool.main(["--clean"]) == 2
-    assert capsys.readouterr().out == "error: SEED_ERROR\n"
+    assert capsys.readouterr().out == "error: REVIEW_RETENTION_REQUIRED\n"
     assert tool._snapshot() == before and stored_files(isolated_demo) == files_before
 
 
@@ -244,7 +240,7 @@ def test_submission_side_effect_on_existing_data_is_rolled_back(isolated_demo, c
     assert tool._snapshot() == before and stored_files(isolated_demo) == files_before
 
 
-def test_clean_rejects_owned_path_referencing_unrelated_storage(isolated_demo, capsys):
+def test_reviewed_cleanup_retention_precedes_path_cleanup(isolated_demo, capsys):
     unrelated(isolated_demo)
     assert tool.main([]) == 0
     result = payload(capsys)
@@ -256,7 +252,7 @@ def test_clean_rejects_owned_path_referencing_unrelated_storage(isolated_demo, c
         session.commit()
     before, files_before = tool._snapshot(), stored_files(isolated_demo)
     assert tool.main(["--clean"]) == 2
-    assert capsys.readouterr().out == "error: STORAGE_UNSAFE\n"
+    assert capsys.readouterr().out == "error: REVIEW_RETENTION_REQUIRED\n"
     assert tool._snapshot() == before and stored_files(isolated_demo) == files_before
 
 
@@ -268,9 +264,9 @@ def test_clean_removes_later_owned_files_but_preserves_other_names(isolated_demo
     own.write_bytes(b"FAKE-later-owned")
     neighbor = own.parent.parent / f"{normal.application_no}-neighbor.pdf"
     neighbor.write_bytes(b"FAKE-unrelated-neighbor")
-    assert tool.main(["--clean"]) == 0
-    assert payload(capsys)["deleted_files"] == 15
-    assert not own.exists() and neighbor.read_bytes() == b"FAKE-unrelated-neighbor"
+    assert tool.main(["--clean"]) == 2
+    assert capsys.readouterr().out == "error: REVIEW_RETENTION_REQUIRED\n"
+    assert own.read_bytes() == b"FAKE-later-owned" and neighbor.read_bytes() == b"FAKE-unrelated-neighbor"
 
 
 
@@ -286,8 +282,8 @@ def test_dedicated_numbers_preserve_orphaned_ordinary_api_artifacts(isolated_dem
         assert app.application_no.startswith(tool.NUMBER_PREFIX)
         assert app.application_no != "DS-2026-000001"
     assert orphan.read_bytes() == b"FAKE-old-synthetic-scenario-artifact"
-    assert tool.main(["--clean"]) == 0
-    assert payload(capsys)["deleted_applications"] == 2
+    assert tool.main(["--clean"]) == 2
+    assert capsys.readouterr().out == "error: REVIEW_RETENTION_REQUIRED\n"
     assert orphan.read_bytes() == b"FAKE-old-synthetic-scenario-artifact"
 
 
@@ -306,9 +302,10 @@ def test_seed_namespace_works_with_gaps_in_ordinary_api_numbers(isolated_demo, c
     assert all(tool._snapshot().get(key) == value for key, value in before.items())
     for item in result["applications"].values():
         assert common.load_application(item["application_id"]).application_no.startswith(tool.NUMBER_PREFIX)
-    assert tool.main(["--clean"]) == 0
-    assert payload(capsys)["deleted_applications"] == 2
-    assert tool._snapshot() == before and stored_files(isolated_demo) == files_before
+    assert tool.main(["--clean"]) == 2
+    assert capsys.readouterr().out == "error: REVIEW_RETENTION_REQUIRED\n"
+    assert all(tool._snapshot().get(key) == value for key, value in before.items())
+    assert all(stored_files(isolated_demo).get(key) == value for key, value in files_before.items())
 
 
 def test_seed_numbers_are_short_enough_for_the_list_column(isolated_demo, capsys):
@@ -319,5 +316,5 @@ def test_seed_numbers_are_short_enough_for_the_list_column(isolated_demo, capsys
     assert all(number.startswith(tool.NUMBER_PREFIX) for number in numbers)
     assert all(len(number) == len(tool.NUMBER_PREFIX) + tool.NUMBER_SUFFIX_LEN for number in numbers)
     assert len(set(numbers)) == len(numbers)
-    assert tool.main(["--clean"]) == 0
-    assert payload(capsys)["deleted_applications"] == 2
+    assert tool.main(["--clean"]) == 2
+    assert capsys.readouterr().out == "error: REVIEW_RETENTION_REQUIRED\n"

@@ -1,7 +1,9 @@
 """Explicit synthetic fixture writer. Never imported by the audit CLI/reader.
 
-Uses actual repository SQLModel DDL in a newly created private temporary root;
-never calls init_db, get_session, default criteria, or the default DB engine.
+Uses repository columns and foreign keys in a newly created private temporary root.
+Review cardinality represents a pre-CAS snapshot, including historical duplicates;
+production metadata and its current uniqueness constraint remain unchanged.
+Never calls init_db, get_session, default criteria, or the default DB engine.
 """
 from __future__ import annotations
 
@@ -37,6 +39,7 @@ def seal(root: Path) -> None:
 
 
 def create_fixture(parent: Path | None = None) -> Path:
+    from sqlalchemy import MetaData, UniqueConstraint
     from sqlmodel import SQLModel, create_engine
     from demo.backend import models
 
@@ -44,7 +47,17 @@ def create_fixture(parent: Path | None = None) -> Path:
     root.chmod(0o700)
     db = root / 'synthetic.sqlite3'
     engine = create_engine('sqlite:///' + str(db))
-    SQLModel.metadata.create_all(engine)
+    # The read-only auditor must still inspect pre-CAS duplicate Review history.
+    # Copy metadata so fixture generation cannot weaken the production schema.
+    legacy_metadata = MetaData()
+    for table in SQLModel.metadata.sorted_tables:
+        table.to_metadata(legacy_metadata)
+    review = legacy_metadata.tables['review']
+    for constraint in tuple(review.constraints):
+        if (isinstance(constraint, UniqueConstraint)
+                and tuple(column.name for column in constraint.columns) == ('application_id',)):
+            review.constraints.remove(constraint)
+    legacy_metadata.create_all(engine)
     engine.dispose()
     versions = []
     with sqlite3.connect(db) as conn:

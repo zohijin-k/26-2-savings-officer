@@ -1,3 +1,4 @@
+import { confirmOfficerLeave } from './pages/officer/review-navigation.ts'
 import { useState } from 'react'
 import logo from './assets/brand/jb-logo.png'
 import OfficerConsole from './pages/officer/OfficerConsole.tsx'
@@ -13,8 +14,9 @@ export default function App() {
       <header className="shell">
         <div className="shell__inner">
           <button className="shell__home" type="button" aria-label="처음으로" onClick={() => {
+            if (!confirmOfficerLeave()) return
             const mock = new URLSearchParams(window.location.search).get('mock') === '1'
-            window.history.pushState(null, '', mock ? '/officer?mock=1' : '/officer')
+            window.history.pushState({ officerIndex: Number(window.history.state?.officerIndex ?? 0) + 1 }, '', mock ? '/officer?mock=1' : '/officer')
             setHomeKey((value) => value + 1)
           }}><img className="shell__logo" src={logo} width={275} height={67} alt="전북특별자치도 2026 전북청년 함께 두배적금" /></button>
           <span className="shell__role">담당자</span>

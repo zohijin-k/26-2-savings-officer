@@ -699,7 +699,7 @@ def _append_household_link(
         reasons.append({
             "stage": "stage2_eligibility",
             "code": "HEALTH_INSURANCE_HOUSEHOLD_OVERLAP",
-            "message": "같은 사업·같은 연도 신청서의 건강보험 자격확인서 가구원 정보가 일부 겹쳐 담당자 재검토가 필요합니다.",
+            "message": f"같은 사업·같은 연도 연관 신청 {other.application_no}의 건강보험 자격확인서 가구원 정보가 일부 겹쳐 담당자 재검토가 필요합니다.",
             "doc_type": str(DocType.NHIS_QUALIFICATION),
             "related_application_id": other.id,
             "related_application_no": other.application_no,
@@ -716,7 +716,7 @@ def _append_household_link(
 
 
 def _link_overlapping_households(app: Application, current_review: Review) -> None:
-    """같은 사업·신청연도 자격확인서의 겹치는 가구원을 양쪽 담당자 기록에 링크한다."""
+    """겹치는 가구원을 새 심사에만 기록한다. 기존 심사와 결정은 변경하지 않는다."""
     if get_program(app.program_code).selection != "scored":
         return
     with get_session() as s:
@@ -744,33 +744,15 @@ def _link_overlapping_households(app: Application, current_review: Review) -> No
         for document in docs:
             docs_by_app.setdefault(document.application_id, []).append(document)
 
-        current_changed = False
         for candidate in candidates:
             candidate_docs = docs_by_app.get(candidate.id or 0, [])
             candidate_members = qualification_members([document_fact(d) for d in candidate_docs])
             shared = overlap_members(current_members, candidate_members)
             if not shared:
                 continue
-            previous = s.exec(
-                select(Review).where(Review.application_id == candidate.id)
-            ).first()
-            if previous is None:
-                continue
+            # The applicant owns only this submission. Even a candidate without
+            # a Review still requires overlap checking; never auto-PASS it.
             _append_household_link(current_review, candidate, shared)
-            _append_household_link(previous, app, shared)
-            candidate.status = STATUS_REVIEWING
-            candidate.updated_at = datetime.now()
-            # 기존 담당자 결정은 새 근거가 발견되었으므로 다시 확인받는다.
-            previous.officer_role = None
-            previous.officer_decision = None
-            previous.officer_memo = None
-            previous.decided_at = None
-            s.add(previous)
-            s.add(candidate)
-            current_changed = True
-        if current_changed:
-            s.commit()
-
 
 @router.post("/{application_id}/submit")
 @serialized_application_write
@@ -809,11 +791,9 @@ def submit(application_id: int) -> dict[str, Any]:
         row.written_forms_archive_path = archive_path
         row.written_forms_archive_count = archive_count
         s.add(row)
-        # 데모는 재제출 시나리오를 다루지 않는다. 기존 심사 결과는 지우고 다시 쓴다.
-        for old in s.exec(
-            select(Review).where(Review.application_id == application_id)
-        ).all():
-            s.delete(old)
+        # A draft must never replace an existing review or reset its revision.
+        if s.exec(select(Review).where(Review.application_id == application_id)).first():
+            raise HTTPException(409, "이미 심사 기록이 있는 신청 건입니다.")
         s.add(review)
         s.commit()
         submitted_at = row.submitted_at

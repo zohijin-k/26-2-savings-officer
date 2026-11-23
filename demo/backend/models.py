@@ -19,7 +19,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from sqlalchemy import JSON, Column, UniqueConstraint
+from sqlalchemy import JSON, Column, Integer, UniqueConstraint, text
+from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import Field, Session, SQLModel, create_engine
 
 DB_PATH = Path(__file__).resolve().parents[1] / "demo.db"
@@ -146,6 +147,76 @@ class SubsidyItem(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now)
 
 
+_review_revision_column = Column("revision", Integer, nullable=False, default=1, server_default=text("1"))
+
+# Mixed-version guard enforced by SQLite itself. Every current writer (ORM
+# version_id_col flushes and review_revision.update_review) advances revision by
+# exactly one. Writers that predate CAS (an old backend binary still running
+# against this file, ad-hoc SQL) never touch revision, so their UPDATE would
+# silently overwrite newer officer data; this trigger rejects it instead. It does
+# not cover separate DB copies/hosts, and anyone able to drop triggers bypasses it.
+REVIEW_WRITE_GUARD_NAME = "review_write_guard_update"
+REVIEW_WRITE_GUARD_MESSAGE = "REVIEW_WRITE_GUARD: review update must advance revision by exactly 1"
+REVIEW_WRITE_GUARD_DDL = (
+    f"CREATE TRIGGER {REVIEW_WRITE_GUARD_NAME} BEFORE UPDATE ON review FOR EACH ROW "
+    "WHEN NEW.revision IS NOT OLD.revision + 1 "
+    f"BEGIN SELECT RAISE(ABORT, '{REVIEW_WRITE_GUARD_MESSAGE}'); END"
+)
+# REPLACE/UPSERT/duplicate INSERT would delete or rewrite an existing review (and
+# reset revision) without firing the UPDATE guard. Creation stays allowed only
+# when the application has no review yet. Separate lifetime guards below also
+# forbid deletion and reassignment, including UPDATE OR REPLACE conflicts.
+REVIEW_INSERT_GUARD_NAME = "review_write_guard_insert"
+REVIEW_INSERT_GUARD_DDL = (
+    f"CREATE TRIGGER {REVIEW_INSERT_GUARD_NAME} BEFORE INSERT ON review FOR EACH ROW "
+    "WHEN EXISTS (SELECT 1 FROM review WHERE application_id = NEW.application_id OR id = NEW.id) "
+    "BEGIN SELECT RAISE(ABORT, 'REVIEW_WRITE_GUARD: review already exists for this application'); END"
+)
+# A Review's (id, application_id) is its immutable lifetime identity. Retain
+# guard-v3 definitions byte-for-byte for an additive legacy migration. These
+# guards do not rely on connection-local recursive_triggers or foreign_keys.
+REVIEW_DELETE_GUARD_NAME = "review_write_guard_delete"
+REVIEW_DELETE_GUARD_DDL = (
+    f"CREATE TRIGGER {REVIEW_DELETE_GUARD_NAME} BEFORE DELETE ON review FOR EACH ROW "
+    "BEGIN SELECT RAISE(ABORT, 'REVIEW_WRITE_GUARD: review deletion is forbidden'); END"
+)
+REVIEW_IDENTITY_GUARD_NAME = "review_write_guard_identity"
+REVIEW_IDENTITY_GUARD_DDL = (
+    f"CREATE TRIGGER {REVIEW_IDENTITY_GUARD_NAME} BEFORE UPDATE ON review FOR EACH ROW "
+    "WHEN NEW.id IS NOT OLD.id OR NEW.application_id IS NOT OLD.application_id "
+    "BEGIN SELECT RAISE(ABORT, 'REVIEW_WRITE_GUARD: review identity is immutable'); END"
+)
+REVIEW_WRITE_GUARDS = (
+    (REVIEW_WRITE_GUARD_NAME, REVIEW_WRITE_GUARD_DDL),
+    (REVIEW_INSERT_GUARD_NAME, REVIEW_INSERT_GUARD_DDL),
+    (REVIEW_DELETE_GUARD_NAME, REVIEW_DELETE_GUARD_DDL),
+    (REVIEW_IDENTITY_GUARD_NAME, REVIEW_IDENTITY_GUARD_DDL),
+)
+
+# Preserve the owner of a retained Review even on legacy FK-OFF connections.
+# A parent REPLACE can bypass DELETE triggers when recursive_triggers is OFF,
+# so protect its INSERT as well as explicit DELETE and identity UPDATE.
+REVIEW_PARENT_GUARDS = (
+    ("review_parent_guard_delete",
+     "CREATE TRIGGER review_parent_guard_delete BEFORE DELETE ON application FOR EACH ROW "
+     "WHEN EXISTS (SELECT 1 FROM review WHERE application_id = OLD.id) "
+     "BEGIN SELECT RAISE(ABORT, 'REVIEW_WRITE_GUARD: reviewed application deletion is forbidden'); END"),
+    ("review_parent_guard_insert",
+     "CREATE TRIGGER review_parent_guard_insert BEFORE INSERT ON application FOR EACH ROW "
+     "WHEN EXISTS (SELECT 1 FROM review WHERE application_id = NEW.id) "
+     "OR EXISTS (SELECT 1 FROM application a JOIN review r ON r.application_id = a.id "
+     "WHERE a.application_no = NEW.application_no) "
+     "BEGIN SELECT RAISE(ABORT, 'REVIEW_WRITE_GUARD: reviewed application replacement is forbidden'); END"),
+    ("review_parent_guard_identity",
+     "CREATE TRIGGER review_parent_guard_identity BEFORE UPDATE ON application FOR EACH ROW "
+     "WHEN NEW.id IS NOT OLD.id AND (EXISTS (SELECT 1 FROM review WHERE application_id = OLD.id) "
+     "OR EXISTS (SELECT 1 FROM review WHERE application_id = NEW.id)) "
+     "OR EXISTS (SELECT 1 FROM application a JOIN review r ON r.application_id = a.id "
+     "WHERE a.id != OLD.id AND a.application_no = NEW.application_no) "
+     "BEGIN SELECT RAISE(ABORT, 'REVIEW_WRITE_GUARD: reviewed application identity is immutable'); END"),
+)
+
+
 class Review(SQLModel, table=True):
     """제출 1건의 심사 결과.
 
@@ -157,6 +228,10 @@ class Review(SQLModel, table=True):
     마이페이지 응답(`/status`)은 이 테이블의 점수 컬럼을 절대 싣지 않는다.
     """
 
+    # All ORM updates (including system evidence changes) use SQLAlchemy's CAS.
+    __mapper_args__ = {"version_id_col": _review_revision_column}
+    __table_args__ = (UniqueConstraint("application_id", name="uq_review_application"),)
+    revision: int = Field(default=1, sa_column=_review_revision_column)
     id: Optional[int] = Field(default=None, primary_key=True)
     application_id: int = Field(index=True, foreign_key="application.id")
     #: PASS | FAIL | NEEDS_REVIEW (엔진 최종 판정)
@@ -229,6 +304,13 @@ def _add_missing_columns() -> None:
     from sqlalchemy import text
 
     with engine.connect() as conn:
+        # Reserve the writer before inspecting legacy rows; SQLite DDL rolls back
+        # with this explicit transaction. Never repair duplicate reviews by deletion.
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
+        if conn.exec_driver_sql("SELECT 1 FROM sqlite_master WHERE type='table' AND name='review'").first():
+            duplicate = conn.exec_driver_sql("SELECT application_id FROM review GROUP BY application_id HAVING COUNT(*) > 1 LIMIT 1").first()
+            if duplicate:
+                raise RuntimeError("Review migration stopped: duplicate application reviews require manual reconciliation")
         for table in SQLModel.metadata.sorted_tables:
             existing = {
                 row[1] for row in conn.execute(text(f"PRAGMA table_info({table.name})"))
@@ -238,8 +320,27 @@ def _add_missing_columns() -> None:
             for column in table.columns:
                 if column.name in existing:
                     continue
-                ddl = f"ALTER TABLE {table.name} ADD COLUMN {column.name} {column.type}"
+                ddl = ("ALTER TABLE review ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"
+                       if table.name == "review" and column.name == "revision"
+                       else f"ALTER TABLE {table.name} ADD COLUMN {column.name} {column.type}")
                 conn.execute(text(ddl))
+        if conn.exec_driver_sql("SELECT 1 FROM sqlite_master WHERE type='table' AND name='review'").first():
+            invalid = conn.exec_driver_sql("SELECT 1 FROM review WHERE revision IS NULL OR typeof(revision) != 'integer' OR revision < 1 LIMIT 1").first()
+            if invalid:
+                raise RuntimeError("Review migration stopped: invalid revision requires manual reconciliation")
+            conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS uq_review_application ON review(application_id)")
+            has_application = conn.exec_driver_sql(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='application'"
+            ).first()
+            guards = REVIEW_WRITE_GUARDS + (REVIEW_PARENT_GUARDS if has_application else ())
+            for name, ddl in guards:
+                guard = conn.exec_driver_sql(
+                    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?", (name,)
+                ).first()
+                if guard is None:
+                    conn.exec_driver_sql(ddl)
+                elif guard[0] != ddl:
+                    raise RuntimeError("Review migration stopped: unexpected review write guard requires manual reconciliation")
         conn.commit()
 
 
@@ -312,6 +413,9 @@ def session_transaction(*, join_existing: bool = False, busy_timeout_ms: int | N
                 # pooled read/editor sessions after an async reservation.
                 if not connection.invalidated:
                     connection.exec_driver_sql(f"PRAGMA busy_timeout={int(previous_timeout)}")
+    except StaleDataError:
+        raise HTTPException(409, {"code": "REVIEW_REVISION_CONFLICT",
+                                  "message": "심사 기록이 변경되었습니다. 최신 상태를 확인해 주세요."}) from None
     except (DBAPIError, PoolTimeoutError) as exc:
         # Busy/locked are retryable. Other operational failures stay sanitized,
         # but do not advertise retries for corruption/schema/read-only errors.

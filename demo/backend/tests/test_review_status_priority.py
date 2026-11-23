@@ -98,7 +98,7 @@ def assert_officer_views(client, application_id, final, stage2):
 
 @pytest.mark.parametrize("previous_failure", ["none", "stage1", "stage2"])
 @pytest.mark.parametrize("current_failure", [False, True])
-def test_overlap_preserves_both_reviews_and_reopens_officer_decision(
+def test_overlap_preserves_existing_review_and_warns_officer(
         client, monkeypatch, previous_failure, current_failure):
     authenticate_officer(client, monkeypatch)
     previous = make_application(premium=0)
@@ -126,29 +126,24 @@ def test_overlap_preserves_both_reviews_and_reopens_officer_decision(
     for application in (previous, current):
         alter_document(application, DocType.NHIS_QUALIFICATION, put_members)
     current_review = _run_review(current)
+    before = old_review.model_dump()
     _link_overlapping_households(current, current_review)
     # Repeat discovery to check that reason/link deduplication keeps every other reason.
     _link_overlapping_households(current, current_review)
     current_status = "FAIL" if current_failure else "NEEDS_REVIEW"
     assert_status(current_review, current_status, current_status)
     store_submitted(current, current_review, "FAKE-CURRENT-000")
-    previous_status = "NEEDS_REVIEW" if previous_failure == "none" else "FAIL"
-    previous_stage2 = "FAIL" if previous_failure == "stage2" else "NEEDS_REVIEW"
     with models.get_session() as session:
         saved = session.get(models.Review, old_review.id)
-        assert_status(saved, previous_status, previous_stage2)
-        assert session.get(models.Application, previous.id).status == models.STATUS_REVIEWING
-        assert saved.stage1_status == old_review.stage1_status
-        assert saved.officer_role is saved.officer_decision is saved.officer_memo is saved.decided_at is None
-        for review in (saved, current_review):
-            payload = review.review_payload_json
-            assert len(payload["related_applications"]) == len(payload["household_overlap_details"]) == 1
-            codes = [row["code"] for row in payload["reasons"]]
-            assert codes.count("HEALTH_INSURANCE_HOUSEHOLD_OVERLAP") == 1
-        if previous_failure != "none":
-            assert saved.review_payload_json["reasons"][0]["code"] == "FAKE_EXISTING_FAILURE"
-        assert "INCOME_UNDETERMINED" in {row["code"] for row in current_review.review_payload_json["reasons"]}
-    assert_officer_views(client, previous.id, previous_status, previous_stage2)
+        assert saved.model_dump() == before
+        assert session.get(models.Application, previous.id).status == models.STATUS_SUBMITTED
+        payload = current_review.review_payload_json
+        assert len(payload["related_applications"]) == len(payload["household_overlap_details"]) == 1
+        assert [r["code"] for r in payload["reasons"]].count("HEALTH_INSURANCE_HOUSEHOLD_OVERLAP") == 1
+        assert "INCOME_UNDETERMINED" in {r["code"] for r in payload["reasons"]}
+    previous_status = "PASS" if previous_failure == "none" else "FAIL"
+    detail = assert_officer_views(client, previous.id, previous_status, old_review.stage2_status)
+    assert any(r["code"] == "HEALTH_INSURANCE_HOUSEHOLD_RECHECK" for r in detail["ai"]["reasons"])
     assert_officer_views(client, current.id, current_status, current_status)
 
 

@@ -114,7 +114,7 @@ const entries = new Map<number, MockEntry>(SEEDS.map((seed, index) => {
   const ai: DocStatus = statuses.includes('FAIL') || missing ? 'FAIL' : statuses.includes('NEEDS_REVIEW') ? 'NEEDS_REVIEW' : 'PASS'
   const sheet = scoreSheet(seed.scores, documents[0]?.document_id ?? 0, index)
   const row: OfficerRow = {
-    application_id: id, application_no: `SYN-2026-${String(index + 1).padStart(6, '0')}`, name: seed.name,
+    revision: 1, application_id: id, application_no: `SYN-2026-${String(index + 1).padStart(6, '0')}`, name: seed.name,
     program_code: 'double_savings', region: seed.region, town: seed.town, ai_status: ai,
     ai_status_label: { PASS: '적합', NEEDS_REVIEW: '확인필요', FAIL: '부적합' }[ai],
     total_score: sheet.total, max_total: 100, missing_count: missing ? 1 : 0, submitted_at: seed.submitted,
@@ -129,7 +129,7 @@ const entries = new Map<number, MockEntry>(SEEDS.map((seed, index) => {
     }),
   }
   const detail: ReviewDetailData = {
-    application_id: id, application_no: row.application_no, name: seed.name, program_code: 'double_savings',
+    revision: 1, application_id: id, application_no: row.application_no, name: seed.name, program_code: 'double_savings',
     region: seed.region, town: seed.town,
     ai: {
       final_status: ai,
@@ -146,6 +146,8 @@ function apply(id: number, decision: DecisionKey, memo: string, role: RoleKey): 
   const entry = entries.get(id)
   if (!entry) throw new Error('해당 합성 신청이 없습니다.')
   const label = ROLES[role].actions.find((action) => action.key === decision)?.result_label ?? decision
+  entry.detail.revision = (entry.detail.revision ?? 1) + 1
+  entry.row.revision = entry.detail.revision
   entry.row.decision = decision
   entry.row.decision_label = label
   entry.detail.decision = { decision, memo, label }

@@ -216,13 +216,13 @@ def test_overlapping_households_link_both_applications(tmp: Path) -> None:
 
     _link_overlapping_households(current, current_review)
 
-    check("신청서 A가 재검토로 변경", _review_status(previous.id or 0), "NEEDS_REVIEW")
+    check("기존 신청서 A의 판정 보존", _review_status(previous.id or 0), "PASS")
     check("새 신청서 재검토", current_review.final_status, "NEEDS_REVIEW")
     previous_payload = _review_payload(previous.id or 0)
     current_links = current_review.review_payload_json["related_applications"]
     check("성명만 같고 생년월일이 다르면 연결 안 함", [row["application_no"] for row in current_links], ["P13-A"])
     check("양쪽 신청서 링크 상호 참조", current_links[0]["application_no"], "P13-A")
-    check("이전 신청서도 새 신청서 링크", previous_payload["related_applications"][0]["application_no"], "P13-D")
+    check("기존 심사 payload 불변", previous_payload.get("related_applications", []), [])
     check("겹친 가구원만 근거에 포함", current_review.review_payload_json["household_overlap_details"][0]["members"], [first_members[0]])
     check("주소는 비교 근거에 포함 안 됨", "주소" in json.dumps(current_review.review_payload_json, ensure_ascii=False), False)
 

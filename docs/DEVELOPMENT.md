@@ -49,7 +49,7 @@ OCR은 서류 사진이나 PDF에서 글자를 읽는 기술입니다.
 
 ## 개발 환경과 실행
 
-Python 3.12 이상, Node.js 22.13 이상(`npm test`는 22.18 이상)이 필요합니다. macOS와 Linux에서 백엔드·프론트엔드를 실행할 수 있습니다. 합성 담당자 시연은 시연 고정 응답을 사용합니다. 로컬 OCR 자체를 사용할 때는 `python engine_v2/tools/fetch_own_models.py`로 모델을 설치합니다.
+Python 3.12 이상, Node.js 22.13 이상(`node --test tests/`는 22.18 이상)이 필요합니다. macOS와 Linux에서 백엔드·프론트엔드를 실행할 수 있습니다. 합성 담당자 시연은 시연 고정 응답을 사용합니다. 로컬 OCR 자체를 사용할 때는 `python engine_v2/tools/fetch_own_models.py`로 모델을 설치합니다.
 
 저장소 루트에서 설치하고 시연 샘플을 생성합니다.
 
@@ -189,7 +189,7 @@ python -m pytest demo/backend/tests -q
 
 ```bash
 cd demo/frontend
-npm test  # 새 화면 회귀 시험: Node.js 22.18 이상
+node --test tests/  # 새 화면 회귀 시험: Node.js 22.18 이상
 npm run lint
 npm run build
 ```

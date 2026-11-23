@@ -53,7 +53,7 @@ demo/
 ## 2. 준비 (최초 1회)
 
 검증에 쓴 환경: **Python 3.14.0 · Node 22.19.0** (Windows 11).
-Python은 3.12 이상, Node는 22.13 이상(`npm test`는 22.18 이상)이면 된다.
+Python은 3.12 이상, Node는 22.13 이상(`node --test tests/`는 22.18 이상)이면 된다.
 
 ```bash
 # 저장소 루트에서
@@ -198,7 +198,7 @@ PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python -m demo.backend.tests.run_p6_scenario
 
 ```bash
 cd demo/frontend
-npm test  # 새 화면 회귀 시험: Node.js 22.18 이상
+node --test tests/  # 새 화면 회귀 시험: Node.js 22.18 이상
 npm run lint
 npm run build
 ```

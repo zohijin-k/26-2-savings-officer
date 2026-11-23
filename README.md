@@ -17,7 +17,7 @@
 
 ## 설치와 실행
 
-Python 3.12 이상, Node.js 22.13 이상(프런트 시험 `npm test`는 22.18 이상)이 필요합니다. 저장소 루트에서 설치합니다.
+Python 3.12 이상, Node.js 22.13 이상(프런트 시험 `node --test tests/`는 22.18 이상)이 필요합니다. 저장소 루트에서 설치합니다.
 
 ```bash
 python3 -m venv .venv

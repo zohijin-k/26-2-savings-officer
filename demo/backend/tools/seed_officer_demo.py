@@ -312,6 +312,8 @@ def clean():
             rows = {kind: session.exec(select(kind)).all()
                     for kind in (models.Document, models.Consent, models.Review, models.SubsidyItem,
                                  models.ReviewSummary)}
+            if any(row.application_id in ids for row in rows[models.Review]):
+                raise SeedError("REVIEW_RETENTION_REQUIRED")
             protected = set()
             for app in apps:
                 if app.id not in ids:

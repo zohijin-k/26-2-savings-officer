@@ -31,7 +31,7 @@ def snapshot():
     return rows, files
 
 
-def seed(client, monkeypatch):
+def seed(client, monkeypatch, *, with_review=True):
     response = client.post('/api/applications', json={'program_code': 'double_savings'})
     assert response.status_code == 200
     aid = response.json()['id']
@@ -43,7 +43,8 @@ def seed(client, monkeypatch):
             file_path=str(path.relative_to(common.STORAGE.parent)), file_format='pdf',
             stage1_status='FAIL', findings_json=[{'code': 'LOW_IMAGE_QUALITY', 'severity': 'FAIL'}])
         session.add(row)
-        session.add(models.Review(application_id=aid, final_status='NEEDS_REVIEW', officer_memo='synthetic memo'))
+        if with_review:
+            session.add(models.Review(application_id=aid, final_status='NEEDS_REVIEW', officer_memo='synthetic memo'))
         session.commit(); session.refresh(row)
         did = row.id
     monkeypatch.setattr(documents, 'assess_upload', lambda *a, **k: (
@@ -222,13 +223,9 @@ def test_generated_signature_originals_restored_if_outer_commit_fails(client, mo
 
 def test_submit_commit_failure_restores_prior_archive_and_all_review_state(client, monkeypatch):
     from demo.backend.api import review
-    aid, _, _ = seed(client, monkeypatch)
-    # A valid first submission has no pre-existing Review. Keep this test on
-    # the actual commit-failure path; legacy-review rejection is tested separately.
-    with models.get_session() as session:
-        for previous in session.exec(select(models.Review).where(models.Review.application_id == aid)).all():
-            session.delete(previous)
-        session.commit()
+    # Construct a fresh unreviewed fixture. Retained Reviews are never deleted,
+    # including during test setup; database-per-test owns fixture lifetime.
+    aid, _, _ = seed(client, monkeypatch, with_review=False)
     monkeypatch.setattr(forms, 'STORAGE', common.STORAGE)
     monkeypatch.setattr(forms, '_written_pdf_bytes', lambda row: (b'NEW SYNTHETIC ARCHIVE', 1))
     monkeypatch.setattr(review, '_blockers', lambda row: [])

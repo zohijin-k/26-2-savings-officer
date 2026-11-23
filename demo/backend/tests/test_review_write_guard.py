@@ -52,7 +52,7 @@ def run(path, statement):
 
 
 def test_init_installs_exact_guards_and_reapplication_is_idempotent(db):
-    expected = dict(models.REVIEW_WRITE_GUARDS)
+    expected = dict(models.REVIEW_WRITE_GUARDS + models.REVIEW_PARENT_GUARDS)
     assert triggers(db) == expected
     for _ in range(2):
         models._add_missing_columns()
@@ -141,11 +141,8 @@ def test_legacy_database_migration_installs_guards_before_any_legacy_write(tmp_p
     engine.dispose()
 
 
-def test_explicit_review_delete_is_a_documented_residual_outside_the_guard(db):
-    """DELETE is not guarded: operator deletion tools remove reviews explicitly.
-
-    If a DELETE guard is introduced, change this test together with
-    tools/delete_application.py and the seed tools in the same change.
-    """
-    run(db, "DELETE FROM review WHERE application_id=1")
-    assert reviews(db) == []
+def test_explicit_review_delete_and_reinsert_aba_are_forbidden(db):
+    before = reviews(db)
+    with pytest.raises(sqlite3.IntegrityError, match="REVIEW_WRITE_GUARD"):
+        run(db, "DELETE FROM review WHERE application_id=1")
+    assert reviews(db) == before

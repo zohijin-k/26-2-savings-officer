@@ -402,7 +402,8 @@ def test_service_transaction_default_commits_and_nested_refusal(isolated):
         assert session.bind is models.engine
 
 
-def test_cleanup_all_rows_files_shared_and_unrelated_preserved(tool, isolated, capfd):
+@pytest.mark.parametrize("with_review", [False, True])
+def test_cleanup_all_rows_files_shared_and_unrelated_preserved(tool, isolated, capfd, with_review):
     seeded = make_application(isolated)
     other_seeded = make_application(isolated, program=JOB_PACKAGE)
     untouched = make_application(isolated)
@@ -434,8 +435,15 @@ def test_cleanup_all_rows_files_shared_and_unrelated_preserved(tool, isolated, c
         for aid, path in ((seeded, own_upload), (seeded, shared), (untouched, shared), (untouched, keep_path)):
             session.add(models.Document(application_id=aid, slot_key="fake", file_path=str(path.relative_to(isolated.parent)),
                 source_file_path=str(merged.relative_to(isolated.parent)) if path == own_upload else None, file_format="pdf"))
-        session.add(models.Review(application_id=seeded, final_status="NEEDS_REVIEW"))
+        if with_review:
+            session.add(models.Review(application_id=seeded, final_status="NEEDS_REVIEW"))
         session.commit()
+    if with_review:
+        before = snapshot(isolated.parent)
+        assert tool.main(["--clean"]) == 2
+        assert_private(capfd.readouterr())
+        assert snapshot(isolated.parent) == before
+        return
     assert tool.main(["--clean"]) == 0
     captured = capfd.readouterr()
     assert_private(captured)

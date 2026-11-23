@@ -164,17 +164,56 @@ REVIEW_WRITE_GUARD_DDL = (
 )
 # REPLACE/UPSERT/duplicate INSERT would delete or rewrite an existing review (and
 # reset revision) without firing the UPDATE guard. Creation stays allowed only
-# when the application has no review yet. DELETE is intentionally not guarded
-# here: operator deletion tools remove reviews explicitly (documented residual).
+# when the application has no review yet. Separate lifetime guards below also
+# forbid deletion and reassignment, including UPDATE OR REPLACE conflicts.
 REVIEW_INSERT_GUARD_NAME = "review_write_guard_insert"
 REVIEW_INSERT_GUARD_DDL = (
     f"CREATE TRIGGER {REVIEW_INSERT_GUARD_NAME} BEFORE INSERT ON review FOR EACH ROW "
     "WHEN EXISTS (SELECT 1 FROM review WHERE application_id = NEW.application_id OR id = NEW.id) "
     "BEGIN SELECT RAISE(ABORT, 'REVIEW_WRITE_GUARD: review already exists for this application'); END"
 )
+# A Review's (id, application_id) is its immutable lifetime identity. Retain
+# guard-v3 definitions byte-for-byte for an additive legacy migration. These
+# guards do not rely on connection-local recursive_triggers or foreign_keys.
+REVIEW_DELETE_GUARD_NAME = "review_write_guard_delete"
+REVIEW_DELETE_GUARD_DDL = (
+    f"CREATE TRIGGER {REVIEW_DELETE_GUARD_NAME} BEFORE DELETE ON review FOR EACH ROW "
+    "BEGIN SELECT RAISE(ABORT, 'REVIEW_WRITE_GUARD: review deletion is forbidden'); END"
+)
+REVIEW_IDENTITY_GUARD_NAME = "review_write_guard_identity"
+REVIEW_IDENTITY_GUARD_DDL = (
+    f"CREATE TRIGGER {REVIEW_IDENTITY_GUARD_NAME} BEFORE UPDATE ON review FOR EACH ROW "
+    "WHEN NEW.id IS NOT OLD.id OR NEW.application_id IS NOT OLD.application_id "
+    "BEGIN SELECT RAISE(ABORT, 'REVIEW_WRITE_GUARD: review identity is immutable'); END"
+)
 REVIEW_WRITE_GUARDS = (
     (REVIEW_WRITE_GUARD_NAME, REVIEW_WRITE_GUARD_DDL),
     (REVIEW_INSERT_GUARD_NAME, REVIEW_INSERT_GUARD_DDL),
+    (REVIEW_DELETE_GUARD_NAME, REVIEW_DELETE_GUARD_DDL),
+    (REVIEW_IDENTITY_GUARD_NAME, REVIEW_IDENTITY_GUARD_DDL),
+)
+
+# Preserve the owner of a retained Review even on legacy FK-OFF connections.
+# A parent REPLACE can bypass DELETE triggers when recursive_triggers is OFF,
+# so protect its INSERT as well as explicit DELETE and identity UPDATE.
+REVIEW_PARENT_GUARDS = (
+    ("review_parent_guard_delete",
+     "CREATE TRIGGER review_parent_guard_delete BEFORE DELETE ON application FOR EACH ROW "
+     "WHEN EXISTS (SELECT 1 FROM review WHERE application_id = OLD.id) "
+     "BEGIN SELECT RAISE(ABORT, 'REVIEW_WRITE_GUARD: reviewed application deletion is forbidden'); END"),
+    ("review_parent_guard_insert",
+     "CREATE TRIGGER review_parent_guard_insert BEFORE INSERT ON application FOR EACH ROW "
+     "WHEN EXISTS (SELECT 1 FROM review WHERE application_id = NEW.id) "
+     "OR EXISTS (SELECT 1 FROM application a JOIN review r ON r.application_id = a.id "
+     "WHERE a.application_no = NEW.application_no) "
+     "BEGIN SELECT RAISE(ABORT, 'REVIEW_WRITE_GUARD: reviewed application replacement is forbidden'); END"),
+    ("review_parent_guard_identity",
+     "CREATE TRIGGER review_parent_guard_identity BEFORE UPDATE ON application FOR EACH ROW "
+     "WHEN NEW.id IS NOT OLD.id AND (EXISTS (SELECT 1 FROM review WHERE application_id = OLD.id) "
+     "OR EXISTS (SELECT 1 FROM review WHERE application_id = NEW.id)) "
+     "OR EXISTS (SELECT 1 FROM application a JOIN review r ON r.application_id = a.id "
+     "WHERE a.id != OLD.id AND a.application_no = NEW.application_no) "
+     "BEGIN SELECT RAISE(ABORT, 'REVIEW_WRITE_GUARD: reviewed application identity is immutable'); END"),
 )
 
 
@@ -290,7 +329,11 @@ def _add_missing_columns() -> None:
             if invalid:
                 raise RuntimeError("Review migration stopped: invalid revision requires manual reconciliation")
             conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS uq_review_application ON review(application_id)")
-            for name, ddl in REVIEW_WRITE_GUARDS:
+            has_application = conn.exec_driver_sql(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='application'"
+            ).first()
+            guards = REVIEW_WRITE_GUARDS + (REVIEW_PARENT_GUARDS if has_application else ())
+            for name, ddl in guards:
                 guard = conn.exec_driver_sql(
                     "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?", (name,)
                 ).first()

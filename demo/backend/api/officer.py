@@ -842,6 +842,33 @@ def read_authored_form(application_id: int, form_no: str) -> Response:
         raise
 
 
+def _incoming_household_warnings(app: Application) -> list[dict[str, Any]]:
+    """Project persisted incoming links; never reopen or rewrite an old Review.
+
+    The source submission and its edge commit atomically. Draft/rolled-back
+    sources do not become warnings. Return no household names or birth dates.
+    """
+    with get_session() as session:
+        sources = session.exec(
+            select(Application, Review).join(Review, Review.application_id == Application.id)
+            .where(Application.program_code == app.program_code,
+                   Application.status != STATUS_DRAFT, Application.id != app.id)
+        ).all()
+    warnings = []
+    for source, source_review in sources:
+        if source.created_at.year != app.created_at.year:
+            continue
+        links = (source_review.review_payload_json or {}).get("related_applications") or []
+        if any(link.get("application_id") == app.id for link in links):
+            warnings.append({
+                "code": "HEALTH_INSURANCE_HOUSEHOLD_RECHECK",
+                "message": f"연관 신청 {source.application_no}에서 가구원 중복이 확인되었습니다. "
+                           "기존 결정과 메모는 보존되어 있습니다. 관련 신청을 확인하고 담당자가 재검토해 주세요.",
+                "related_application_id": source.id,
+            })
+    return warnings
+
+
 @router.get("/applications/{application_id}")
 def review_detail(application_id: int, role: str = Query(ROLE_PROVINCE)) -> dict[str, Any]:
     """심사 상세 — 분할 뷰가 읽는 전부 (R4.2/R4.3).
@@ -909,7 +936,8 @@ def review_detail(application_id: int, role: str = Query(ROLE_PROVINCE)) -> dict
             "stage1_status": review.stage1_status if review else None,
             "stage2_status": review.stage2_status if review else None,
             "recommended_action": payload.get("recommended_action", ""),
-            "reasons": [readable_reason(r) for r in payload.get("reasons", [])],
+            "reasons": [readable_reason(r) for r in payload.get("reasons", [])]
+                       + _incoming_household_warnings(app),
         },
         "score_sheet": score,
         # 선발 방식이 갈리는 지점. 점수제는 심사표가, 선착순은 접수 순번과 보완

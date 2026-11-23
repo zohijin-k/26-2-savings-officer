@@ -32,8 +32,10 @@ the same database transaction. Pure assessment helpers do not persist reviews.
 
 ## Local file guards and lock ordering
 
-Existing per-application POSIX `flock` guards remain useful for local request
-preparation and composition. Their namespaces still differ between repositories
+Existing per-application OS file-lock guards (`flock` on macOS/Linux,
+`msvcrt.locking` on Windows; lock directory
+`<temp>/jeonbuk-application-writes-<uid or win-user-hash>/`) remain useful for
+local request preparation and composition. Their namespaces still differ between repositories
 and may differ between workers. They are not the cross-process integrity source.
 For normal guarded calls the order is file guard, then SQLite transaction.
 If a composed service already owns the context-local database connection,

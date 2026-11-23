@@ -1,6 +1,6 @@
 # Phase 4A historical document risk audit prototype
 
-This offline prototype is **SYNTHETIC_ONLY / PRODUCTION_NOT_READY**. It never
+This offline prototype is **SYNTHETIC_ONLY**. It never
 changes an administrative verdict. No server routes, application screens, models,
 sessions, migrations, OCR, engine rules or deployed configuration are modified.
 

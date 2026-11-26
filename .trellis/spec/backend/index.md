@@ -25,6 +25,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Access control](./access-control.md) | Owner cookie on applicant routes and originals, officer login, middleware order, test helpers | Active |
 | [Confirmed failure filtering](./failure-filtering.md) | Upload certainty, provisional continuity and submission blockers | Active |
 | [Document OCR and Form Contracts](./document-form-contracts.md) | Resident-number redaction, coordinate forms, arithmetic, identity and review boundaries | Active |
+| [Scanned resident completeness](./resident-scan-completeness.md) | 11-26 temporary no-auto-PASS guard for OCR-read 초본, end evidence, audit field and re-allow conditions | Active |
 | [Synthetic officer seeding](./officer-demo-seeding.md) | Fixed samples, demo-only ownership, idempotence and safe cleanup | Active |
 | [Demo stage-two seeding](./seed-application.md) | Guarded developer CLI, shared validation, ownership cleanup and same-tab upload restoration | Active |
 | [Private case verification](./verify-cases.md) | Shared upload assessments, ignored manifests, value-free snapshots and signed regression differences | Active |

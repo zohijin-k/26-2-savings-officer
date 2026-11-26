@@ -212,9 +212,12 @@ def test_same_fields_as_localocr(tmp: Path) -> None:
         check_true(f"(가) {label} 전송 이미지 JPEG(FF D8 · data:image/jpeg · RGB)", jpeg_ok(sent))
         check(f"{label} 요청 시간 제한(기본 60초)", {item["timeout"] for item in sent}, {60.0})
         check_true(f"{label} LocalOcr 필드 이름이 모두 있음", set(local.fields) <= set(ocr.fields))
-        check(f"{label} 더 있는 필드는 보조 필드뿐", sorted(set(ocr.fields) - set(local.fields) - optional), [])
+        # 11-26: 전북AI는 좌표 없이 임시 격자로 단어를 놓으므로 초본 이력 끝 근거(마지막 건 아래 이하 여백)를
+        # 위치로 세울 수 없다 → 주소이력상태·주소이력불확실사유(END_UNCONFIRMED)가 더 붙는다.
+        end_fields = {"주소이력상태", "주소이력불확실사유"} if doc_type is DocType.RESIDENT_ABSTRACT else set()
+        check(f"{label} 더 있는 필드는 보조 필드뿐", sorted(set(ocr.fields) - set(local.fields) - optional - end_fields), [])
         if doc_type is not DocType.NHIS_PAYMENT:
-            check(f"{label} 필드 이름 동일", sorted(ocr.fields), sorted(local.fields))
+            check(f"{label} 필드 이름 동일", sorted(set(ocr.fields) - end_fields), sorted(local.fields))
         check(f"{label} 발급일", ocr.issue_date, date(2026, 11, 10))
         check(f"{label} 성명·생년월일", (ocr.fields.get("성명"), ocr.fields.get("생년월일")),
               ("김가상", "1999-01-01"))
@@ -225,11 +228,14 @@ def test_same_fields_as_localocr(tmp: Path) -> None:
         print(f"         판정 {result.status} {result.codes}")
         if doc_type is DocType.NHIS_PAYMENT:
             check_true(f"{label} 판정 규칙 동작(부적합 아님)", result.status in {"PASS", "NEEDS_REVIEW"})
+        elif doc_type is DocType.RESIDENT_ABSTRACT:
+            check(f"{label} 판정: 이력 끝 미확인으로 확인필요(적합 아님)",
+                  (result.status, "END_UNCONFIRMED" in ocr.fields.get("주소이력불확실사유", "").split(",")),
+                  ("NEEDS_REVIEW", True))
         else:
             check(f"{label} 판정 규칙 그대로 적합", result.status, "PASS")
         if doc_type is DocType.RESIDENT_ABSTRACT:
-            check("초본 전입일·주소변동내역", (ocr.fields.get("전입일"), ocr.fields.get("주소변동내역")),
-                  ("2020-04-10", "포함"))
+            check("초본 전입일은 자동 판정에 쓰지 않음(불확실)", ocr.fields.get("전입일"), "불확실")
 
 
 def test_photo_upload_is_jpeg(tmp: Path) -> None:
@@ -445,7 +451,7 @@ def test_api_privacy_cache_and_views(client, tmp: Path) -> None:
         check("(마) 같은 파일 두 번 → 전북AI 호출 횟수", counts, [2 * len(pages), 0])
         check("업로드 응답", [r.status_code for r in responses], [200, 200])
         doc = responses[-1].json()
-        check_document_status('판정(캐시 결과로도 같은 규칙)', doc, 'PASS')
+        check_document_status('판정(캐시 결과로도 같은 규칙: 전북AI 초본은 이력 끝 미확인 → 확인필요)', doc, 'NEEDS_REVIEW')
         listed = client.get(f"/api/applications/{app_id}/documents").text
         checklist = client.get(f"/api/applications/{app_id}/required-documents").text
         rows = list_documents(app_id)
@@ -529,7 +535,13 @@ def test_api_privacy_cache_and_views(client, tmp: Path) -> None:
         other = new_app(client)
         identify(client, other, "김전북", "1999-01-01")
         FAKE.serve(pages, "network")
-        install_fake_ocr([[type(w)({"1/3": "1/2", "2/3": "2/2"}.get(w.text, w.text), w.confidence, w.bbox_px) for w in page] for page in fake_abstract_words()])
+        # 3쪽 합성 초본의 앞 두 쪽을 1/2·2/2로 다시 붙인 2쪽 초본: 마지막 쪽이 이력을 이하 여백으로 닫아야
+        # 완전한 2쪽 초본이다 (11-26 끝 근거). 이 시나리오의 대상은 네트워크 끊김 대체 경로다.
+        relabeled = [[type(w)({"1/3": "1/2", "2/3": "2/2"}.get(w.text, w.text), w.confidence, w.bbox_px) for w in page]
+                     for page in fake_abstract_words()]
+        from engine_v2.tests.test_resident_abstract import wd as _wd
+        relabeled[1].append(_wd(42.8, 40.0, "== 이하 여백 ==", 1.0, 12))
+        install_fake_ocr(relabeled)
         with pdf.open("rb") as fh:
             res = client.post(f"/api/applications/{other}/documents",
                               files={"file": (pdf.name, fh, "application/pdf")},
@@ -546,6 +558,11 @@ def test_api_privacy_cache_and_views(client, tmp: Path) -> None:
 
 
 def main() -> int:
+    # 11-26: 이 시나리오는 판독·규칙을 본다. 스캔 초본 자동 PASS 제한(SCAN_ABSTRACT_REVIEW_GUARD)은
+    # test_resident_scan_guard.py가 검증한다. main에서만 끈다 (이 모듈을 import하는 pytest에는 영향 없음).
+    from demo.backend.ocr import localocr as _localocr
+    _localocr.SCAN_ABSTRACT_REVIEW_GUARD = False
+    print("[NOTE] 스캔 초본 자동 PASS 제한(11-26)을 끈 상태로 판독·규칙만 확인합니다 (안전장치 자체: test_resident_scan_guard.py)")
     from fastapi.testclient import TestClient
 
     from engine_v2.pipeline import jbai_ocr

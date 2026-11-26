@@ -6,6 +6,7 @@
 
 import json
 import os
+import re
 import tempfile
 from dataclasses import replace
 from datetime import date, timedelta
@@ -65,10 +66,19 @@ def resident_words(marker="1/1", *, name=IDENTITY.name, birth="1999-01-01", inde
             word.text = "980203-1******"
     first_date = date(2020, 1, 1) if index == 0 else date(2023, 1, 1) + timedelta(days=2 * index - 1)
     second_date = date(2023, 1, 1) if index == 0 else date(2023, 1, 1) + timedelta(days=2 * index)
-    return words + table_head(31.8) + [
+    rows = words + table_head(31.8) + [
         *row(34.4, 1 + index * 2, "전북특별자치도 전주시 가상동", first_date.isoformat()),
         *row(39.4, 2 + index * 2, "전북특별자치도 전주시 합성동", second_date.isoformat()),
     ]
+    return rows + final_page_end(marker)
+
+
+def final_page_end(marker):
+    """11-26: the last page (k/N, k == N) of a complete abstract closes its history with 이하 여백."""
+    from engine_v2.tests.test_resident_abstract import wd
+
+    found = re.fullmatch(r"(\d+)/(\d+)", marker)
+    return [wd(42.8, 44.6, "== 이하 여백 ==", 1.0, 12)] if found and found[1] == found[2] else []
 
 
 def read_fake(tmp, name, words):
@@ -284,6 +294,11 @@ def test_issue_date_labels():
 
 
 def main():
+    # 11-26: 이 시나리오는 판독·규칙을 본다. 스캔 초본 자동 PASS 제한(SCAN_ABSTRACT_REVIEW_GUARD)은
+    # test_resident_scan_guard.py가 검증한다. main에서만 끈다 (이 모듈을 import하는 pytest에는 영향 없음).
+    from demo.backend.ocr import localocr as _localocr
+    _localocr.SCAN_ABSTRACT_REVIEW_GUARD = False
+    print("[NOTE] 스캔 초본 자동 PASS 제한(11-26)을 끈 상태로 판독·규칙만 확인합니다 (안전장치 자체: test_resident_scan_guard.py)")
     apply_runtime_overrides()
     # 외부 OCR 설정은 사용하지 않는다. 원래 환경은 patch가 복구한다.
     clean = {key: value for key, value in os.environ.items() if not key.startswith("JBAI_")}

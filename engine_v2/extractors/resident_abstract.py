@@ -136,6 +136,9 @@ class ResidentAbstractResult:
     #: Header-band markers per sheet when several pages are printed side by side (S1, held).
     sheet_markers: list[list[tuple[int, int]]] | None = None
     classification_evidence: str = ""
+    #: 11-26: 주소 이력 끝 근거 (BLANK_MARKER / NEXT_SECTION / NONE / NA)와 그 끝 표시가 있는 쪽(스캔 순서, 1부터).
+    history_end: str = "NA"
+    history_end_page: int | None = None
     #: 쪽 수 확인에서 뺀 내용 없는 쪽 수 (page_markers에 들어 있지 않다).
     blank_pages: int = 0
     #: page_markers(또는 sheet_markers)의 각 항목을 읽은 쪽 번호(PageImage.page), 같은 순서 (11-19 D10).
@@ -234,6 +237,9 @@ def _parse_header(lines: list[list[Word]]) -> dict:
                 out["name_words"] = nws
         if y < 26 and "성명" in squash(t) and out["name"] is None:
             remainder = re.split(r"성명\s*[:：]?", t, maxsplit=1)[-1]
+            # "성명(한자)" 머리글의 괄호 속 '한자'는 이름이 아니다 (11-26: 주민번호를 못 읽은 쪽에서
+            # 성명이 '한자'로 읽혔다). 괄호 머리글만 떼고, 이름 자체는 그대로 둔다.
+            remainder = re.sub(r"^\s*[(（]\s*한\s*자\s*[)）]", "", remainder)
             candidate = re.search(r"[가-힣]{2,6}", remainder)
             if candidate and candidate.group() not in {"주민등록", "생년월일"}:
                 out["name"] = candidate.group()
@@ -511,8 +517,10 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
     #: 표 머리글만 되풀이되고 이력 줄·내용이 없는 쪽 (다른 쪽과 같은 쪽표기일 때만 쪽 수에서 뺀다).
     table_only: list[bool] = []
     prior_table_read = False
+    page_lines: list[tuple[int, list[list[Word]]]] = []
     for p, r in pages:
         lines = group_lines(normalize(r.words, p.page, p.pixel_size))
+        page_lines.append((p.page, lines))
         if p.page == 0:
             first_page_lines = lines
         headers.append(_parse_header(lines))
@@ -657,14 +665,18 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
     entry_nos = [e.no for e in entries if e.no is not None]
     nos = sorted(entry_nos + note_numbers)
     if entries or note_numbers or observed_numbers or detected == DocType.RESIDENT_ABSTRACT:
+        # 11-26: 순번이 있는 메모 줄은 다음 건에 붙는다(실측). 마지막 건보다 큰 메모 순번은 뒤따르는 건을
+        # 읽지 못했다는 뜻이다 (끝 이력 누락). 순번 없는 덧붙임 안내는 지금처럼 다루지 않는다.
+        orphan_notes = sorted(n for n in note_numbers if not entry_nos or n > max(entry_nos))
         seq_ok = (bool(entries) and len(entry_nos) == len(entries) and
                   bool(nos) and nos == list(range(nos[0], nos[0] + len(nos))) and
-                  sorted(observed_numbers) == nos)
+                  sorted(observed_numbers) == nos and not orphan_notes)
         missing = sorted(set(range(nos[0], nos[-1] + 1)) - set(nos)) if nos else []
         validations.append(Validation(
             "history_numbers_sequential", seq_ok,
             f"순번 {len(nos)}개 (이력 {len(entry_nos)} + 메모 {len(note_numbers)}) / 건 {len(entries)}개"
-            + (f", 빠진 번호 {missing}" if missing else "")))
+            + (f", 빠진 번호 {missing}" if missing else "")
+            + (f", 뒤따르는 건 없는 메모 순번 {orphan_notes}" if orphan_notes else "")))
     eff = [e.effective for e in entries if e.effective]
     order_ok = all(a <= b for a, b in zip(eff, eff[1:]))
     validations.append(Validation("history_dates_ordered", order_ok))
@@ -745,8 +757,10 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
         for key in ("address_history", "address_history_count", "current_address"):
             if key in fields:
                 fields[key].confidence = min(fields[key].confidence, .4)
+    history_end, history_end_page = _history_end(page_lines, entries)
     return ResidentAbstractResult(
         detected, tconf, fields, entries, validations, warnings,
+        history_end=history_end, history_end_page=history_end_page,
         history_numbers=history_numbers, history_empty_page=history_empty_page,
         history_table_issues=table_issues,
         sheet_markers=sheets if multi else None,
@@ -756,6 +770,61 @@ def extract(pages: list[tuple[PageImage, OcrResult]], today: date | None = None)
         page_marker_confidence=min((headers[i]["page_confidence"] for i in kept), default=0.0),
         blank_pages=len(headers) - len(kept),
     )
+
+
+#: 11-26: 주소 이력 끝 근거. address_dates.py가 초본 표 끝으로 쓰는 것과 같은 단독 '이하 여백' 줄
+#: (앞뒤 꾸밈 기호만 허용, 부분 문자열 불인정)만 인정한다.
+_HISTORY_END_MARKER = re.compile(r"[=＝*＊·.()（）\-–—]*이하여백[=＝*＊·.()（）\-–—]*")
+
+
+def _history_row_word(word) -> bool:
+    """A word that only a history row carries: a number-column ordinal or a report-column date."""
+    text = word.text.strip()
+    return ((word.x0 < COL_NO_MAX_X and re.fullmatch(r"\d{1,3}", text) is not None)
+            or (COL_REPORT_X[0] <= word.x0 < COL_REPORT_X[1]
+                and ISO_DATE.fullmatch(normalize_format_text(text)) is not None))
+
+
+def _history_end(page_lines, entries) -> tuple[str, int | None]:
+    """Positive evidence that the last parsed entry is the last history row (11-26).
+
+    BLANK_MARKER / NEXT_SECTION: on the page of the last entry, a standalone 이하 여백 line or the next
+    section's heading in the ordinal column (병역사항; both are _table_end's terminators from the 실측
+    layout) follows it, with no ordinal or report date between them or below it on that page. NONE: no such evidence (an unread last
+    row, a cut page bottom, a missing marker), so the end of the history is unknown. NA: no history.
+    The marker's distance from the last row is not judged: authored layouts place it one to several
+    rows below, and no observed form fixes it. Returns (kind, 1-based scan page of the marker).
+    """
+    if not entries:
+        return "NA", None
+    last = entries[-1]
+    order = [number for number, _ in page_lines]
+    if last.page not in order or not last.words:
+        return "NONE", None
+    index = order.index(last.page)
+    # Only the entry's words on its own page: continuation lines may carry words from a later page.
+    own = [word for word in last.words if word.page == last.page]
+    if not own:
+        return "NONE", None
+    centre = max(word.cy for word in own)
+    for line in page_lines[index][1]:
+        if not centre < line[0].cy < FOOTER_Y:
+            continue
+        if any(_history_row_word(word) for word in line):
+            return "NONE", None  # a row, or part of one, that no parsed entry holds
+        marker = _HISTORY_END_MARKER.fullmatch(squash(line_text(line)))
+        # The next section's heading in the ordinal column (병역사항) also ends the table, as _table_end has it.
+        section = "병역" in squash(line_text(line)) and line[0].x0 < 12
+        if marker or section:
+            # Rows below the marker on its own page contradict it. A later page is not judged here:
+            # without a table header it is another section (11-18 continuation contract), and with one
+            # its rows are already parsed entries, which would have moved the last entry there.
+            below = [word for row in page_lines[index][1] for word in row
+                     if line[0].cy < word.cy < FOOTER_Y]
+            if any(_history_row_word(word) for word in below):
+                return "NONE", None
+            return ("BLANK_MARKER" if marker else "NEXT_SECTION"), page_lines[index][0] + 1
+    return "NONE", None
 
 
 def resolved_sido(entries: list[HistoryEntry], i: int) -> str | None:

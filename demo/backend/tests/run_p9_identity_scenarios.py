@@ -458,6 +458,11 @@ def test_insurance4_reader_privacy(client, tmp: Path) -> None:
 
 
 def main() -> int:
+    # 11-26: 이 시나리오는 판독·규칙을 본다. 스캔 초본 자동 PASS 제한(SCAN_ABSTRACT_REVIEW_GUARD)은
+    # test_resident_scan_guard.py가 검증한다. main에서만 끈다 (이 모듈을 import하는 pytest에는 영향 없음).
+    from demo.backend.ocr import localocr as _localocr
+    _localocr.SCAN_ABSTRACT_REVIEW_GUARD = False
+    print("[NOTE] 스캔 초본 자동 PASS 제한(11-26)을 끈 상태로 판독·규칙만 확인합니다 (안전장치 자체: test_resident_scan_guard.py)")
     from fastapi.testclient import TestClient
 
     from ..main import app

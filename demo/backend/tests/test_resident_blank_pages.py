@@ -12,6 +12,10 @@ from ..ocr.localocr import ENGINE_ENV, LocalOcr
 from ..rules.doc_check import check_document
 from .run_p8_localocr_scenarios import abstract_slot, make_image_pdf
 from .run_p18_applicant_precheck_scenarios import IDENTITY, resident_words
+from .scan_guard import scan_guard_off  # noqa: F401 (fixture)
+
+# Subject: other resident logic; the 11-26 scan guard is tested in test_resident_scan_guard.py.
+pytestmark = pytest.mark.usefixtures("scan_guard_off")
 
 
 def _read(tmp_path, pages):

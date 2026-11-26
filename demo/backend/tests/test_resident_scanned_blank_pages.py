@@ -10,6 +10,10 @@ from engine_v2.tests.test_resident_abstract import row, table_head, wd
 
 from .run_p18_applicant_precheck_scenarios import resident_words
 from .test_resident_blank_pages import _header_only, _read, _two_pages
+from .scan_guard import scan_guard_off  # noqa: F401 (fixture)
+
+# Subject: other resident logic; the 11-26 scan guard is tested in test_resident_scan_guard.py.
+pytestmark = pytest.mark.usefixtures("scan_guard_off")
 
 
 def _noise():

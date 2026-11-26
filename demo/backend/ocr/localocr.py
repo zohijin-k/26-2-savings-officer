@@ -46,6 +46,15 @@ ENGINE_ENV = "ENGINE_V2_OCR"
 #: 서류 내부 검증이 없는 서류는 엔진 임계값(0.85) 아래로 묶어 담당자 확인으로 보낸다.
 GENERIC_CONFIDENCE_CAP = 0.8
 
+#: 11-26 임시 안전장치 (Phase 1). OCR로 읽은(글자층이 아닌 쪽이 하나라도 있는) 주민등록초본은 자동 적합(PASS)을
+#: 내지 않는다. 마지막 이력까지 빠짐없이 읽었는지(문서 완결성)를 독립적으로 확인할 검증된 기준이 아직 없기 때문이다:
+#: 이미지에서 마지막 이력 줄들이 빠지고 '이하 여백'만 남은 초본은 순번·끝 표시만으로는 정상 초본과 구분되지 않는다.
+#: 적용 범위: 이 모듈 _from_resident가 만드는 초본 결과 중 OCR 쪽이 있는 것 → 주소이력불확실사유 SCAN_UNVERIFIED
+#: (→ doc_check ADDRESS_HISTORY_INCOMPLETE, 확인필요; 전입일·주소이력건수·현주소시도는 '불확실').
+#: 바꾸지 않는 것: 글자층 PDF 판독(pdftext, 글자층 좌표 판독), 등본·그 밖의 서류, 사업별 규칙, 다른 검증.
+#: 해제 조건: .trellis/spec/backend/resident-scan-completeness.md의 '자동 PASS 재허용 조건'을 독립 표본으로 충족할 때.
+SCAN_ABSTRACT_REVIEW_GUARD = True
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _logger = logging.getLogger(__name__)
 
@@ -216,6 +225,16 @@ def _shared_image_groups(pages, marker_pages) -> list[list[int] | None] | None:
     return groups
 
 
+def _history_end_label(ex) -> str:
+    """11-26: 주소 이력 끝을 무엇으로 확인했는지 (근거 종류와 쪽 번호만, 값 없음)."""
+    kind, page = getattr(ex, "history_end", "NONE"), getattr(ex, "history_end_page", None)
+    if kind == "BLANK_MARKER":
+        return f"이하 여백 ({page}쪽)"
+    if kind == "NEXT_SECTION":
+        return f"다음 구역(병역사항) 시작 ({page}쪽)"
+    return "확인되지 않음" if ex.history else "이력 없음"
+
+
 def _from_resident(ex, pages, ra, v2types) -> OcrResult:
     """engine_v2 초본 추출 결과 → 데모 OcrResult (필드 이름은 데모 규칙이 쓰는 그대로)."""
     detected = (DocType.RESIDENT_ABSTRACT if ex.detected_type == v2types.RESIDENT_ABSTRACT
@@ -273,21 +292,34 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
     # 이력 줄을 0건 읽은 쪽이 있으면 전입일·주소이력건수를 '불확실'로 두고 doc_check가 확인필요로 보낸다.
     # 번호 누락과 번호 판독 실패는 세부 사유를 나눠 남긴다.
     if ex.detected_type == v2types.RESIDENT_ABSTRACT:
+        # OCR로 읽은 쪽이 있으면 스캔(사진)본이다. 모든 쪽이 글자층일 때만 글자층 판독이다 (_pages_engine과 같은 기준).
+        scanned = any(page.source.value != "text_layer" for page, _ in pages)
         uncertain = [code for code, hit in (
             ("NUMBER_GAP", getattr(ex, "history_numbers", "NA") == "GAP"),
             ("NUMBER_UNREADABLE", getattr(ex, "history_numbers", "NA") == "UNREADABLE"),
             ("EMPTY_PAGE", getattr(ex, "history_empty_page", False)),
+            # 11-26: 마지막 건 바로 아래 단독 '이하 여백'으로 이력 끝을 확인하지 못함 (끝 이력 누락·하단 잘림 가능).
+            ("END_UNCONFIRMED", scanned and bool(ex.history)
+             and getattr(ex, "history_end", "NONE") not in ("BLANK_MARKER", "NEXT_SECTION")),
+            ("SCAN_UNVERIFIED", scanned and SCAN_ABSTRACT_REVIEW_GUARD),
         ) if hit]
+        # 담당자 감사·진단용 끝 근거: 근거 종류와 쪽 번호만 남긴다 (값 없음).
+        fields["주소이력끝근거"] = _history_end_label(ex)
         table_issues = getattr(ex, "history_table_issues", [])
         uncertain.extend(table_issues)
         if uncertain:
             fields["주소이력상태"] = "불확실"
             fields["주소이력불확실사유"] = ",".join(uncertain)
+            # 11-26 사유(END_UNCONFIRMED·SCAN_UNVERIFIED)만 있으면 읽은 줄 수(주소이력건수)는 그대로 둔다:
+            # 자동 판정에 쓰이는 전입일·현주소시도만 '불확실'로 두고, 1건 초본 안내(PAST_ADDRESS_OMISSION_SUSPECTED)는 유지한다.
+            count_uncertain = bool(set(uncertain) - {"END_UNCONFIRMED", "SCAN_UNVERIFIED"})
             for label in ("전입일", "주소이력건수"):
+                if label == "주소이력건수" and not count_uncertain:
+                    continue
                 if label in fields:
                     fields[label] = "불확실"
                 bboxes.pop(label, None)
-            if table_issues:
+            if table_issues or {"END_UNCONFIRMED", "SCAN_UNVERIFIED"} & set(uncertain):
                 for label in ("현주소시도", "주소변동내역"):
                     if label in fields:
                         fields[label] = "불확실"

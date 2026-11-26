@@ -6,6 +6,11 @@ from ..api.officer import _document_view
 from ..models import Document
 from ..ocr.pdftext import VIEWING_COPY_FIELD, read_page_text
 from .test_resident_blank_pages import _read, _two_pages
+import pytest
+from .scan_guard import scan_guard_off  # noqa: F401 (fixture)
+
+# Subject: other resident logic; the 11-26 scan guard is tested in test_resident_scan_guard.py.
+pytestmark = pytest.mark.usefixtures("scan_guard_off")
 
 
 def _with_bottom_mark(pages):

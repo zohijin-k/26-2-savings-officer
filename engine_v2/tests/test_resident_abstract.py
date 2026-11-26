@@ -180,3 +180,16 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print("ok", name)
+
+
+def test_name_label_hanja_is_not_read_as_the_name_when_rrn_is_unreadable():
+    # 11-26: 주민번호 성별 숫자를 OCR이 놓친 쪽에서 '성명(한자)' 머리글의 '한자'가 성명으로 읽혔다.
+    pages = build()
+    for word in pages[0][1].words:
+        if word.text.startswith("990101-"):  # 성별 숫자를 놓친 판독
+            word.text = "990101-*****"
+    r = extract(pages, today=date(2026, 11, 10))
+    assert r.fields["name"].value == "김전북"
+    assert next(v for v in r.validations if v.name == "name_consistent").passed
+    # 못 읽은 생년월일은 채우지 않는다: 그 쪽은 생년월일 없음 → 일치 검증 실패로 남는다.
+    assert not next(v for v in r.validations if v.name == "birth_consistent").passed

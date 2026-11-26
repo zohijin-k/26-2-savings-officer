@@ -11,8 +11,12 @@ from engine_v2.extractors import resident_abstract
 from engine_v2.tests.p2_resident_samples import damage, resident
 from engine_v2.tests.test_resident_abstract import header, row, table_head, wd
 
-from .run_p18_applicant_precheck_scenarios import IDENTITY
+from .run_p18_applicant_precheck_scenarios import IDENTITY, final_page_end
 from .test_resident_blank_pages import _read
+from .scan_guard import scan_guard_off  # noqa: F401 (fixture)
+
+# Subject: other resident logic; the 11-26 scan guard is tested in test_resident_scan_guard.py.
+pytestmark = pytest.mark.usefixtures("scan_guard_off")
 
 APPLICANT = f"신청인: {IDENTITY.name} ({IDENTITY.birth.isoformat()})"
 
@@ -22,7 +26,7 @@ def _page(marker, rows):
     for word in words:
         if word.text == "1/1":
             word.text = marker
-    return words + table_head(31.8) + rows
+    return words + table_head(31.8) + rows + final_page_end(marker)
 
 
 OLD = [*row(34.4, 1, "전북특별자치도 전주시 가상동", "2020-01-01"), *row(39.4, 2, "전북특별자치도 전주시 합성동", "2021-01-01")]
@@ -44,14 +48,14 @@ def test_first_page_rows_missed_is_reviewed(tmp_path):
 def test_recent_page_rows_missed_never_yields_an_early_transfer_date(tmp_path):
     # Without the recent page the 전북 run would start at 2020-01-01 (earlier than the real 2023-01-01).
     ocr, result = _read(tmp_path, [_page("1/2", OLD), _page("2/2", [])])
-    _uncertain(ocr, result, "EMPTY_PAGE")
+    _uncertain(ocr, result, "EMPTY_PAGE,END_UNCONFIRMED")  # 11-26: 마지막으로 읽힌 건 아래 끝 표시 없음
 
 
 def test_recent_page_rows_without_readable_dates_are_reviewed(tmp_path):
     garbled = [wd(9.1, 35.3, "3", 1.0, 2), wd(13.2, 34.4, "서울특별시 가상구 시험동", 1.0, 35),
                wd(67.9, 34.4, "2O22-O1-O1", 1.0, 9)]
     ocr, result = _read(tmp_path, [_page("1/2", OLD), _page("2/2", garbled)])
-    _uncertain(ocr, result, "EMPTY_PAGE")
+    _uncertain(ocr, result, "EMPTY_PAGE,END_UNCONFIRMED")  # 11-26: 마지막으로 읽힌 건 아래 끝 표시 없음
 
 
 def test_complete_ordinals_are_unchanged(tmp_path):

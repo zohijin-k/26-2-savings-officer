@@ -81,6 +81,9 @@ test('failed check names become Korean sentences, including patterned names', ()
   assert.equal(fieldLabel('판독검증실패'), '확인되지 않은 검증 항목')
   assert.deepEqual(formatField('주소이력불확실사유', 'NUMBER_GAP,EMPTY_PAGE'),
     { kind: 'list', items: ['주소 이력 순번이 중간에 빠져 있음', '이력 줄을 하나도 읽지 못한 쪽이 있음'] })
+  assert.deepEqual(formatField('주소이력불확실사유', 'END_UNCONFIRMED'),
+    { kind: 'list', items: ['마지막 이력 아래 끝 표시(이하 여백·다음 구역)를 확인하지 못함 (끝 이력 누락 가능)'] })
+  assert.equal(fieldLabel('주소이력끝근거'), '주소 이력 끝 확인 근거')
   assert.deepEqual(formatField('구성머리글불완전사유', 'FRAGMENT'), { kind: 'list', items: ['보수외소득월액 머리글 글자 일부가 다르게 읽힘'] })
 })
 

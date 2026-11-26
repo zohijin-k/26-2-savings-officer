@@ -219,7 +219,57 @@ def _detect(image, session):
         box *= np.array([w / mw, h / mh], dtype=np.float32)
         box = np.clip(box, (0, 0), (w - 1, h - 1)).astype(np.float32)
         boxes.append(box)
-    return boxes
+    return _align_glyph_boxes(boxes, (w, h))
+
+
+#: (11-26) A box whose long side is under this multiple of its short side holds one or two glyphs.
+#: Its minAreaRect angle then follows the glyph shape (the diagonal stroke of "7", a lone ")"),
+#: not a text line, and warping along it rotates the glyph (synthetic scan: "7" at +26 deg read "1").
+GLYPH_BOX_MAX_ASPECT = 1.5
+#: Boxes at least this elongated are text lines; their median angle is the page text angle.
+LINE_BOX_MIN_ASPECT = 2.0
+#: Glyph boxes within this many degrees of the page text angle keep their detected corners.
+GLYPH_ANGLE_TOLERANCE = 3.0
+
+
+def _box_angle(box) -> float:
+    """Top-edge angle in degrees, folded to [-45, 45) (a rectangle repeats every 90 degrees)."""
+    dx, dy = (float(v) for v in box[1] - box[0])
+    return (math.degrees(math.atan2(dy, dx)) + 45) % 90 - 45
+
+
+def _box_aspect(box) -> float:
+    import numpy as np
+    width, height = float(np.linalg.norm(box[1] - box[0])), float(np.linalg.norm(box[3] - box[0]))
+    return max(width, height) / max(min(width, height), 1e-6)
+
+
+def _align_glyph_boxes(boxes, size):
+    """Re-frame glyph-sized boxes along the page text angle; every other box is returned as is.
+
+    The page text angle is the median angle of elongated (line) boxes. Without line boxes nothing
+    changes. A re-framed box is the rectangle at the page angle that encloses the detected box, so
+    no detected ink is cut off; its corners stay in the [tl, tr, br, bl] order _crop expects.
+    """
+    import numpy as np
+    lines = [_box_angle(box) for box in boxes if _box_aspect(box) >= LINE_BOX_MIN_ASPECT]
+    if not lines:
+        return boxes
+    page_angle = float(np.median(lines))
+    theta = math.radians(page_angle)
+    rotation = np.array([[math.cos(theta), -math.sin(theta)],
+                         [math.sin(theta), math.cos(theta)]], dtype=np.float32)
+    w, h = size
+    aligned = []
+    for box in boxes:
+        off = (_box_angle(box) - page_angle + 45) % 90 - 45
+        if _box_aspect(box) < GLYPH_BOX_MAX_ASPECT and abs(off) > GLYPH_ANGLE_TOLERANCE:
+            local = box @ rotation  # rotate by -page_angle: page text axis -> image axis
+            (x0, y0), (x1, y1) = local.min(axis=0), local.max(axis=0)
+            rect = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.float32) @ rotation.T
+            box = np.clip(rect, (0, 0), (w - 1, h - 1)).astype(np.float32)
+        aligned.append(box)
+    return aligned
 
 
 def _crop(image, box):

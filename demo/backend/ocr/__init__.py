@@ -13,13 +13,15 @@ from engine_v2.pipeline.privacy import mask_data, mask_rrn
 
 from ..rules.doc_types import DocType
 from .base import BBox, OcrAdapter, OcrFallback, OcrResult
-from .fixture import FixtureOcr, fixture_keys
+from .fixture import NAME as FIXTURE_TIER, FixtureOcr, fixture_ocr_enabled, fixture_keys
 from .jbai import JbaiOcr
 from .localocr import LocalOcr, ensure_nhis_required_fields, ensure_business_required_fields, exception_code
 from .pdftext import PdfTextOcr, split_pdf_pages
 from .upstage import UpstageOcr
 
 #: 시도 순서. 앞 계층이 None을 돌려주면 다음으로 넘어간다.
+#: FixtureOcr는 기본으로 꺼져 있어 정상 실행에서는 항상 None이다. 합성 시험만 명시적으로 켠다
+#: (`fixture.synthetic_fixture_ocr`).
 #: 전북AI(JbaiOcr)는 JBAI_API_KEY·JBAI_ALLOW_REAL_DOCS가 모두 있을 때만, 판독기가 있는 서류
 #: (초본·등본·납부확인서·자격득실)의 텍스트 레이어 없는 파일을 맡는다. 실패하면 OcrFallback으로
 #: 사유를 남기고 LocalOcr가 이어받는다.
@@ -51,6 +53,12 @@ def read_document(file_path: str, expected: DocType | None = None) -> OcrResult:
             result = None
         if result is not None:
             break
+
+    if result is not None and result.tier == FIXTURE_TIER and not fixture_ocr_enabled():
+        # 불변식: fixture 판독이 켜지지 않은 프로세스에서는 어떤 업로드 파일도 검증을 건너뛰는
+        # fixture 결과를 받지 않는다. 자동 판독 실패로 처리해 담당자가 확인하게 한다.
+        fallback_reasons.append("FIXTURE_DISABLED")
+        result = None
 
     if result is None:
         result = fallback_result or OcrResult(

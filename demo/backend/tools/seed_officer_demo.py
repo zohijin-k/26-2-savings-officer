@@ -231,11 +231,15 @@ def _create(scenario, samples, storage, allocated):
                                 signature_data_url=signature if kind == "admin_info" else None)
         for kind in ("privacy", "unique_id", "third_party", "admin_info")]), request)
     documents.set_doc_context(aid, documents.DocContextRequest(work_category="직장가입자", workplace_count=1))
-    for slot, filename in SAMPLE_FILES.items():
-        if scenario == "needs-review" and slot == "resident_abstract":
-            filename = REVIEW_SAMPLE
-        upload = UploadFile(filename=filename, file=io.BytesIO(samples[filename]))
-        asyncio.run(documents.upload_document(aid, upload, slot, "2026-03-05"))
+    from ..ocr.fixture import synthetic_fixture_ocr
+    # 올리는 파일은 _samples()가 합성 고지 문구를 확인한 생성기 샘플뿐이다. 그 업로드 동안만
+    # 합성 fixture 판독을 켠다. 서버·실제 업로드 경로에서는 꺼져 있다.
+    with synthetic_fixture_ocr():
+        for slot, filename in SAMPLE_FILES.items():
+            if scenario == "needs-review" and slot == "resident_abstract":
+                filename = REVIEW_SAMPLE
+            upload = UploadFile(filename=filename, file=io.BytesIO(samples[filename]))
+            asyncio.run(documents.upload_document(aid, upload, slot, "2026-03-05"))
     _complete_work(aid)
     review.submit(aid)
     return aid

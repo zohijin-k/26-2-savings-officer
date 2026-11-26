@@ -34,7 +34,7 @@ from .llm_client import TextProvider, configured_provider
 from .models import ReviewSummary, get_session
 
 #: 프롬프트·투영 규칙이 바뀌면 올린다. 해시에 들어가 기존 캐시가 다시 생성된다.
-SUMMARY_VERSION = 4
+SUMMARY_VERSION = 5
 LABEL = "AI 종합의견(참고용)"
 MAX_CHECK_POINTS = 4
 #: 같은 입력으로 방금 실패했다면 이 시간 동안은 다시 부르지 않는다(화면 반복 열기 대비).
@@ -204,6 +204,12 @@ def _document_facts(fields: Mapping[str, Any], names: set[str], birth: str | Non
     return facts
 
 
+def _projected_title(item: Mapping[str, Any]) -> str | None:
+    """review_reasons가 붙인 제목. 문구표(CODE_LABELS)에 있는 코드는 기존 문구를 그대로 쓴다."""
+    title = item.get("title")
+    return title if isinstance(title, str) and title and item.get("code") not in CODE_LABELS else None
+
+
 def summary_payload(detail: Mapping[str, Any], form1: Mapping[str, Any] | None = None,
                     identity: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """`review_detail` 응답 → LLM에 보낼 허용목록 투영.
@@ -233,7 +239,7 @@ def summary_payload(detail: Mapping[str, Any], form1: Mapping[str, Any] | None =
     for reason in (ai.get("reasons") or [])[:30]:
         reasons.append({"code": reason.get("code"), "doc_type": reason.get("doc_type"),
                         "message": scrub.text(reason.get("message"))})
-        add_evidence(reason.get("code"), reason.get("message"))
+        add_evidence(reason.get("code"), reason.get("message"), label=_projected_title(reason))
 
     documents = []
     for doc in (detail.get("documents") or [])[:20]:
@@ -241,7 +247,7 @@ def summary_payload(detail: Mapping[str, Any], form1: Mapping[str, Any] | None =
         for finding in (doc.get("findings") or [])[:10]:
             findings.append({"code": finding.get("code"), "severity": finding.get("severity"),
                              "message": scrub.text(finding.get("message"))})
-            add_evidence(finding.get("code"), finding.get("message"))
+            add_evidence(finding.get("code"), finding.get("message"), label=_projected_title(finding))
         entry: dict[str, Any] = {
             "slot_key": doc.get("slot_key"),
             "label": doc.get("label"),

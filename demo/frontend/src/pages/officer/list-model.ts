@@ -103,3 +103,11 @@ export function selectOfficerDocument(documents: OfficerDocument[], documentId: 
   if (slotKey !== null) return documents.find((doc) => doc.slot_key === slotKey) ?? null
   return null
 }
+
+/**
+ * 신청 목록 펼친 행의 "신청 전체" 줄 (11-27). 이미 서류 줄로 보이는 서류의 사유는 되풀이하지 않는다.
+ * 사유의 document_id는 백엔드 review_reasons가 응답 때 붙인다.
+ */
+export function generalReasons<T extends { document_id?: number | null }>(reasons: readonly T[], shownDocumentIds: ReadonlySet<number>): T[] {
+  return reasons.filter((reason) => reason.document_id == null || !shownDocumentIds.has(reason.document_id))
+}

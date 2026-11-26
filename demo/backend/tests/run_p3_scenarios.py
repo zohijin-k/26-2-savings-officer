@@ -477,7 +477,8 @@ def test_e2e(client) -> None:
     check("점수 관련 필드 없음", _score_leak(status), [])
     raw = json.dumps(status, ensure_ascii=False)
     check("총점 숫자(99)가 응답에 없음", ": 99" in raw or ":99" in raw, False)
-    check("'점수'는 미공개 안내 문장에만 등장", _score_word_fields(status), ["result_notice"])
+    # #48(a930817)이 결과 안내에서 평가결과 비공개 문장을 뺐다: '점수' 낱말은 신청자 응답 어디에도 없어야 한다.
+    check("'점수' 낱말이 신청자 응답에 없음", _score_word_fields(status), [])
     print(f"         안내 문구: {status['result_notice']}")
 
 
@@ -564,7 +565,7 @@ def _score_leak(value: object, path: str = "") -> list[str]:
 
 
 def _score_word_fields(value: object, path: str = "") -> list[str]:
-    """'점수'라는 낱말이 등장하는 필드 경로. 미공개 안내 문장 외에는 없어야 한다."""
+    """'점수'라는 낱말이 등장하는 필드 경로. 신청자 응답에는 없어야 한다(#48 이후 안내 문장에서도 뺐다)."""
     hits: list[str] = []
     if isinstance(value, dict):
         for key, child in value.items():

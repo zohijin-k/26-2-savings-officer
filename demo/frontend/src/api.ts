@@ -16,6 +16,28 @@ export interface Finding {
   how_to_fix: string
   link: string
   severity: 'FAIL' | 'NEEDS_REVIEW'
+  /** 응답 때 붙는 분류·설명 (backend review_reasons). 저장값이 아니다. */
+  category?: string
+  category_label?: string
+  explanation?: string
+  details?: string[]
+}
+/** 신청 단위 사유 (backend review_reasons.project_reasons). origin은 엔진이 저장한 원문이다. */
+export interface ApplicationReason {
+  code: string
+  title?: string
+  message: string
+  doc_type: string | null
+  severity?: 'FAIL' | 'NEEDS_REVIEW'
+  category?: string
+  category_label?: string
+  explanation?: string
+  details?: string[]
+  document_id?: number | null
+  slot_key?: string | null
+  priority?: number
+  stored_message?: string
+  origin?: { code: string; message: string }
 }
 export interface BBox { page: number; x0: number; y0: number; x1: number; y1: number }
 export interface OfficerRole {
@@ -112,6 +134,8 @@ export interface OfficerDocument {
   detected_doc_type: string | null
   status: DocStatus | null
   findings: Finding[]
+  /** 담당자 화면용 분류·제목·설명 (backend review_reasons, 응답 시점). findings는 기존 응답 그대로다. */
+  finding_views?: Finding[]
   /** 인라인 스트리밍 주소. 뷰어가 이 URL을 그대로 읽는다. */
   file_url: string
   file_name: string
@@ -151,7 +175,9 @@ export interface ReviewDetailData {
   ai: {
     final_status: DocStatus | null
     recommended_action: string
-    reasons: { code: string; title?: string; message: string; doc_type: string | null }[]
+    reasons: ApplicationReason[]
+    /** 감사·진단: 엔진이 저장한 신청 단위 사유 원문 (구 응답에는 없다). */
+    stored_reasons?: ApplicationReason[]
   }
   score_sheet: ScoreSheetData
   documents: OfficerDocument[]

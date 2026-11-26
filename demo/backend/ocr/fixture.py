@@ -1,8 +1,15 @@
-"""Tier1 — 시연용 고정 판독 결과.
+"""Tier1 — 합성 시험용 고정 판독 결과.
 
-파일명(확장자 제외)이 아래 표의 키와 같으면 정해진 결과를 돌려준다. 시연 중
-OCR이 흔들려서 화면이 무너지는 사고를 막는 안전장치이자, 시나리오 S1~S10을
-클릭만으로 재현하는 수단이다.
+**기본으로 꺼져 있다.** 애플리케이션을 정상 실행하면 이 계층은 아무 파일도 읽지 않고,
+업로드된 파일은 언제나 실제 판독 계층(JBAI·LocalOcr·PDF 텍스트)으로 간다. fixture
+결과는 신원·발급일·화질 검증을 건너뛰므로, 실제 업로드 파일에 쓰이면 내용과 무관한
+자동 적합이 된다. 그래서 켜는 곳은 시험 패키지(`demo/backend/tests`)와, 생성기 샘플만
+올리는 합성 시드 도구뿐이며 `synthetic_fixture_ocr()`로 명시적으로 켠다. 환경변수로는
+켤 수 없다.
+
+켜져 있어도 파일명(확장자 제외)이 아래 표의 키와 같고 본문이 `make_samples`가 만든 그
+키의 더미 문구와 정확히 같을 때만 정해진 결과를 돌려준다. 파일명만 같은 다른 파일은
+실제 판독 계층으로 넘긴다. 시나리오 S1~S12를 같은 결과로 재현하는 수단이다.
 
 샘플 파일은 저장소에 커밋하지 않는다. `demo/fixtures/make_samples.py`를 돌리면
 여기 정의된 키와 같은 이름의 더미 PDF가 `demo/fixtures/samples/`에 생성된다.
@@ -10,6 +17,8 @@ OCR이 흔들려서 화면이 무너지는 사고를 막는 안전장치이자, 
 """
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
@@ -17,6 +26,34 @@ from ..rules.doc_types import DocType
 from .base import BBox, OcrResult
 
 NAME = "fixture"
+
+#: 프로세스 전체 스위치. 정상 실행 경로에서는 절대 켜지 않는다.
+_enabled = False
+
+
+def fixture_ocr_enabled() -> bool:
+    """이 프로세스에서 합성 fixture 판독이 명시적으로 켜져 있는가."""
+    return _enabled
+
+
+@contextmanager
+def synthetic_fixture_ocr(enabled: bool = True) -> Iterator[None]:
+    """시험·합성 시드 도구 전용으로 fixture 판독을 켜거나 끈다. 나가면 이전 상태로 돌린다.
+
+    실제 사용자가 올린 파일을 판독하는 경로(서버·검증 도구)에서는 쓰지 않는다.
+    """
+    global _enabled
+    previous, _enabled = _enabled, enabled
+    try:
+        yield
+    finally:
+        _enabled = previous
+
+
+def enable_synthetic_fixture_ocr_for_tests() -> None:
+    """시험 패키지가 import될 때 한 번 켠다. 시험 프로세스 밖에서는 부르지 않는다."""
+    global _enabled
+    _enabled = True
 
 #: 초본 본문에서 성명이 찍히는 대략적인 위치. 담당자 화면 하이라이트 시연용.
 _ABSTRACT_BOXES = {
@@ -373,16 +410,53 @@ FIXTURES: dict[str, OcrResult] = {
 }
 
 
+def _squeeze(text: str) -> str:
+    return "".join(text.split())
+
+
+def is_generated_sample(path: Path, stem: str) -> bool:
+    """`make_samples`가 그 키로 만든 시연용 더미 PDF와 본문이 정확히 같은가.
+
+    fixture 결과는 신원·발급일·화질 검증을 건너뛰므로, 파일명만 같은 다른 서류
+    (예: 초본 이름을 붙인 재학증명서)에 쓰이면 내용과 무관한 자동 적합이 된다.
+    """
+    if path.suffix.lower() != ".pdf":
+        return False
+    from ...fixtures.make_samples import SAMPLE_PASSWORD, sample_lines
+
+    try:
+        import pymupdf
+
+        with pymupdf.open(path) as document:
+            if document.needs_pass and not document.authenticate(SAMPLE_PASSWORD):
+                return False
+            if document.page_count != 1:
+                return False
+            text = document[0].get_text()
+    except Exception:  # noqa: BLE001 - 못 여는 파일은 다음 계층이 판정한다
+        return False
+    return _squeeze(text) == _squeeze("".join(sample_lines(stem)))
+
+
 class FixtureOcr:
-    """파일명으로 사전 정의된 결과를 찾는다. 못 찾으면 None → 다음 계층으로."""
+    """명시적으로 켜진 합성 시험에서, 생성기 샘플 파일에만 사전 정의된 결과를 돌려준다.
+
+    꺼져 있거나 샘플이 아니면 None → 다음 계층으로.
+    """
 
     name = NAME
 
     def read(self, file_path: str, expected: DocType | None) -> OcrResult | None:
-        del expected  # fixture는 기대 문서종류와 무관하게 파일명으로만 찾는다
-        stem = Path(file_path).stem
+        del expected  # fixture는 기대 문서종류와 무관하다
+        if not _enabled:
+            return None
+        path = Path(file_path)
+        stem = path.stem
         hit = FIXTURES.get(stem)
         if hit is None:
+            return None
+        # 파일명만으로는 고정 결과를 고르지 않는다. 내용이 생성기 샘플과 다르면 실제 판독으로 넘긴다.
+        if not is_generated_sample(path, stem):
             return None
         # 호출자가 결과를 바꿔도 표가 오염되지 않게 복사해 돌려준다.
         return OcrResult(

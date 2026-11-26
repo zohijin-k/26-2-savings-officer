@@ -228,6 +228,9 @@ def to_engine_documents(rows: list[dict[str, Any]], requirements=None) -> list:
             # Missing evidence must not turn a legacy stored PASS into a new PASS.
             confidence = min(confidence, 0.4)
         image_quality = float(row.get("image_quality") or 0.0)
+        if not row.get("doc_type") and not row.get("is_encrypted"):
+            # 판독된 종류가 없는 파일은 요구 종류 자리에 두되, 그 자리를 적합으로 채우지 않는다.
+            confidence = min(confidence, 0.4)
         payment_failed = (doc_type == str(DocType.NHIS_PAYMENT) and
                           has_failed_payment_validation(row.get("fields") or {}))
         if payment_failed or (row.get("status") == "NEEDS_REVIEW" and confidence >= engine_config.OCR_CONFIDENCE_THRESHOLD):

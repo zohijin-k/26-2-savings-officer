@@ -2,6 +2,12 @@
 
 from pathlib import Path
 
+from demo.backend.ocr.fixture import enable_synthetic_fixture_ocr_for_tests
+
+# 합성 시나리오 시험은 생성기 샘플의 고정 판독 결과에 기대므로 이 시험 패키지 안에서만
+# fixture 판독을 명시적으로 켠다. 앱을 정상 실행하면 꺼져 있다(test_fixture_ocr_isolation).
+enable_synthetic_fixture_ocr_for_tests()
+
 SAMPLES_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "samples"
 
 

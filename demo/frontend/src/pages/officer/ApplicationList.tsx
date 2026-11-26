@@ -239,7 +239,7 @@ function Reasons({ id, row, state, onRetry, onOpen }: {
   const data = state?.status === 'ready' ? state.data : null
   const documents = data?.documents.filter((doc) => doc.status !== 'PASS') ?? []
   const missing = (row.documents ?? []).filter((doc) => doc.document_id === null && doc.required)
-  const general = data ? generalReasons(data.ai.reasons, new Set(documents.map((doc) => doc.document_id))) : []
+  const general = data ? generalReasons(data.ai.reasons, documents) : []
   const rejected = row.decision === 'reject'
   return <div className="alist__reasons" id={id} role="region" aria-label={`${row.application_no} ${rejected ? '반려' : '확인 필요'} 사유`}>
     {(!state || state.status === 'loading') && <p className="alist__reasons-note" role="status">사유를 불러오는 중입니다.</p>}

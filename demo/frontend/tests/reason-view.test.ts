@@ -44,8 +44,10 @@ test('the backend priority decides what the officer checks first', () => {
   assert.equal(primaryReason([]), null)
 })
 
-test('list row does not repeat reasons of documents it already shows', () => {
+test('list row does not repeat a reason its shown document already stores, but keeps engine-only reasons', () => {
   const income = { code: 'INCOME_UNDETERMINED', message: '합성', doc_type: null }
   const hiddenDoc = { ...scan, document_id: 9 }
-  assert.deepEqual(generalReasons([scan, income, hiddenDoc], new Set([7])), [income, hiddenDoc])
+  const engineOnly = { code: 'LOW_OCR_CONFIDENCE', message: '합성', doc_type: '통장사본', document_id: 7 }
+  const shown = [{ document_id: 7, findings: [{ code: 'ADDRESS_HISTORY_INCOMPLETE' }] }]
+  assert.deepEqual(generalReasons([scan, income, hiddenDoc, engineOnly], shown), [income, hiddenDoc, engineOnly])
 })

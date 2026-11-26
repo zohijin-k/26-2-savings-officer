@@ -27,6 +27,7 @@ from .engine_adapter import engine_config
 CATEGORIES: dict[str, tuple[str, int]] = {
     "conflict": ("정보 충돌", 10),
     "missing": ("필수 정보 누락", 20),
+    "issue_date": ("발급일 요건 확인", 25),
     "doc_type": ("문서 종류 확인 필요", 30),
     "completeness": ("서류 완결성 확인 필요", 40),
     "quality": ("파일·화질 확인 필요", 50),
@@ -34,6 +35,8 @@ CATEGORIES: dict[str, tuple[str, int]] = {
     "manual": ("담당자 수동 검토 대상", 70),
     "other": ("담당자 확인 필요", 80),
 }
+#: 확인필요 등급의 "필수 정보" 사유는 누락으로 단정하지 않는다(부적합으로 확정된 것만 "누락").
+MISSING_REVIEW_LABEL = "필수 정보 확인 필요"
 
 _CODE_CATEGORY: dict[str, str] = {
     **dict.fromkeys((
@@ -44,13 +47,13 @@ _CODE_CATEGORY: dict[str, str] = {
     ), "conflict"),
     **dict.fromkeys((
         "MISSING_REQUIRED_DOC", "MISSING_REQUIRED_FIELD", "MISSING_SIGNATURE", "ISSUE_DATE_MISSING",
-        "MISSING_ADDRESS_DATES", "MISSING_ADDRESS_HISTORY", "MISSING_BILLING_MONTHS", "PAGES_INCOMPLETE",
-        "PAGES_DUPLICATED", "PAST_ADDRESS_OMISSION_SUSPECTED", "NHIS_HISTORY_PERIOD_MISSING",
-        "DAILY_RECORDS_PARTIALLY_SELECTED", "DOCUMENT_ISSUED_TOO_EARLY", "DOCUMENT_ISSUED_AFTER_APPLICATION",
-        "ADMIN_CONSENT_NOT_GIVEN",
+        "MISSING_ADDRESS_DATES", "MISSING_ADDRESS_HISTORY", "MISSING_BILLING_MONTHS",
+        "NHIS_HISTORY_PERIOD_MISSING", "DAILY_RECORDS_PARTIALLY_SELECTED", "ADMIN_CONSENT_NOT_GIVEN",
     ), "missing"),
+    **dict.fromkeys(("DOCUMENT_ISSUED_TOO_EARLY", "DOCUMENT_ISSUED_AFTER_APPLICATION"), "issue_date"),
+    **dict.fromkeys(("ADDRESS_HISTORY_INCOMPLETE", "PAST_ADDRESS_OMISSION_SUSPECTED",
+                     "PAGES_INCOMPLETE", "PAGES_DUPLICATED"), "completeness"),
     **dict.fromkeys(("UNKNOWN_DOCUMENT_TYPE", "WRONG_DOCUMENT_TYPE"), "doc_type"),
-    "ADDRESS_HISTORY_INCOMPLETE": "completeness",
     **dict.fromkeys((
         "LOW_IMAGE_QUALITY", "IMAGE_RESOLUTION_TOO_LOW", "SCREEN_CAPTURE_SUSPECTED", "UNREADABLE_FILE",
     ), "quality"),
@@ -161,69 +164,107 @@ def _confidence(doc: Mapping[str, Any]) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
-def _replacement(reason: Mapping[str, Any], documents: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """엔진 LOW_OCR_CONFIDENCE 한 건 → 해당 서류의 실제 사유들. 근거가 없으면 원래 사유를 정확한 말로."""
-    origin = {"code": reason.get("code"), "message": reason.get("message")}
-    matches = [doc for doc in documents if reason.get("doc_type") and _doc_type_of(doc) == reason.get("doc_type")]
-    out: list[dict[str, Any]] = []
-    for doc in matches:
-        if doc.get("status") not in _REVIEW_STATES:
-            continue
-        for finding in doc.get("findings") or []:
-            if not isinstance(finding, Mapping):
-                continue  # 과거 문자열 사유는 분류할 수 없다. 서류 화면에는 그대로 남는다.
-            code = finding.get("code")
-            if not isinstance(code, str) or code == "LOW_OCR_CONFIDENCE":
-                continue
-            if finding.get("severity", "FAIL") not in _REVIEW_STATES:
-                continue
-            info = describe(code, doc.get("extracted"))
-            item = {
-                "stage": reason.get("stage"), "code": code, "severity": finding.get("severity", "FAIL"),
-                "message": info.get("explanation") or finding.get("message") or "",
-                "doc_type": reason.get("doc_type"), "slot_key": doc.get("slot_key"),
-                "document_id": doc.get("document_id"), "origin": origin, **info,
-            }
-            item.setdefault("title", finding.get("title") or _first_sentence(str(finding.get("message") or "")))
-            if info.get("explanation") and finding.get("message"):
-                item["stored_message"] = finding.get("message")
-            out.append(item)
-    if out:
-        return out
-    low = [doc for doc in matches if (_confidence(doc) is not None
-                                      and _confidence(doc) < engine_config.OCR_CONFIDENCE_THRESHOLD)]
-    target = (low or matches or [{}])[0]
-    item = {**dict(reason), "severity": "NEEDS_REVIEW", "slot_key": target.get("slot_key"),
-            "document_id": target.get("document_id")}
-    if low:
-        item.update(describe("LOW_OCR_CONFIDENCE"))
-        item["explanation"] = (f"자동 판독 신뢰도 {round(_confidence(target) * 100)}%로 기준"
-                               f"({round(engine_config.OCR_CONFIDENCE_THRESHOLD * 100)}%)보다 낮습니다. "
-                               "원본에서 값을 확인해 주세요.")
-    else:
-        # 엔진이 이 서류를 자동 적합으로 확정하지 않았지만 서류에 저장된 구체 사유가 없다. 판독 실패로 단정하지 않는다.
-        item.update({"category": "other", "category_label": CATEGORIES["other"][0],
-                     "title": "자동 적합 확정 안 됨",
-                     "explanation": "자동 판정이 이 서류를 적합으로 확정하지 않았습니다. 원본에서 확인해 주세요."})
-        item["origin"] = origin
-    item["message"] = item["explanation"]
-    item["stored_message"] = reason.get("message")
-    return [item]
+def _graded(item: dict[str, Any]) -> dict[str, Any]:
+    """확인필요(또는 등급 미상) "필수 정보" 사유는 "누락" 대신 "확인 필요"로 보인다."""
+    if item.get("category") == "missing" and item.get("severity") != "FAIL":
+        item["category_label"] = MISSING_REVIEW_LABEL
+    return item
 
 
 def _with_info(reason: Mapping[str, Any], extracted: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """저장된 사유에 분류를 붙인다. 이 모듈이 제목을 정하지 않은 코드는 저장된 제목을 유지한다."""
+    """저장된 사유에 분류를 붙인다. 이 모듈이 제목을 정하지 않은 코드는 저장된 제목을 유지한다.
+
+    설명(explanation)이 저장 문장을 대신해 보일 때는 저장 문장을 stored_message로 함께 남긴다(감사용).
+    """
     item = dict(reason)
     info = describe(str(item.get("code") or ""), extracted)
     stored_title = item.get("title")
     item.update(info)
     if "title" not in info:
         item["title"] = stored_title or _first_sentence(str(item.get("message") or ""))
+    if info.get("explanation") and item.get("message") and item["message"] != info["explanation"]:
+        item.setdefault("stored_message", item["message"])
+    return _graded(item)
+
+
+def _specific_findings(doc: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """서류에 저장된 확인필요·부적합 사유(코드가 있는 것). 서류 자체의 LOW_OCR_CONFIDENCE도 실제 사유다."""
+    return [finding for finding in doc.get("findings") or []
+            if isinstance(finding, Mapping) and isinstance(finding.get("code"), str)
+            and finding.get("severity", "FAIL") in _REVIEW_STATES]
+
+
+def _fallback(reason: Mapping[str, Any], doc: Mapping[str, Any]) -> dict[str, Any]:
+    """서류에 구체 사유가 없을 때: 실제 신뢰도가 기준 미만이면 OCR 신뢰도, 아니면 '자동 적합 확정 안 됨'."""
+    origin = {"code": reason.get("code"), "message": reason.get("message")}
+    item = {**dict(reason), "severity": "NEEDS_REVIEW", "slot_key": doc.get("slot_key"),
+            "document_id": doc.get("document_id"), "stored_message": reason.get("message")}
+    confidence = _confidence(doc)
+    if confidence is not None and confidence < engine_config.OCR_CONFIDENCE_THRESHOLD:
+        item.update(describe("LOW_OCR_CONFIDENCE"))
+        item["explanation"] = (f"자동 판독 신뢰도 {round(confidence * 100)}%로 기준"
+                               f"({round(engine_config.OCR_CONFIDENCE_THRESHOLD * 100)}%)보다 낮습니다. "
+                               "원본에서 값을 확인해 주세요.")
+    else:
+        # 엔진이 이 서류를 자동 적합으로 확정하지 않았지만 서류에 저장된 구체 사유가 없다. 판독 실패로 단정하지 않는다.
+        item.update({"category": "other", "category_label": CATEGORIES["other"][0], "title": "자동 적합 확정 안 됨",
+                     "explanation": "자동 판정이 이 서류를 적합으로 확정하지 않았습니다. 원본에서 확인해 주세요.",
+                     "origin": origin})
+    item["message"] = item["explanation"]
     return item
 
 
-#: 엔진 1단계(engine/stage1_document_check.py)가 확인필요로만 내는 코드. 나머지 1단계 코드는 부적합이다.
+def _document_items(reason: Mapping[str, Any], doc: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """엔진 LOW_OCR_CONFIDENCE 한 건이 가리키는 서류 하나 → 그 서류의 실제 사유들(없으면 대체 한 건)."""
+    origin = {"code": reason.get("code"), "message": reason.get("message")}
+    out = []
+    for finding in _specific_findings(doc):
+        item = _with_info(finding, doc.get("extracted"))
+        item.update({"stage": reason.get("stage"), "severity": finding.get("severity", "FAIL"),
+                     "message": item.get("explanation") or finding.get("message") or "",
+                     "doc_type": reason.get("doc_type"), "slot_key": doc.get("slot_key"),
+                     "document_id": doc.get("document_id"), "origin": origin})
+        for key in ("how_to_fix", "link", "detail"):
+            item.pop(key, None)
+        out.append(_graded(item))
+    return out or [_fallback(reason, doc)]
+
+
+def _replacement(reason: Mapping[str, Any], documents: list[Mapping[str, Any]], expected: int) -> list[dict[str, Any]]:
+    """엔진 LOW_OCR_CONFIDENCE → 같은 종류 서류들의 실제 사유.
+
+    엔진 사유에는 칸(slot)이 없어 종류로만 찾는다. 같은 종류 서류가 여럿(예: 근로확인서류 1·2)이면
+    확인필요·부적합 서류마다 자기 사유를 낸다. 그런 서류 수가 엔진 사유 수(expected)보다 적으면
+    저장 판정이 적합인데 엔진이 낮춘 서류(예: 발급일 근거 없음)도 대체 사유로 함께 보인다. 사유를 버리지 않는다.
+    """
+    matches = [doc for doc in documents if reason.get("doc_type") and _doc_type_of(doc) == reason.get("doc_type")]
+    if not matches:
+        return [_fallback(reason, {})]
+    flagged = [doc for doc in matches if doc.get("status") in _REVIEW_STATES]
+    targets = flagged if len(flagged) >= expected else matches
+    return [item for doc in targets for item in _document_items(reason, doc)]
+
+
+#: 엔진 1단계(engine/stage1_document_check.py)가 확인필요로만 내는 코드.
 _ENGINE_REVIEW_CODES = frozenset({"LOW_OCR_CONFIDENCE", "DECLARED_DATE_UNCERTAIN"})
+#: 화질 등급에 따라 부적합·확인필요가 갈리는 코드. 저장 사유가 없으면 등급을 지어내지 않는다.
+_ENGINE_GRADED_CODES = frozenset({"LOW_IMAGE_QUALITY"})
+
+
+def _owner(reason: Mapping[str, Any], documents: list[Mapping[str, Any]], used: set[Any]) -> Mapping[str, Any] | None:
+    """엔진 사유(LOW_OCR 외)의 서류: 같은 코드를 저장한 같은 종류 서류 중 아직 배정되지 않은 것.
+
+    그런 서류가 없고 같은 종류 서류가 하나뿐이면 그 서류. 여럿이면 추측하지 않는다(None).
+    """
+    same_type = [d for d in documents if reason.get("doc_type") and _doc_type_of(d) == reason.get("doc_type")]
+    holders = [d for d in same_type if any(isinstance(f, Mapping) and f.get("code") == reason.get("code")
+                                           for f in d.get("findings") or [])]
+    for doc in holders:
+        if (reason.get("code"), doc.get("document_id")) not in used:
+            return doc
+    if holders:
+        return holders[0]
+    return same_type[0] if len(same_type) == 1 else None
 
 
 def _severity(reason: Mapping[str, Any], doc: Mapping[str, Any] | None) -> str | None:
@@ -232,26 +273,30 @@ def _severity(reason: Mapping[str, Any], doc: Mapping[str, Any] | None) -> str |
                    if isinstance(f, Mapping) and f.get("code") == code), None)
     if stored:
         return str(stored)
-    if reason.get("stage") != "stage1_document":
-        return None  # 데모 자체 1단계 사유는 등급을 저장하지 않는다. 지어내지 않는다.
+    if reason.get("stage") != "stage1_document" or code in _ENGINE_GRADED_CODES:
+        return None  # 데모 자체 1단계 사유·화질 등급은 저장 사유 없이 지어내지 않는다.
     return "NEEDS_REVIEW" if code in _ENGINE_REVIEW_CODES else "FAIL"
 
 
 def project_reasons(reasons: Iterable[Mapping[str, Any]], documents: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """신청 단위 사유 → 담당자 화면용 목록 (응답 시점, 저장하지 않음)."""
+    reasons = [reason for reason in reasons if isinstance(reason, Mapping)]
+    low_count: dict[Any, int] = {}
+    for reason in reasons:
+        if reason.get("code") == "LOW_OCR_CONFIDENCE" and str(reason.get("stage") or "").startswith("stage1"):
+            low_count[reason.get("doc_type")] = low_count.get(reason.get("doc_type"), 0) + 1
     document_reasons: list[dict[str, Any]] = []
     other_reasons: list[dict[str, Any]] = []
-    seen: set[tuple[Any, Any]] = set()
+    seen: set[tuple[Any, ...]] = set()
+    used: set[tuple[Any, Any]] = set()
     for reason in reasons:
-        if not isinstance(reason, Mapping):
-            continue
         if not str(reason.get("stage") or "").startswith("stage1"):
             other_reasons.append(_with_info(reason) if reason.get("code") in _CODE_CATEGORY else dict(reason))
             continue
         if reason.get("code") == "LOW_OCR_CONFIDENCE":
-            items = _replacement(reason, documents)
+            items = _replacement(reason, documents, low_count.get(reason.get("doc_type"), 1))
         else:
-            doc = next((d for d in documents if _doc_type_of(d) == reason.get("doc_type")), None)
+            doc = _owner(reason, documents, used)
             item = _with_info(reason, doc.get("extracted") if doc else None)
             severity = _severity(reason, doc)
             if severity:
@@ -259,9 +304,11 @@ def project_reasons(reasons: Iterable[Mapping[str, Any]], documents: list[Mappin
             if doc:
                 item.setdefault("slot_key", doc.get("slot_key"))
                 item.setdefault("document_id", doc.get("document_id"))
-            items = [item]
+                used.add((reason.get("code"), doc.get("document_id")))
+            items = [_graded(item)]
         for item in items:
-            key = (item.get("code"), item.get("document_id") or item.get("doc_type"))
+            key = ((item.get("code"), item.get("document_id")) if item.get("document_id") is not None
+                   else (item.get("code"), item.get("doc_type"), item.get("message")))
             if key in seen:
                 continue
             seen.add(key)

@@ -85,7 +85,7 @@ def test_unknown_type_missing_field_and_true_low_ocr_are_distinct():
     items = project_reasons([low("건강보험료납부확인서"), low("건강보험자격확인서"), low("4대보험가입내역확인서")], docs)
     by_doc = {item["document_id"]: item for item in items}
     assert by_doc[2]["code"] == "UNKNOWN_DOCUMENT_TYPE" and by_doc[2]["title"] == "문서 종류 판별 불가"
-    assert by_doc[3]["code"] == "MISSING_REQUIRED_FIELD" and by_doc[3]["category_label"] == "필수 정보 누락"
+    assert by_doc[3]["code"] == "MISSING_REQUIRED_FIELD" and by_doc[3]["category_label"] == "필수 정보 확인 필요"  # 확인필요 등급은 누락으로 단정하지 않음
     assert by_doc[4]["code"] == "LOW_OCR_CONFIDENCE" and by_doc[4]["category"] == "ocr"
     assert "60%" in by_doc[4]["message"] and "85%" in by_doc[4]["message"]
     # 우선순위: 필수 정보 누락 → 문서 종류 → OCR 신뢰도
@@ -124,6 +124,77 @@ def test_legacy_string_findings_do_not_break_projection():
     views = annotate_findings(legacy["findings"], {})
     assert views[0] == {"message": "FAKE 글자만 있는 과거 사유", "category": "other",
                         "category_label": "담당자 확인 필요", "title": "FAKE 글자만 있는 과거 사유"}
+
+
+def test_same_type_documents_each_keep_their_own_reason():
+    # 근로확인서류 1·2처럼 같은 종류 칸이 여럿이면 엔진 사유(칸 없음)가 둘 다 같은 종류를 가리킨다.
+    first = doc("4대보험가입내역확인서", document_id=11, findings=[finding("IDENTITY_UNCERTAIN")])
+    second = doc("4대보험가입내역확인서", document_id=12, confidence=.3)
+    items = project_reasons([low("4대보험가입내역확인서"), low("4대보험가입내역확인서")], [first, second])
+    by_doc = {item["document_id"]: item for item in items}
+    assert set(by_doc) == {11, 12}
+    assert by_doc[11]["code"] == "IDENTITY_UNCERTAIN"
+    assert by_doc[12]["code"] == "LOW_OCR_CONFIDENCE" and "30%" in by_doc[12]["message"]
+
+
+def test_engine_capped_pass_document_is_not_dropped_when_reasons_outnumber_flagged_docs():
+    flagged = doc("4대보험가입내역확인서", document_id=21, findings=[finding("MISSING_REQUIRED_FIELD")])
+    capped = doc("4대보험가입내역확인서", document_id=22, status="PASS")
+    items = project_reasons([low("4대보험가입내역확인서"), low("4대보험가입내역확인서")], [flagged, capped])
+    assert {item["document_id"] for item in items} == {21, 22}
+    assert next(i for i in items if i["document_id"] == 22)["title"] == "자동 적합 확정 안 됨"
+    # 엔진 사유가 하나뿐이면 적합 서류에 사유를 지어 붙이지 않는다.
+    assert {i["document_id"] for i in project_reasons([low("4대보험가입내역확인서")], [flagged, capped])} == {21}
+
+
+def test_non_low_engine_reason_goes_to_the_document_that_stores_it():
+    first = doc("4대보험가입내역확인서", document_id=31, status="PASS")
+    second = doc("4대보험가입내역확인서", document_id=32, status="FAIL",
+                 findings=[finding("DOCUMENT_ISSUED_TOO_EARLY", "FAIL")])
+    reason = {"stage": "stage1_document", "code": "DOCUMENT_ISSUED_TOO_EARLY", "message": "합성 발급일 이전",
+              "doc_type": "4대보험가입내역확인서"}
+    [item] = project_reasons([reason], [first, second])
+    assert item["document_id"] == 32 and item["category_label"] == "발급일 요건 확인" and item["severity"] == "FAIL"
+    # 두 서류 모두 같은 코드면 각각 자기 서류로 남는다.
+    both = [doc("4대보험가입내역확인서", document_id=d, status="FAIL", findings=[finding("IDENTITY_MISMATCH", "FAIL")])
+            for d in (41, 42)]
+    mismatch = {**reason, "code": "IDENTITY_MISMATCH"}
+    assert [i["document_id"] for i in project_reasons([mismatch, mismatch], both)] == [41, 42]
+    # 저장 사유가 없고 같은 종류가 여럿이면 서류를 추측하지 않는다.
+    [unknown] = project_reasons([reason], [doc("4대보험가입내역확인서", document_id=51, status="PASS"),
+                                           doc("4대보험가입내역확인서", document_id=52, status="PASS")])
+    assert unknown.get("document_id") is None
+
+
+def test_review_grade_wording_never_asserts_missing():
+    past = doc("주민등록초본", findings=[finding("PAST_ADDRESS_OMISSION_SUSPECTED")])
+    [item] = project_reasons([low("주민등록초본")], [past])
+    assert item["category"] == "completeness" and "누락" not in item["category_label"]
+    review = doc("주민등록초본", findings=[finding("MISSING_REQUIRED_FIELD")])
+    [item] = project_reasons([low("주민등록초본")], [review])
+    assert item["category_label"] == "필수 정보 확인 필요"
+    confirmed = doc("주민등록초본", status="FAIL", findings=[finding("MISSING_ADDRESS_DATES", "FAIL")])
+    [item] = project_reasons([low("주민등록초본")], [confirmed])
+    assert item["category_label"] == "필수 정보 누락"  # 부적합으로 확정된 것만 "누락"
+
+
+def test_stored_document_low_ocr_finding_is_kept_next_to_other_reasons():
+    both = doc("주민등록초본", confidence=.4, findings=[finding("LOW_OCR_CONFIDENCE"), finding("DECLARED_DATE_UNCERTAIN")])
+    codes = {item["code"] for item in project_reasons([low("주민등록초본")], [both])}
+    assert codes == {"LOW_OCR_CONFIDENCE", "DECLARED_DATE_UNCERTAIN"}
+
+
+def test_quality_reason_without_stored_finding_gets_no_invented_grade():
+    reason = {"stage": "stage1_document", "code": "LOW_IMAGE_QUALITY", "message": "합성 화질", "doc_type": "통장사본"}
+    [item] = project_reasons([reason], [doc("통장사본", status="PASS")])
+    assert "severity" not in item
+
+
+def test_explanation_keeps_stored_sentence_for_audit():
+    from demo.backend.review_reasons import annotate_findings
+    [view] = annotate_findings(SCAN_DOC["findings"], SCAN_DOC["extracted"])
+    assert view["explanation"] == SCAN_COMPLETENESS_EXPLANATION
+    assert view["stored_message"] == SCAN_DOC["findings"][0]["message"] == view["message"]
 
 
 def test_duplicate_reasons_for_the_same_document_collapse():

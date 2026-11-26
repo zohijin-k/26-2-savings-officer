@@ -17,8 +17,11 @@ from ..backend.ocr.fixture import FIXTURES
 
 OUT_DIR = Path(__file__).resolve().parent / "samples"
 
+#: S6 암호 샘플의 사용자 암호. Tier1이 샘플 본문을 확인할 때도 쓴다.
+SAMPLE_PASSWORD = "1234"
+
 #: 파일명 키워드 → 본문에 넣을 더미 문구.
-#: Tier1이 파일명으로 먼저 잡으므로 본문은 사람이 열어봤을 때의 설명용이다.
+#: Tier1은 파일명과 함께 본문이 이 문구(sample_lines)와 정확히 같은지 확인한다.
 BODY_HINTS: list[tuple[str, list[str]]] = [
     ("P9_건강보험료납부확인서_부모명의", ["건강보험료 납부확인서", "성명 : 김보호자", "고지금액 : 200,000"]),
     ("P9_건강보험자격확인서_부모명의_본인포함", ["건강보험 자격확인서", "가입자 성명 : 김보호자", "가구원 : 김전북 1999-01-01"]),
@@ -75,11 +78,16 @@ def _body(stem: str) -> list[str]:
     return [stem, "", "※ 시연용 더미 문서입니다. 실제 서류가 아닙니다."]
 
 
+def sample_lines(stem: str) -> list[str]:
+    """그 키의 샘플 PDF에 찍히는 본문 줄. Tier1이 업로드 파일과 대조한다."""
+    return _body(stem)
+
+
 def _fill_amount(stem: str, lines: list[str]) -> list[str]:
     """파일명 끝의 금액(S10_결제영수증_정장70000)을 본문 금액과 맞춘다.
 
-    Tier1 fixture가 파일명으로 먼저 잡으므로 판정에는 영향이 없지만, 사람이 파일을
-    열어봤을 때 본문과 판독 결과가 다르면 시연 중에 설명이 꼬인다.
+    Tier1 fixture는 이 본문까지 대조하므로, 금액을 바꾸면 그 샘플은 다시 생성해야 한다.
+    사람이 파일을 열어봤을 때 본문과 판독 결과가 다르면 시연 중에 설명이 꼬인다.
     """
     digits = "".join(c for c in stem.rsplit("_", 1)[-1] if c.isdigit())
     if not digits or "결제금액" not in " ".join(lines):
@@ -107,7 +115,7 @@ def make(stem: str, out_dir: Path) -> Path:
     target = out_dir / f"{stem}.pdf"
     if "암호" in stem:
         # S6 재현: 사용자 암호가 걸린 PDF.
-        doc.save(target, encryption=fitz.PDF_ENCRYPT_AES_256, user_pw="1234")
+        doc.save(target, encryption=fitz.PDF_ENCRYPT_AES_256, user_pw=SAMPLE_PASSWORD)
     else:
         doc.save(target)
     doc.close()

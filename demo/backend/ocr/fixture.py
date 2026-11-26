@@ -1,6 +1,8 @@
 """Tier1 — 시연용 고정 판독 결과.
 
-파일명(확장자 제외)이 아래 표의 키와 같으면 정해진 결과를 돌려준다. 시연 중
+파일명(확장자 제외)이 아래 표의 키와 같고 본문이 `make_samples`가 만든 그 키의
+더미 문구와 정확히 같으면 정해진 결과를 돌려준다. 파일명만 같은 다른 파일은 실제
+판독 계층으로 넘긴다. 시연 중
 OCR이 흔들려서 화면이 무너지는 사고를 막는 안전장치이자, 시나리오 S1~S10을
 클릭만으로 재현하는 수단이다.
 
@@ -373,16 +375,48 @@ FIXTURES: dict[str, OcrResult] = {
 }
 
 
+def _squeeze(text: str) -> str:
+    return "".join(text.split())
+
+
+def is_generated_sample(path: Path, stem: str) -> bool:
+    """`make_samples`가 그 키로 만든 시연용 더미 PDF와 본문이 정확히 같은가.
+
+    fixture 결과는 신원·발급일·화질 검증을 건너뛰므로, 파일명만 같은 다른 서류
+    (예: 초본 이름을 붙인 재학증명서)에 쓰이면 내용과 무관한 자동 적합이 된다.
+    """
+    if path.suffix.lower() != ".pdf":
+        return False
+    from ...fixtures.make_samples import SAMPLE_PASSWORD, sample_lines
+
+    try:
+        import pymupdf
+
+        with pymupdf.open(path) as document:
+            if document.needs_pass and not document.authenticate(SAMPLE_PASSWORD):
+                return False
+            if document.page_count != 1:
+                return False
+            text = document[0].get_text()
+    except Exception:  # noqa: BLE001 - 못 여는 파일은 다음 계층이 판정한다
+        return False
+    return _squeeze(text) == _squeeze("".join(sample_lines(stem)))
+
+
 class FixtureOcr:
-    """파일명으로 사전 정의된 결과를 찾는다. 못 찾으면 None → 다음 계층으로."""
+    """시연용 더미 샘플 파일에만 사전 정의된 결과를 돌려준다. 아니면 None → 다음 계층으로."""
 
     name = NAME
 
     def read(self, file_path: str, expected: DocType | None) -> OcrResult | None:
-        del expected  # fixture는 기대 문서종류와 무관하게 파일명으로만 찾는다
-        stem = Path(file_path).stem
+        del expected  # fixture는 기대 문서종류와 무관하다
+        path = Path(file_path)
+        stem = path.stem
         hit = FIXTURES.get(stem)
         if hit is None:
+            return None
+        # 파일명만으로는 고정 결과를 고르지 않는다. 내용이 생성기 샘플과 다르면 실제 판독으로 넘긴다.
+        if not is_generated_sample(path, stem):
             return None
         # 호출자가 결과를 바꿔도 표가 오염되지 않게 복사해 돌려준다.
         return OcrResult(

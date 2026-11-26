@@ -89,3 +89,69 @@ def test_unnumbered_bracketed_annotation_keeps_legacy_note_semantics(continuatio
     result = reader.extract(pages)
     assert all(validation.passed for validation in result.validations)
     assert result.warnings == []
+
+
+def _without_row(pages, number):
+    """Drop every OCR word of one history row (its ordinal line ±1.3% of page height)."""
+    for page, result in pages:
+        height = page.pixel_size[1]
+        found = [w for w in result.words if w.bbox_px[0] / page.pixel_size[0] * 100 < 11.5 and w.text == str(number)]
+        if found:
+            centre = (found[0].bbox_px[1] + found[0].bbox_px[3]) / 2
+            result.words = [w for w in result.words
+                            if abs((w.bbox_px[1] + w.bbox_px[3]) / 2 - centre) > .013 * height]
+    return pages
+
+
+def test_numbered_note_without_following_entry_is_an_incomplete_history():
+    # 11-26: 마지막 건(11)을 못 읽으면 메모 10만 남아 순번 1~10이 이어져 보인다. 메모는 다음 건에 붙으므로
+    # 뒤따르는 건 없는 순번 메모는 끝 이력 누락이다.
+    result = reader.extract(_without_row(sample.resident(), 11))
+    check = next(v for v in result.validations if v.name == "history_numbers_sequential")
+    assert not check.passed and "뒤따르는 건 없는 메모 순번 [10]" in check.detail
+    assert all(field.confidence <= .4 for field in result.fields.values())
+
+
+def test_complete_history_with_inner_numbered_notes_still_passes():
+    result = reader.extract(sample.resident())
+    assert all(validation.passed for validation in result.validations)
+
+
+def _drop_band(pages, index, low, high):
+    """Remove the OCR words of one page whose centre lies between low% and high% of the page height."""
+    page, result = pages[index]
+    result.words = [w for w in result.words
+                    if not low < (w.bbox_px[1] + w.bbox_px[3]) / 2 / page.pixel_size[1] * 100 < high]
+    return pages
+
+
+def _end(pages):
+    result = reader.extract(pages)
+    return result.history_end, result.history_end_page
+
+
+def test_history_end_is_confirmed_only_by_a_terminator_after_the_last_entry():
+    # 11-26: 순번이 1..N으로 이어져도 마지막 건 아래 끝 표시가 없으면 이력 끝을 확인하지 못한 것이다.
+    assert _end(sample.resident()) == ("BLANK_MARKER", 3)
+    assert _end(_drop_band(sample.resident(), 2, 37.0, 77.0)) == ("NONE", None)   # 쪽 아래 잘림 (메모 10·11번·이하 여백)
+    assert _end(_drop_band(sample.resident(), 2, 43.8, 77.0)) == ("NONE", None)   # 이력은 온전, 끝 표시만 없음
+    assert _end(_without_row(sample.resident(), 11)) == ("NONE", None)            # 끝 메모만 남음
+
+
+def test_history_end_terminator_must_be_standalone_and_last():
+    pages = sample.resident()
+    marker = next(w for w in pages[2][1].words if "이하 여백" in w.text)
+    marker.text = "주소 이하 여백 참고"                                      # 부분 문자열은 끝 표시가 아니다
+    assert _end(pages)[0] == "NONE"
+    pages = sample.resident()
+    x0, y0, x1, y1 = next(w for w in pages[2][1].words if "이하 여백" in w.text).bbox_px
+    pages[2][1].words.append(OcrWord("12", .99, (170, y1 + 60, 221, y1 + 106)))   # 끝 표시 아래 순번
+    assert _end(pages)[0] == "NONE"
+
+
+def test_next_section_heading_after_the_last_entry_is_end_evidence():
+    pages = sample.resident()
+    marker = next(w for w in pages[2][1].words if "이하 여백" in w.text)
+    x0, y0, x1, y1 = marker.bbox_px
+    marker.text, marker.bbox_px = "병역사항", (170, y0, 330, y1)                   # 순번 칸의 다음 구역 머리글
+    assert _end(pages) == ("NEXT_SECTION", 3)

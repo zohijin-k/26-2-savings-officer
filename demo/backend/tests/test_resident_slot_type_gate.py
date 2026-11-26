@@ -37,6 +37,9 @@ REGISTER = ["주민등록표 (등본)", "이 등본은 세대별 주민등록표
 NHIS_PAYMENT = ["건강보험료 납부확인서", "성명 : 가상신청", "생년월일 : 1999-01-01",
                 "고지금액 : 30,000", "발급일자 : 2026.03.03"]
 UNRELATED = ["가상 동아리 회의록", "일시 : 2026.03.03", "안건 : 봄 행사 준비"]
+#: A text-layer abstract for the synthetic applicant (resident_sample identity), read by pdftext.
+TEXT_ABSTRACT = ["주민등록표 초본", "신청인 : 가상인 (1999-01-01)", "성명 : 가상인", "주소변동 사항",
+                 "2020년 11월 20일 전입 전라북도 전주시 완산구", "발급일자 : 2026년 3월 3일"]
 # A resident-like heading without the 초본/등본 distinction is not evidence of a 초본.
 UNCERTAIN = ["주민등록표", "성명 : 가상신청", "발급일 : 2026년 3월 3일"]
 
@@ -228,13 +231,12 @@ def test_mixed_enrollment_and_resident_pages(client, tmp_path, monkeypatch, orde
 
 
 def test_replacing_a_passed_abstract_drops_the_previous_pass(client, tmp_path, monkeypatch):
-    original_chain = list(chain.CHAIN)
-    use_own_words(monkeypatch, resident_sample.resident())
-    good = image_pdf(tmp_path / "FAKE-resident.pdf", resident_sample.resident())
+    # 11-26: OCR로 읽은 초본은 임시 안전장치(SCAN_ABSTRACT_REVIEW_GUARD)로 자동 PASS가 나지 않으므로,
+    # 앞서 PASS된 초본은 글자층 초본으로 만든다. 이 시험의 대상(교체가 이전 PASS를 지우는지)은 그대로다.
+    good = text_pdf(tmp_path / "FAKE-resident.pdf", TEXT_ABSTRACT)
     aid = new_app(client, name=resident_sample.NAME, birth=resident_sample.BIRTH)
     first = post(client, aid, good)
     assert stored(first["document_id"])[0] == "PASS"
-    monkeypatch.setattr(chain, "CHAIN", original_chain)
     second = post(client, aid, enrollment_pdf(tmp_path))
     listed = client.get(f"/api/applications/{aid}/documents").json()
     slot_docs = [doc for doc in listed if doc["slot_key"] == SLOT]

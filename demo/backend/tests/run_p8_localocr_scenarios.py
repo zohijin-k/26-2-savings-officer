@@ -505,6 +505,11 @@ def test_applicant_payload() -> None:
 
 
 def main() -> int:
+    # 11-26: 이 시나리오는 판독·규칙을 본다. 스캔 초본 자동 PASS 제한(SCAN_ABSTRACT_REVIEW_GUARD)은
+    # test_resident_scan_guard.py가 검증한다. main에서만 끈다 (이 모듈을 import하는 pytest에는 영향 없음).
+    from demo.backend.ocr import localocr as _localocr
+    _localocr.SCAN_ABSTRACT_REVIEW_GUARD = False
+    print("[NOTE] 스캔 초본 자동 PASS 제한(11-26)을 끈 상태로 판독·규칙만 확인합니다 (안전장치 자체: test_resident_scan_guard.py)")
     apply_runtime_overrides()
     saved = os.environ.get(ENGINE_ENV)
     tmp = Path(tempfile.mkdtemp(prefix="p8-localocr-"))

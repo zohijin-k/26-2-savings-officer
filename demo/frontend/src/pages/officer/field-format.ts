@@ -42,6 +42,7 @@ const LABELS: Record<string, string> = {
   판독경고: '판독 시 주의할 점',
   판독검증실패: '확인되지 않은 검증 항목',
   주소이력불확실사유: '주소 이력 불확실 사유',
+  주소이력끝근거: '주소 이력 끝 확인 근거',
   구성머리글불완전사유: '보험료 머리글 불완전 사유',
 }
 
@@ -159,6 +160,8 @@ const ADDRESS_UNCERTAIN: Record<string, string> = {
   NUMBER_GAP: '주소 이력 순번이 중간에 빠져 있음',
   NUMBER_UNREADABLE: '주소 이력 순번을 읽지 못함',
   EMPTY_PAGE: '이력 줄을 하나도 읽지 못한 쪽이 있음',
+  END_UNCONFIRMED: '마지막 이력 아래 끝 표시(이하 여백·다음 구역)를 확인하지 못함 (끝 이력 누락 가능)',
+  SCAN_UNVERIFIED: '스캔 초본은 주소 이력이 끝까지 다 있는지 자동으로 확인하지 않음 (담당자 확인)',
 }
 const COMPONENT_ISSUE: Record<string, string[]> = {
   FRAGMENT: ['보수외소득월액 머리글 글자 일부가 다르게 읽힘'],

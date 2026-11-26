@@ -9,6 +9,10 @@ from demo.backend.rules.doc_check import check_document
 from demo.backend.tests.run_p8_localocr_scenarios import abstract_slot
 from demo.backend.tests.run_p18_applicant_precheck_scenarios import IDENTITY
 from demo.backend.tests.test_resident_blank_pages import _read
+from .scan_guard import scan_guard_off  # noqa: F401 (fixture)
+
+# Subject: other resident logic; the 11-26 scan guard is tested in test_resident_scan_guard.py.
+pytestmark = pytest.mark.usefixtures("scan_guard_off")
 
 
 def words(mode):
@@ -89,7 +93,8 @@ def test_one_page_and_single_entry_policy_are_preserved(tmp_path):
     ocr, result = _read(tmp_path, data)
     assert result.status == "PASS" and ocr.fields["주소이력건수"] == "8"
     # A one-entry history retains the pre-existing omission-suspicion review policy.
-    data[0] = [word for word in data[0] if word.bbox_px[1] / 2923 * 100 < 38]
+    # Keep the page's 이하 여백 (11-26 end evidence): this checks the single-entry policy, not a cut page.
+    data[0] = [word for word in data[0] if word.bbox_px[1] / 2923 * 100 < 38 or word.text == "이하 여백"]
     ocr, result = _read(tmp_path, data)
     assert ocr.fields["주소이력건수"] == "1"
     assert result.status == "NEEDS_REVIEW"

@@ -7,7 +7,7 @@
  */
 import { Fragment, useEffect, useId, useRef, useState } from 'react'
 import type { DecisionKey, DocStatus, OfficerRole, OfficerRow, OfficerScope, ReviewDetailData } from '../../api.ts'
-import { EMPTY_FILTERS, QUEUES, SORTS, importanceOf, matchesFilters, queueCounts, queueOf, sortRows, type ListFilters, type Queue, type SortKey } from './list-model.ts'
+import { EMPTY_FILTERS, QUEUES, SORTS, generalReasons, importanceOf, matchesFilters, queueCounts, queueOf, sortRows, type ListFilters, type Queue, type SortKey } from './list-model.ts'
 
 interface Props {
   rows: OfficerRow[]
@@ -239,7 +239,7 @@ function Reasons({ id, row, state, onRetry, onOpen }: {
   const data = state?.status === 'ready' ? state.data : null
   const documents = data?.documents.filter((doc) => doc.status !== 'PASS') ?? []
   const missing = (row.documents ?? []).filter((doc) => doc.document_id === null && doc.required)
-  const general = data?.ai.reasons ?? []
+  const general = data ? generalReasons(data.ai.reasons, documents) : []
   const rejected = row.decision === 'reject'
   return <div className="alist__reasons" id={id} role="region" aria-label={`${row.application_no} ${rejected ? '반려' : '확인 필요'} 사유`}>
     {(!state || state.status === 'loading') && <p className="alist__reasons-note" role="status">사유를 불러오는 중입니다.</p>}
@@ -255,12 +255,14 @@ function Reasons({ id, row, state, onRetry, onOpen }: {
         {documents.map((doc) => <li key={doc.document_id}>
           <strong>{doc.label}</strong>
           {doc.status && <span className={`alist__chip alist__chip--${AI_CHIP[doc.status].tone}`}>{AI_CHIP[doc.status].label}</span>}
-          {doc.findings.length > 0 && <ul>{doc.findings.map((finding, index) => <li key={index}>{finding.message}</li>)}</ul>}
+          {doc.findings.length > 0 && <ul>{(doc.finding_views ?? doc.findings).map((finding, index) => <li key={index}>
+            {finding.title && <strong>{finding.title}: </strong>}{finding.explanation || finding.message}
+          </li>)}</ul>}
         </li>)}
         {missing.map((doc) => <li key={doc.slot_key}>
           <strong>{doc.label}</strong><span className="alist__chip alist__chip--fail">미제출</span>
         </li>)}
-        {general.map((reason, index) => <li key={`general-${index}`}>{reason.message}</li>)}
+        {general.map((reason, index) => <li key={`general-${index}`}>{reason.title && <strong>{reason.title}: </strong>}{reason.explanation || reason.message}</li>)}
       </ul>
       {!rejected && documents.length === 0 && missing.length === 0 && general.length === 0 && <p className="alist__reasons-note">저장된 사유가 없습니다. 심사 화면에서 서류를 확인해 주세요.</p>}
       <button type="button" className="alist__link" onClick={onOpen}>심사 화면 열기 →</button>

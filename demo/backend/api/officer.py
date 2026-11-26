@@ -30,6 +30,7 @@ from ..models import transactional_write
 from ..review_revision import update_review, require_revision, MAX_EXPECTED_REVISION
 from pydantic import StrictInt
 from ..officer_summary import readable_reason, summarize
+from ..review_reasons import annotate_findings, project_reasons
 from ..models import (
     STATUS_DECIDED,
     STATUS_DRAFT,
@@ -674,6 +675,9 @@ def _document_view(d: Document, labels: dict[str, str]) -> dict[str, Any]:
         "classification_evidence": ocr.get("classification_evidence", ""),
         "status": d.stage1_status,
         "findings": [readable_reason(f) for f in mask_data(d.findings_json or [])],
+        # 담당자 화면용 분류·제목·설명(review_reasons, 응답 시점). findings는 기존 응답 그대로 둔다.
+        "finding_views": annotate_findings([readable_reason(f) for f in mask_data(d.findings_json or [])],
+                                           ocr.get("fields") or {}),
         "file_url": f"/api/files/{d.id}",
         "file_name": file_name,
         "file_format": (d.file_format or "").lower(),
@@ -936,8 +940,11 @@ def review_detail(application_id: int, role: str = Query(ROLE_PROVINCE)) -> dict
             "stage1_status": review.stage1_status if review else None,
             "stage2_status": review.stage2_status if review else None,
             "recommended_action": payload.get("recommended_action", ""),
-            "reasons": [readable_reason(r) for r in payload.get("reasons", [])]
+            # 신청 단위 사유는 서류별 실제 사유와 맞춰 보인다(review_reasons.project_reasons, 응답 시점).
+            # 엔진이 저장한 원문은 stored_reasons(감사·진단용)와 각 사유의 origin에 그대로 남는다.
+            "reasons": project_reasons([readable_reason(r) for r in payload.get("reasons", [])], documents)
                        + _incoming_household_warnings(app),
+            "stored_reasons": [readable_reason(r) for r in payload.get("reasons", [])],
         },
         "score_sheet": score,
         # 선발 방식이 갈리는 지점. 점수제는 심사표가, 선착순은 접수 순번과 보완

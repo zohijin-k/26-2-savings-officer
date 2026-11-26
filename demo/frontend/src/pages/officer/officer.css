@@ -252,6 +252,15 @@
 .reasons__title { color: var(--ui-color-warning-text); font-weight: var(--ui-font-weight-bold); margin-right: var(--ui-space-1); }
 .reasons p { margin: var(--ui-space-1) 0 0; font-size: var(--ui-fs-13); color: var(--ui-color-text-muted); }
 .reasons a { font-size: var(--ui-fs-13); color: var(--ui-color-info-text); }
+/* 11-27: 사유 분류(정보 충돌·완결성·OCR 신뢰도 등)를 제목 앞에 작은 꼬리표로 보인다. 엔진 원문은 감사·진단에 접는다. */
+.reasons__category { display: inline-block; margin-right: var(--ui-space-1); padding: 0 var(--ui-space-1); border: 1px solid var(--ui-color-warning-border); border-radius: var(--ui-radius-4); background: var(--ui-color-surface); color: var(--ui-color-warning-text); font-size: var(--ui-fs-13); }
+.reasons__details { margin: var(--ui-space-1) 0 0; padding-left: var(--ui-space-4); font-size: var(--ui-fs-13); color: var(--ui-color-text-muted); }
+.reasons__details li { padding: 0; border: 0; background: none; font-size: var(--ui-fs-13); }
+.reasons__open { margin-left: var(--ui-space-2); }
+.reasons__audit { margin-top: var(--ui-space-1); font-size: var(--ui-fs-13); color: var(--ui-color-text-muted); }
+.reasons__audit summary { cursor: pointer; }
+.verdict__primary { margin-top: var(--ui-space-3); padding: var(--ui-space-2) var(--ui-space-3); border: 1px solid var(--ui-color-warning-border); border-radius: var(--ui-radius-6); background: var(--ui-color-warning-bg); font-size: var(--ui-fs-15); overflow-wrap: anywhere; }
+.verdict__primary-tag { display: block; margin-bottom: var(--ui-space-1); font-size: var(--ui-fs-13); font-weight: var(--ui-font-weight-bold); color: var(--ui-color-warning-text); }
 .ocr-note { margin: var(--ui-space-2) 0 0; font-size: var(--ui-fs-13); color: var(--ui-color-text-muted); }
 .fields { margin: var(--ui-space-4) 0 0; font-size: var(--ui-fs-15); border-top: 1px solid var(--ui-color-border); }
 .fields > div { display: grid; grid-template-columns: minmax(96px, 32%) 1fr; gap: var(--ui-space-3); padding: var(--ui-space-2) 0; border-bottom: 1px solid var(--ui-color-border); }

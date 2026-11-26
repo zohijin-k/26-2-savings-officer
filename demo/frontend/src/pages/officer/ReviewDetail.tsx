@@ -4,12 +4,13 @@ import StatusBadge from '../../components/StatusBadge.tsx'
 import AiSummaryCard from './AiSummaryCard.tsx'
 import DocumentViewer from './DocumentViewer.tsx'
 import ScoreSheet6 from './ScoreSheet6.tsx'
-import { fieldLabel, formatField, plainText, reasonTitle, type FieldView } from './field-format.ts'
+import { fieldLabel, formatField, plainText, type FieldView } from './field-format.ts'
 import { selectOfficerDocument } from './list-model.ts'
 import { useReviewDraft } from './useReviewDraft.ts'
 import { reviewSaveError } from './review-save.ts'
 import ReviewSaveStatus from './ReviewSaveStatus.tsx'
 import { tiebreakParts } from './tiebreak.ts'
+import { primaryReason, reasonView, type ReasonLike } from './reason-view.ts'
 
 interface Props {
   role: RoleKey
@@ -91,6 +92,9 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
     selectOriginal(doc.document_id, doc.slot_key)
   }
   const tiebreak = detail ? tiebreakParts(detail.score_sheet) : null
+  // 담당자가 먼저 볼 사유와 그 서류. 사유 순서·우선순위는 백엔드(review_reasons)가 정한다.
+  const primary = detail ? primaryReason(detail.ai.reasons) : null
+  const primaryDoc = primary?.document_id != null ? detail?.documents.find((doc) => doc.document_id === primary.document_id) : undefined
   // 서류 버튼 줄: ←/→로 이전·다음 서류, Home/End로 처음·마지막 서류를 연다. 포커스도 함께 옮긴다.
   const moveTab = (event: React.KeyboardEvent<HTMLElement>) => {
     if (!detail || !detail.documents.length) return
@@ -155,12 +159,18 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
               <span className="notice__icon" aria-hidden="true">!</span>
               <span>보완 요청이 없는 사업입니다. 서류가 미비하면 보완 없이 선발에서 제외됩니다.</span>
             </p>
+            {primary && <div className="verdict__primary" role="note">
+              <span className="verdict__primary-tag">우선 확인</span>
+              <ReasonItem reason={primary} docType={primary.doc_type}
+                onOpen={primaryDoc ? () => jumpToOriginal(primaryDoc, null, primaryDoc.label) : undefined} />
+            </div>}
             <details className="verdict__reasons" open={detail.ai.reasons.length > 0}>
               <summary>신청 전체 사유 {detail.ai.reasons.length}건</summary>
-              {detail.ai.reasons.length ? <ul className="reasons">{detail.ai.reasons.map((reason, index) => <li key={index}>
-                {reasonTitle(reason) && <strong className="reasons__title">{reasonTitle(reason)}</strong>}{' '}
-                {plainText(reason.message)}{reason.doc_type && <em> ({reason.doc_type})</em>}
-              </li>)}</ul> : <p className="muted">저장된 신청 전체 사유가 없습니다.</p>}
+              {detail.ai.reasons.length ? <ul className="reasons">{detail.ai.reasons.map((reason, index) => {
+                const doc = reason.document_id != null ? detail.documents.find((item) => item.document_id === reason.document_id) : undefined
+                return <li key={index}><ReasonItem reason={reason} docType={reason.doc_type}
+                  onOpen={doc ? () => jumpToOriginal(doc, null, doc.label) : undefined} /></li>
+              })}</ul> : <p className="muted">저장된 신청 전체 사유가 없습니다.</p>}
             </details>
           </section>
 
@@ -180,9 +190,8 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
               {activeDoc?.status && <StatusBadge status={activeDoc.status} />}
             </div>
             {activeDoc ? <>
-              {activeDoc.findings.length ? <ul className="reasons">{activeDoc.findings.map((finding, index) => <li key={index}>
-                {reasonTitle(finding) && <strong className="reasons__title">{reasonTitle(finding)}</strong>}{' '}
-                {plainText(finding.message)}
+              {activeDoc.findings.length ? <ul className="reasons">{(activeDoc.finding_views ?? activeDoc.findings).map((finding, index) => <li key={index}>
+                <ReasonItem reason={finding} />
                 {finding.how_to_fix && <p>{plainText(finding.how_to_fix)}</p>}
                 {finding.link && /^https?:\/\//.test(finding.link) && <a href={finding.link} target="_blank" rel="noreferrer">기존 안내 보기</a>}
               </li>)}</ul> : <p className="muted">이 서류에 저장된 확인 사유가 없습니다.</p>}
@@ -214,4 +223,19 @@ export default function ReviewDetail({ role, applicationId, documentId, slotKey,
       </div>
     </>}
   </div>
+}
+
+/** 확인 사유 한 건: 분류 · 제목 · 설명. 엔진 원문은 '감사·진단'에 접어 둔다. 코드는 보이지 않는다. */
+function ReasonItem({ reason, docType, onOpen }: { reason: ReasonLike; docType?: string | null; onOpen?: () => void }) {
+  const view = reasonView(reason)
+  return <>
+    {view.category && <span className="reasons__category">{view.category}</span>}
+    {view.title && <strong className="reasons__title">{view.title}</strong>}{' '}
+    {view.body}{docType && <em> ({docType})</em>}
+    {view.details.length > 0 && <ul className="reasons__details">{view.details.map((item) => <li key={item}>{item}</li>)}</ul>}
+    {onOpen && <button type="button" className="btn btn--sm reasons__open" onClick={onOpen}>원본 보기</button>}
+    {view.audit.length > 0 && <details className="reasons__audit"><summary>감사·진단 정보</summary>
+      {view.audit.map((line) => <p key={line}>{line}</p>)}
+    </details>}
+  </>
 }

@@ -103,3 +103,19 @@ export function selectOfficerDocument(documents: OfficerDocument[], documentId: 
   if (slotKey !== null) return documents.find((doc) => doc.slot_key === slotKey) ?? null
   return null
 }
+
+/**
+ * 신청 목록 펼친 행의 "신청 전체" 줄 (11-27). 이미 서류 줄로 보이는 서류가 같은 코드의 사유를 저장하고 있으면
+ * 되풀이하지 않는다. 저장 사유 없는 엔진 사유(예: '자동 적합 확정 안 됨')는 숨기지 않는다.
+ * 사유의 document_id는 백엔드 review_reasons가 응답 때 붙인다.
+ */
+export function generalReasons<T extends { code?: string | null; document_id?: number | null }>(
+  reasons: readonly T[],
+  shownDocuments: readonly { document_id: number; findings: readonly { code?: string | null }[] }[],
+): T[] {
+  return reasons.filter((reason) => {
+    if (reason.document_id == null) return true
+    const doc = shownDocuments.find((item) => item.document_id === reason.document_id)
+    return !doc || !doc.findings.some((finding) => finding.code === reason.code)
+  })
+}

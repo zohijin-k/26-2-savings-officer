@@ -42,7 +42,8 @@ def _uncertain(ocr, result, reasons):
 
 def test_first_page_rows_missed_is_reviewed(tmp_path):
     ocr, result = _read(tmp_path, [_page("1/2", []), _page("2/2", RECENT)])
-    _uncertain(ocr, result, "NUMBER_GAP,EMPTY_PAGE")
+    # 11-27 공통 동기화: youth 신호 NUMBER_START(읽은 번호가 1로 시작하지 않음)도 같은 결함을 따로 알린다.
+    _uncertain(ocr, result, "NUMBER_GAP,EMPTY_PAGE,NUMBER_START")
 
 
 def test_recent_page_rows_missed_never_yields_an_early_transfer_date(tmp_path):
@@ -55,7 +56,8 @@ def test_recent_page_rows_without_readable_dates_are_reviewed(tmp_path):
     garbled = [wd(9.1, 35.3, "3", 1.0, 2), wd(13.2, 34.4, "서울특별시 가상구 시험동", 1.0, 35),
                wd(67.9, 34.4, "2O22-O1-O1", 1.0, 9)]
     ocr, result = _read(tmp_path, [_page("1/2", OLD), _page("2/2", garbled)])
-    _uncertain(ocr, result, "EMPTY_PAGE,END_UNCONFIRMED")  # 11-26: 마지막으로 읽힌 건 아래 끝 표시 없음
+    # 11-26: 마지막으로 읽힌 건 아래 끝 표시 없음. 11-27: 날짜를 못 읽은 3번 줄의 번호가 보임(UNREAD_ROWS).
+    _uncertain(ocr, result, "EMPTY_PAGE,UNREAD_ROWS,END_UNCONFIRMED")
 
 
 def test_complete_ordinals_are_unchanged(tmp_path):

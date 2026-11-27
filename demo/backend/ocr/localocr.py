@@ -70,12 +70,46 @@ RETRY_CODES = (
     "IMAGE_TEXT_PAGE",          # 그림 길: 첫 쪽은 그림, 뒤쪽에 글자층
     "TEXT_RECLASS_NONE",        # 글자층 길: 모든 쪽 다시 판별도 실패 (숨은 글자층 포함)
     "TEXT_RECLASS_DISCARD",     # 글자층 길: 모든 쪽 다시 판별 결과가 이 계층 담당 밖이라 버려짐
+    "TEXT_RASTER_CONTENT",      # 글자층 길: 초본인데 그림·숨은 글자·글자 없는 쪽이 있어 글자층만으로 다 읽지 못함 (11-27)
 )
-#: 글자층 길 사유. 숨은 글자층·짧은 글자층 뒤의 그림을 읽으려는 대체 판독이므로 쪽을 덮는 그림이 있는
-#: PDF만 다시 읽는다(page_has_cover_image). 그림 없는 글자층 PDF는 렌더링해도 같은 글자층이 보일 뿐인데
-#: 모든 쪽을 300dpi OCR하면 10쪽 무관 글자 PDF가 0.1초에서 32초가 된다(11-27 실측).
+#: 글자층 길 사유. 숨은 글자층·짧은 글자층 뒤의 그림을 읽으려는 대체 판독이므로 쪽을 덮는 그림이 있거나
+#: 숨은 글자층이 있는 PDF만 다시 읽는다(page_has_cover_image·page_has_hidden_text). 그림 없는 글자층 PDF는
+#: 렌더링해도 같은 글자층이 보일 뿐인데 모든 쪽을 300dpi OCR하면 10쪽 무관 글자 PDF가 0.1초에서 32초가 된다(11-27 실측).
 TEXT_RETRY_CODES = ("TEXT_RECLASS_NONE", "TEXT_RECLASS_DISCARD")
 _CLASS_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+#: get_bboxlog 항목 중 그림(래스터·마스크)과 보이지 않게 그린 글자(렌더 모드 3, 스캔 위 숨은 글자층).
+_RASTER_KINDS = ("fill-image", "fill-imgmask")
+_HIDDEN_TEXT_KINDS = ("ignore-text",)
+_VISIBLE_TEXT_KINDS = ("fill-text", "stroke-text")
+
+
+def _page_draw_kinds(path: Path) -> list[set[str]]:
+    """쪽마다 그리는 항목 종류 (PyMuPDF get_bboxlog). 내용·좌표는 읽지 않는다. 암호 PDF는 빈 목록."""
+    import pymupdf
+
+    with pymupdf.open(path) as document:
+        if document.needs_pass:
+            return []
+        return [{kind for kind, _ in page.get_bboxlog()} for page in document]
+
+
+def raster_content_pages(path: Path) -> list[int]:
+    """11-27: 보이는 글자층만으로는 내용을 다 읽었다고 할 수 없는 쪽 번호(0부터).
+
+    PdfText는 첫 쪽 글자층만 읽는다. 그림으로 넣은 뒤쪽(스캔), 잘린 하단, 그림으로 넣은 표, 스캔 위 숨은
+    글자층은 그 경로에서 읽히지 않거나 OCR 글자를 원본 글자층처럼 믿게 된다. 그래서 다음 중 하나라도 있는 쪽은
+    그림 내용이 있는 쪽으로 본다. 면적 기준은 쓰지 않는다(작은 그림도 표 한 부분을 담을 수 있다):
+      - 그림(래스터·마스크)을 그린다 (크기 무관, 직인·바코드 그림도 포함 → 담당자 확인 쪽으로 기운다),
+      - 보이지 않게 그린 글자가 있다 (숨은 글자층),
+      - 보이는 글자가 하나도 없다 (빈 쪽·윤곽선으로 그린 글자 포함).
+    """
+    return [index for index, kinds in enumerate(_page_draw_kinds(path))
+            if kinds & {*_RASTER_KINDS, *_HIDDEN_TEXT_KINDS} or not kinds & set(_VISIBLE_TEXT_KINDS)]
+
+
+def page_has_hidden_text(path: Path) -> bool:
+    """보이지 않게 그린 글자(숨은 글자층)가 있는 쪽이 하나라도 있는가. 면적과 무관한 숨은 글자층 신호."""
+    return any(kinds & set(_HIDDEN_TEXT_KINDS) for kinds in _page_draw_kinds(path))
 
 
 def page_has_cover_image(path: Path) -> bool:
@@ -284,10 +318,16 @@ def _history_end_label(ex) -> str:
     return "확인되지 않음" if ex.history else "이력 없음"
 
 
-def _from_resident(ex, pages, ra, v2types) -> OcrResult:
-    """engine_v2 초본 추출 결과 → 데모 OcrResult (필드 이름은 데모 규칙이 쓰는 그대로)."""
-    detected = (DocType.RESIDENT_ABSTRACT if ex.detected_type == v2types.RESIDENT_ABSTRACT
-                else DocType.RESIDENT_CERTIFICATE)
+def _from_resident(ex, pages, ra, v2types, final_type: DocType | None = None) -> OcrResult:
+    """engine_v2 초본 추출 결과 → 데모 OcrResult (필드 이름은 데모 규칙이 쓰는 그대로).
+
+    final_type: 호출자가 결과에 매길 최종 서류 종류(본문 분류). 11-27: 추출기 머리 제목 판별이 초본을 못 찾아도
+    최종 종류가 초본이면 초본 검증(주소 날짜·이력 누락 사유·SCAN_ABSTRACT_REVIEW_GUARD)을 똑같이 적용한다.
+    전에는 추출기 판별만 보아, 본문 분류로 초본이 된 스캔이 안전장치 없이 전입일·현주소시도를 내보냈다.
+    """
+    # 둘 중 하나라도 초본이면 초본 검증을 적용한다 (검증을 빼는 쪽으로는 바꾸지 않는다).
+    abstract = ex.detected_type == v2types.RESIDENT_ABSTRACT or final_type == DocType.RESIDENT_ABSTRACT
+    detected = DocType.RESIDENT_ABSTRACT if abstract else DocType.RESIDENT_CERTIFICATE
     f = ex.fields
     fields: dict[str, str] = {}
     bboxes: dict[str, BBox] = {}
@@ -302,7 +342,7 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
         page_data["image_groups"] = shared  # 같은 주 그림(xref)을 읽은 쪽 묶음 (D10)
     fields["쪽표기자료"] = json.dumps(page_data)
     from engine_v2.extractors.address_dates import assess
-    if ex.detected_type == v2types.RESIDENT_ABSTRACT:
+    if abstract:
         fields["주소날짜검증자료"] = json.dumps(assess(pages, type_confidence=ex.type_confidence), ensure_ascii=False)
 
     for v2key, label in (
@@ -348,7 +388,7 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
     #   TABLE_NOT_FOUND·ROWS_UNREADABLE (11-21) 후속 쪽 표 미확인·후속 이력 판독 불완전 (추출기 history_table_issues)
     #   END_UNCONFIRMED   (11-26) 스캔에서 마지막 건 아래 끝 표시(이하 여백·다음 구역)를 확인하지 못함
     #   SCAN_UNVERIFIED   (11-26) 스캔 초본 완결성 자동 확인 제한 (SCAN_ABSTRACT_REVIEW_GUARD)
-    if ex.detected_type == v2types.RESIDENT_ABSTRACT:
+    if abstract:
         # OCR로 읽은 쪽이 있으면 스캔(사진)본이다. 모든 쪽이 글자층일 때만 글자층 판독이다 (_pages_engine과 같은 기준).
         scanned = any(page.source.value != "text_layer" for page, _ in pages)
         numbers = sorted(entry.no for entry in ex.history if entry.no is not None)
@@ -885,6 +925,27 @@ def _merge_image_heuristics(result: OcrResult, path: Path) -> None:
         result.image_quality = min(result.image_quality, img.image_quality)
 
 
+def _with_text_page_markers(classified: OcrResult, path: Path, engine: str, ra, v2types, document_input,
+                            load_pages) -> OcrResult | None:
+    """11-27: 그림 없는 글자층 초본. 판독은 그대로 Tier2(PdfText, 첫 쪽 글자층) 결과를 쓰되, 모든 쪽 글자층의
+    쪽표기(n/N)를 _from_resident와 같은 방식으로 붙여 doc_check _check_resident_pages가 빠진 쪽·중복 쪽·다른 쪽을 보게 한다.
+
+    PdfText는 첫 쪽만 읽으므로 2/3쪽이 빠진 초본도 첫 쪽만으로 적합이 됐다. 쪽표기를 하나도 못 찾으면(쪽표기 없는 서식)
+    완결성 근거가 없을 뿐 반대 근거도 없으므로 지금까지처럼 None을 돌려 Tier2가 그대로 판독한다.
+    """
+    pages = load_pages(document_input(doc_id="demo", declared_type=v2types.RESIDENT_ABSTRACT, file_path=str(path)),
+                       engine)
+    if isinstance(pages, str):
+        return None
+    page_data = json.loads(_from_resident(ra.extract(pages), pages, ra, v2types,
+                                         DocType.RESIDENT_ABSTRACT).fields["쪽표기자료"])
+    if not any(page_data.get("markers") or ()) and not page_data.get("sheets"):
+        return None  # 쪽표기를 하나도 읽지 못함([None]뿐인 경우 포함): 근거 없음 → 지금까지처럼 Tier2
+    classified.fields["쪽표기자료"] = json.dumps(page_data)
+    classified.engine = "pdftext"  # 필드는 첫 쪽 글자층 판독 그대로다 (LocalOcr.read가 OCR 엔진 이름을 덮어쓰지 않게).
+    return classified
+
+
 def _tier2_can_read(path: Path) -> bool:
     """Tier2와 **같은 기준**으로 경계를 긋는다: 암호이거나 첫 쪽에 글자가 하나라도 있으면 Tier2 몫."""
     import fitz
@@ -926,8 +987,12 @@ class LocalOcr:
             if classified is None:
                 return None
             detected = classified.detected_doc_type
+            if detected == DocType.RESIDENT_ABSTRACT and raster_content_pages(path):
+                # 11-27: 첫 쪽 글자층이 초본이라도 그림 내용이 있는 쪽이 있으면 Tier2(첫 쪽 글자층만 읽음)에 넘기지 않는다.
+                return self._read_raster_abstract(path, engine, classified)
             if (detected not in (DocType.NHIS_PAYMENT, DocType.NHIS_ACQUISITION_LOSS, DocType.INSURANCE_4, DocType.BIZ_REG_PROOF, DocType.DAILY_WORK_RECORD)
-                    and detected not in _JOB_DOCS and detected != DocType.NHIS_QUALIFICATION and detected is not None):
+                    and detected not in _JOB_DOCS and detected != DocType.NHIS_QUALIFICATION and detected is not None
+                    and detected != DocType.RESIDENT_ABSTRACT):
                 return None  # 그 밖의 텍스트 PDF는 Tier2가 이미 분류·판독한다.
             if detected == DocType.NHIS_QUALIFICATION:
                 from engine_v2.extractors.nhis_qualification import is_notification
@@ -943,6 +1008,9 @@ class LocalOcr:
             ra, payment_extractor, acquisition_extractor, run_ocr, PageSource, preprocess, v2types, V2DocumentInput, load_pages, insurance4_extractor = _import_v2()
         except ImportError:
             return None
+
+        if text_pdf and detected == DocType.RESIDENT_ABSTRACT:
+            return _with_text_page_markers(classified, path, engine, ra, v2types, V2DocumentInput, load_pages)
 
         if text_pdf:
             v2type = v2types(_JOB_DOCS[detected][1]) if detected in _JOB_DOCS else {
@@ -972,9 +1040,14 @@ class LocalOcr:
                     # 숨은 글자층·짧은 글자층 뒤의 그림을 A-스캔과 같은 렌더링으로 한 번 더 읽는다.
                     return self._render_retry(path, engine, "TEXT_RECLASS_NONE" if detected is None
                                               else "TEXT_RECLASS_DISCARD")
+                if detected == DocType.RESIDENT_ABSTRACT and (raster := set(raster_content_pages(path))) and any(
+                        page.source == PageSource.TEXT_LAYER and page.page in raster for page, _ in pages):
+                    # 11-27: 그림 내용이 있는 쪽을 글자층 단어(숨은 글자층 등)로 읽었으면 보이는 그대로(렌더링) 다시 읽는다.
+                    # 그런 쪽을 이미 OCR로 읽었다면 스캔 초본으로 안전장치가 적용되므로 다시 읽지 않는다.
+                    return self._read_raster_abstract(path, engine, classified)
                 # Coordinate fallback changes classification only. Fields still
                 # use the established resident reader and review rules.
-                result = _from_resident(ra.extract(pages), pages, ra, v2types)
+                result = _from_resident(ra.extract(pages), pages, ra, v2types, detected)
                 result.detected_doc_type = detected
                 result.classification_evidence = evidence
                 result.classification_confidence = .95
@@ -1026,7 +1099,7 @@ class LocalOcr:
         """
         if path.suffix.lower() != ".pdf" or engine == "off" or code not in RETRY_CODES:
             return None
-        if code in TEXT_RETRY_CODES and not page_has_cover_image(path):
+        if code in TEXT_RETRY_CODES and not (page_has_cover_image(path) or page_has_hidden_text(path)):
             return None
         run_ocr = _import_v2()[3]
         page_images = render_pages(path)
@@ -1043,6 +1116,33 @@ class LocalOcr:
             return None
         result.fallback_reason = f"RENDER_RETRY:{code}"
         return result
+
+    def _read_raster_abstract(self, path: Path, engine: str, classified: OcrResult) -> OcrResult:
+        """11-27: 그림 내용이 있는 쪽이 섞인 글자층 초본을 보이는 그대로(300dpi 렌더링) 모든 쪽 OCR로 읽는다.
+
+        렌더링 쪽은 글자층이 아니므로 _from_resident가 스캔 초본으로 보고 SCAN_ABSTRACT_REVIEW_GUARD가 적용된다
+        (쪽표기·순번·발급일 등 다른 검증도 모든 쪽에 대해 돈다). 읽지 못하면(OCR 없음·오류·초본이 아닌 결과)
+        다음 계층(첫 쪽 글자층만 읽는 Tier2)에 넘기지 않고 담당자 확인 결과를 돌려준다.
+        """
+        failure = "TEXT_RASTER_CONTENT"
+        try:
+            result = self._render_retry(path, engine, "TEXT_RASTER_CONTENT")
+        except Exception as exc:  # noqa: BLE001 - 어떤 오류도 Tier2의 첫 쪽 판독으로 이어지면 안 된다
+            result, failure = None, f"TEXT_RASTER_CONTENT:{exception_code(exc)}"
+        if result is not None and result.detected_doc_type == DocType.RESIDENT_ABSTRACT:
+            return result
+        return OcrResult(
+            detected_doc_type=DocType.RESIDENT_ABSTRACT,
+            confidence=0.0,
+            image_quality=1.0,
+            fields={"판독실패": "그림으로 된 쪽을 자동으로 읽지 못해 담당자가 원본 전체를 확인합니다."},
+            page_count=classified.page_count,
+            tier=NAME,
+            engine=engine,
+            classification_confidence=0.0,
+            classification_evidence=classified.classification_evidence,
+            fallback_reason=f"RENDER_RETRY_FAILED:{failure}",
+        )
 
     def _from_ocr_pages(self, pages, page_images, path: Path, engine: str, *, retry: bool) -> OcrResult | None:
         """OCR한 쪽들로 서식을 판별하고 그 서식의 판독기를 고른다."""
@@ -1119,7 +1219,7 @@ class LocalOcr:
 
         if detected in (DocType.RESIDENT_ABSTRACT, DocType.RESIDENT_CERTIFICATE):
             ex = ra.extract(pages)
-            result = _from_resident(ex, pages, ra, v2types)
+            result = _from_resident(ex, pages, ra, v2types, detected)
             result.detected_doc_type = detected
             result.classification_evidence = evidence
             result.classification_confidence = 0.95

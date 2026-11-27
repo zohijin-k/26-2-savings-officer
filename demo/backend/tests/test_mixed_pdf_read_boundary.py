@@ -131,8 +131,8 @@ def test_unreadable_raster_content_never_falls_back_to_the_first_page_text(tmp_p
     monkeypatch.setitem(v2ocr.ENGINES, "own", broken)
     path = _pdf(tmp_path / "FAKE-mixed.pdf", ("text", "image", "image"), _pages())
     ocr, check = _verdict(path, program)
-    assert ocr.tier == "localocr" and ocr.fallback_reason.startswith("RENDER_RETRY_FAILED:TEXT_RASTER_CONTENT")
-    assert ocr.detected_doc_type == DocType.RESIDENT_ABSTRACT and ocr.confidence == 0
+    assert ocr.tier == "localocr" and ocr.fallback_reason == "RENDER_RETRY_FAILED:TEXT_RASTER_CONTENT:NO_RESULT"
+    assert ocr.detected_doc_type == DocType.RESIDENT_ABSTRACT and ocr.confidence == 0 and ocr.engine == "none"
     assert check.status == "NEEDS_REVIEW"
 
 
@@ -210,3 +210,53 @@ def test_text_abstract_without_any_page_marker_keeps_the_tier2_result(tmp_path, 
     ocr, check = _verdict(text_pdf(tmp_path / "FAKE-text-nomarker.pdf", TEXT_ABSTRACT), program)
     assert calls == [] and ocr.tier == "pdftext" and "쪽표기자료" not in ocr.fields
     assert check.status == "PASS", check.findings
+
+
+def _nested(path, pages, depth=4100):
+    """Wrap the image pages' content in ~4100 nested q..Q: MuPDF's get_bboxlog raises, page-1 text still reads."""
+    with pymupdf.open(path) as document:
+        for index in pages:
+            for xref in document[index].get_contents():
+                document.update_stream(xref, b"q " * depth + document.xref_stream(xref) + b" Q" * depth)
+        document.save(path.with_name("nested.pdf"))
+    return path.with_name("nested.pdf")
+
+
+@pytest.mark.parametrize("program", PROGRAM_CODES)
+def test_reader_exception_never_hands_the_abstract_to_the_first_page_reader(tmp_path, ocr_words, program):
+    """Independent review 11-27 (reproduced): the raster check raised, read_document moved on to PdfText → PASS."""
+    ocr_words(_pages())
+    path = _nested(_pdf(tmp_path / "FAKE-mixed.pdf", ("text", "image", "image"), _pages()), (1, 2))
+    ocr, check = _verdict(path, program)
+    assert ocr.tier == "localocr" and ocr.fallback_reason.startswith("RENDER_RETRY_FAILED:TEXT_ABSTRACT:")
+    assert check.status == "NEEDS_REVIEW"
+
+
+@pytest.mark.parametrize("program", PROGRAM_CODES)
+def test_short_last_page_is_checked_from_the_text_layer_without_ocr(tmp_path, monkeypatch, program):
+    """Independent review 11-27 (reproduced): a <50-character last page was sent to OCR; with OCR down the page
+    check was skipped and a 초본 missing page 2 passed. Markers now come from text-layer words only."""
+    monkeypatch.setenv("ENGINE_V2_OCR", "own")
+
+    def broken(png, size):
+        raise RuntimeError("model crashed")
+    monkeypatch.setitem(v2ocr.ENGINES, "own", broken)
+    first, last = _pages(drop_page=1)
+    last = (last[0], dataclasses.replace(last[1], words=[w for w in last[1].words if w.text in ("3/3", "== 이하 여백==")]))
+    ocr, check = _verdict(_pdf(tmp_path / "FAKE-short.pdf", ("text", "text"), [first, last]), program)
+    assert ocr.tier == "pdftext" and ocr.engine == "pdftext"
+    assert check.status == "FAIL" and [f.code for f in check.findings] == ["PAGES_INCOMPLETE"]
+
+
+@pytest.mark.parametrize("program", PROGRAM_CODES)
+def test_ocr_reread_of_a_text_abstract_does_not_issue_a_definite_fail(tmp_path, ocr_words, program):
+    """A trusted text layer plus any picture is re-read by OCR; an OCR misread (applicant name) must not become a
+    definite FAIL (independent review 11-27, finding 3). The text layer says 가상인; the fake OCR reads 가상민."""
+    misread = _pages()
+    for word in misread[0][1].words:
+        word.text = word.text.replace(sample.NAME, "가상민")
+    ocr_words(misread)
+    ocr, check = _verdict(_pdf(tmp_path / "FAKE-mixed.pdf", ("text", "image", "image"), _pages()), program)
+    assert ocr.fields["초본신청인성명"] == "가상민" and ocr.confidence <= .4
+    assert check.status == "NEEDS_REVIEW"
+    assert "IDENTITY_MISMATCH" not in [f.code for f in check.findings]

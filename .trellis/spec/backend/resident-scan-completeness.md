@@ -8,10 +8,10 @@
 - `demo/backend/ocr/localocr.py` `SCAN_ABSTRACT_REVIEW_GUARD = True`.
 - 적용 범위: `_from_resident`가 만드는 주민등록초본 결과 중 **글자층이 아닌 쪽(OCR 쪽)이 하나라도 있는 것**
   (`page.source != text_layer`, `_pages_engine`과 같은 기준). 이 결과는 자동 적합(PASS)이 되지 않는다.
-- 사업별 반영 (계약 분리):
-  - 두배적금(officer): `주소이력불확실사유`에 `SCAN_UNVERIFIED` → `주소이력상태=불확실` →
-    `ADDRESS_HISTORY_INCOMPLETE`(확인필요). `전입일`·`주소이력건수`·`현주소시도`는 `불확실`로 둬 자동 점수에 쓰지 않는다.
-  - youth: 신뢰도 0.4 이하와 `판독경고` → `LOW_OCR_CONFIDENCE`(확인필요). 기준 미만 신뢰도 값은 자동 판정에 쓰이지 않는다.
+- 반영 (11-27부터 두 사업 같은 공통 코드): `주소이력불확실사유`에 `SCAN_UNVERIFIED` → `주소이력상태=불확실` →
+  각 사업 doc_check의 `ADDRESS_HISTORY_INCOMPLETE`(확인필요). `전입일`·`현주소시도`·`주소변동내역`은 `불확실`로 둬
+  자동 판정에 쓰지 않는다(`주소이력건수`는 아래 개수에 영향을 주는 사유일 때만 `불확실`). 신뢰도는 낮추지 않으므로
+  발급일 등 확정 FAIL은 그대로 FAIL이다. 담당자 화면 문구는 사업별(`review_reasons.py`·doc_check)이다.
 - 바꾸지 않는 것: 글자층 PDF 판독(pdftext, 글자층 좌표 판독), 등본·재학증명서·그 밖의 서류 판정, 사업별 규칙,
   기존 검증(순번·쪽표기·발급일·성명·생년월일·문서 종류).
 
@@ -27,8 +27,14 @@
 
 - 순번: 이력 번호와 메모 줄 번호를 합쳐 빈틈·중복 없이 이어져야 한다(`history_numbers_sequential`). 순번이 있는 메모
   줄은 다음 건에 붙으므로, 마지막 건보다 큰 메모 순번(뒤따르는 건 없는 메모)은 끝 이력 누락이다.
-- 시작 번호: 두배적금은 11-18 `history_numbers`(1부터), youth는 어댑터에서 1로 시작하지 않으면 확인필요.
-- youth: 순번 칸에 마지막 건보다 큰 번호가 보이면(표를 못 찾은 쪽의 이력) 확인필요.
+- 시작 번호: 추출기 `history_numbers`(1..N, 11-18 → `NUMBER_GAP`·`NUMBER_UNREADABLE`)와 읽은 이력 번호가 1로
+  시작하지 않음(`NUMBER_START`, 11-26)을 둘 다 남긴다.
+- 표 머리글은 찾았는데 이력 0건인 쪽 `EMPTY_PAGE`, 후속 쪽 표 미확인·판독 불완전 `TABLE_NOT_FOUND`·`ROWS_UNREADABLE`
+  (추출기 `history_table_issues`, 11-21). 후속 쪽 표 머리글이 두 줄로 읽혀도 추출기가 그 쪽 이력을 복구해 읽는다.
+- 순번 칸에 마지막 건보다 큰 번호가 보이면(표를 못 찾은 쪽의 이력) `UNREAD_ROWS`. 쪽마다 이력 표 끝(`_table_end`)
+  아래 구역(병역사항 등)의 번호는 세지 않는다. 글자층 좌표 판독에는 `END_UNCONFIRMED`·`SCAN_UNVERIFIED`가 없으므로
+  이 신호가 그 경로의 행 누락을 잡는다.
+- 사유 코드와 계산은 `_from_resident`(공통)에 있고 두 저장소에서 같다(`common-ocr-parity.md`).
 - 끝 근거(`ResidentAbstractResult.history_end`): 마지막 건과 같은 쪽, 그 아래에 단독 `이하 여백` 줄
   (`BLANK_MARKER`, address_dates.py와 같은 정의) 또는 순번 칸의 `병역` 구역 머리글(`NEXT_SECTION`, `_table_end`와
   같은 정의)이 있고, 그 사이와 그 아래(같은 쪽)에 순번·신고일이 없어야 한다. 끝 표시와 마지막 줄 사이 거리는 판정하지

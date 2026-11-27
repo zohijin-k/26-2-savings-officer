@@ -74,8 +74,11 @@ INTRA_OP_THREADS = _env_count('OWN_OCR_INTRA_THREADS', 2)
 MAX_PAGE_WORKERS = _env_count('OWN_OCR_PAGE_WORKERS', 4)
 #: Auto (11-19 T4b): a two-page document reads both pages at once on two page sessions with this
 #: many threads each, when 2 x TWO_PAGE_INTRA_THREADS fits the logical CPU count; otherwise (and for
-#: 3+ pages, and in fixed mode) page sessions use INTRA_OP_THREADS. Its slot 0 is the single session.
-TWO_PAGE_INTRA_THREADS = 4
+#: 3+ pages, and in fixed mode) page sessions use INTRA_OP_THREADS. Its slot 0 is the single session
+#: only when this equals single_intra_threads(). 11-27: 2 (was 4). On the 8-core M2 (4P+4E) intra 4 x 2
+#: read two-page scans 35% slower than intra 2 x 2 (same code, 4 interleaved rounds, round means apart),
+#: so two pages now use the 3+-page sessions and preload holds 5 sessions again.
+TWO_PAGE_INTRA_THREADS = 2
 _worker = threading.local()
 
 

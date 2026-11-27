@@ -68,3 +68,47 @@ def test_swallowed_reader_exceptions_leave_only_the_class_name(tmp_path, fake_en
     result = read_document(str(build(tmp_path / 'plain.pdf', 'plain')), None)
     assert result.fallback_reason == 'LOCALOCR_EXCEPTION:RuntimeError'
     assert 'secret' not in result.fallback_reason
+
+
+def _text_report(path, logo=False):
+    """Three text-layer pages that no reader recognizes (optionally a small logo on page 1)."""
+    import pymupdf
+    from PIL import Image
+    document = pymupdf.open()
+    for index in range(3):
+        page = document.new_page(width=595, height=842)
+        page.insert_text((40, 60), f'Quarterly activity report page {index + 1} ' + 'lorem ipsum dolor sit amet ' * 4,
+                         fontsize=8, fontname='helv')
+        if logo and index == 0:
+            buffer = io.BytesIO()
+            Image.new('RGB', (120, 60), (20, 60, 120)).save(buffer, 'PNG')
+            page.insert_image(pymupdf.Rect(460, 30, 560, 80), stream=buffer.getvalue())
+    document.save(path)
+    return path
+
+
+@pytest.mark.parametrize('logo', [False, True])
+def test_text_pdfs_without_a_cover_image_are_never_rendered(tmp_path, fake_engine, logo):
+    """TEXT_RECLASS_* retries only read pictures behind a text layer; plain text PDFs skip the 300 dpi OCR."""
+    from demo.backend.ocr import localocr, read_document
+    path = _text_report(tmp_path / 'report.pdf', logo)
+    assert not localocr.page_has_cover_image(path)
+    result = read_document(str(path), None)
+    assert fake_engine == []  # no page was rendered or recognized
+    assert 'RENDER_RETRY' not in result.fallback_reason and result.detected_doc_type is None
+
+
+def test_cover_image_counts_tiles_and_ignores_encryption(tmp_path):
+    import pymupdf
+    from PIL import Image
+    from demo.backend.ocr.localocr import page_has_cover_image
+    buffer = io.BytesIO()
+    Image.new('RGB', (100, 100), (200, 200, 200)).save(buffer, 'PNG')
+    document = pymupdf.open()
+    page = document.new_page(width=595, height=842)
+    page.insert_image(pymupdf.Rect(0, 0, 595, 421), stream=buffer.getvalue(), keep_proportion=False)
+    page.insert_image(pymupdf.Rect(0, 421, 595, 842), stream=buffer.getvalue(), keep_proportion=False)
+    document.save(tmp_path / 'tiles.pdf')
+    assert page_has_cover_image(tmp_path / 'tiles.pdf')
+    document.save(tmp_path / 'locked.pdf', encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw='x', owner_pw='y')
+    assert not page_has_cover_image(tmp_path / 'locked.pdf')

@@ -64,6 +64,14 @@ CODE_PAGE_IMAGE_SHARED = "PAGE_IMAGE_SHARED"
 CODE_ISSUE_DATE_MISSING = "ISSUE_DATE_MISSING"
 CODE_VIEW_ONLY_DOCUMENT = "VIEW_ONLY_DOCUMENT"
 CODE_ADDRESS_HISTORY_INCOMPLETE = "ADDRESS_HISTORY_INCOMPLETE"
+#: 주소이력불확실사유 코드 설명 (ocr/localocr._from_resident, 두 사업 공통 판독 신호). 담당자 세부 사유 문구용.
+RESIDENT_HISTORY_REASON_LEGEND = (
+    "NUMBER_GAP 번호 누락, NUMBER_UNREADABLE 번호 판독 실패, EMPTY_PAGE 표 머리글만 읽힌 쪽, "
+    "NUMBER_START 순번이 1로 시작하지 않음, UNREAD_ROWS 표를 못 찾은 쪽의 이력 번호, "
+    "TABLE_NOT_FOUND 후속 표 미확인, ROWS_UNREADABLE 후속 이력 판독 불완전, "
+    "END_UNCONFIRMED 마지막 이력 아래 끝 표시(이하 여백·다음 구역) 미확인, "
+    "SCAN_UNVERIFIED 스캔 초본 완결성 자동 확인 제한"
+)
 CODE_PAYMENT_AMOUNT_COLUMN_UNCERTAIN = "PAYMENT_AMOUNT_COLUMN_UNCERTAIN"
 #: 11-19 (T3): a 보수외소득월액 sub-header under a legacy 고지금액/납부금액 group is only partly read.
 CODE_PAYMENT_COMPONENT_HEADER_INCOMPLETE = "PAYMENT_COMPONENT_HEADER_INCOMPLETE"
@@ -994,10 +1002,7 @@ def _check_document(
             how_to_fix="그대로 두셔도 담당자가 원본을 확인합니다. 주소 이력이 모든 쪽에 선명하게 보이는 초본 전체를 다시 올리면 더 빨리 확인됩니다.",
             severity="NEEDS_REVIEW",
             detail=f"세부 사유: {ocr.fields.get('주소이력불확실사유') or '미상'} "
-                   "(NUMBER_GAP 번호 누락, NUMBER_UNREADABLE 번호 판독 실패, EMPTY_PAGE 표 머리글만 읽힌 쪽, "
-                   "TABLE_NOT_FOUND 후속 표 미확인, ROWS_UNREADABLE 후속 이력 판독 불완전, "
-                   "END_UNCONFIRMED 마지막 이력 아래 끝 표시(이하 여백·다음 구역) 미확인, "
-                   "SCAN_UNVERIFIED 스캔 초본 완결성 자동 확인 제한).",
+                   f"({RESIDENT_HISTORY_REASON_LEGEND}).",
         ))
 
     if (ocr.detected_doc_type is DocType.NHIS_PAYMENT and req.accepts(ocr.detected_doc_type)

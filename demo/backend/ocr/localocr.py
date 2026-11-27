@@ -50,7 +50,8 @@ GENERIC_CONFIDENCE_CAP = 0.8
 #: 내지 않는다. 마지막 이력까지 빠짐없이 읽었는지(문서 완결성)를 독립적으로 확인할 검증된 기준이 아직 없기 때문이다:
 #: 이미지에서 마지막 이력 줄들이 빠지고 '이하 여백'만 남은 초본은 순번·끝 표시만으로는 정상 초본과 구분되지 않는다.
 #: 적용 범위: 이 모듈 _from_resident가 만드는 초본 결과 중 OCR 쪽이 있는 것 → 주소이력불확실사유 SCAN_UNVERIFIED
-#: (→ doc_check ADDRESS_HISTORY_INCOMPLETE, 확인필요; 전입일·주소이력건수·현주소시도는 '불확실').
+#: (→ doc_check ADDRESS_HISTORY_INCOMPLETE, 확인필요; 전입일·현주소시도·주소변동내역은 '불확실'로 두어 자동 판정에 쓰지 않는다).
+#: 신뢰도는 낮추지 않으므로 발급일 등 확정 FAIL은 그대로 FAIL이다.
 #: 바꾸지 않는 것: 글자층 PDF 판독(pdftext, 글자층 좌표 판독), 등본·그 밖의 서류, 사업별 규칙, 다른 검증.
 #: 해제 조건: .trellis/spec/backend/resident-scan-completeness.md의 '자동 PASS 재허용 조건'을 독립 표본으로 충족할 때.
 SCAN_ABSTRACT_REVIEW_GUARD = True
@@ -70,7 +71,34 @@ RETRY_CODES = (
     "TEXT_RECLASS_NONE",        # 글자층 길: 모든 쪽 다시 판별도 실패 (숨은 글자층 포함)
     "TEXT_RECLASS_DISCARD",     # 글자층 길: 모든 쪽 다시 판별 결과가 이 계층 담당 밖이라 버려짐
 )
+#: 글자층 길 사유. 숨은 글자층·짧은 글자층 뒤의 그림을 읽으려는 대체 판독이므로 쪽을 덮는 그림이 있는
+#: PDF만 다시 읽는다(page_has_cover_image). 그림 없는 글자층 PDF는 렌더링해도 같은 글자층이 보일 뿐인데
+#: 모든 쪽을 300dpi OCR하면 10쪽 무관 글자 PDF가 0.1초에서 32초가 된다(11-27 실측).
+TEXT_RETRY_CODES = ("TEXT_RECLASS_NONE", "TEXT_RECLASS_DISCARD")
 _CLASS_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+
+
+def page_has_cover_image(path: Path) -> bool:
+    """그림(래스터, 인라인 포함)이 쪽 면적의 MAIN_IMAGE_MIN_COVERAGE 이상을 덮는 쪽이 하나라도 있는가.
+
+    preprocess가 본문 그림으로 보는 기준과 같은 비율이다. 여러 조각 그림은 면적을 더한다(겹침은
+    넉넉하게 세어 대체 판독 쪽으로 기운다). 암호 PDF는 False.
+    """
+    import pymupdf
+    from engine_v2.pipeline.preprocess import MAIN_IMAGE_MIN_COVERAGE
+
+    with pymupdf.open(path) as document:
+        if document.needs_pass:
+            return False
+        for page in document:
+            area = page.rect.width * page.rect.height
+            if area <= 0:
+                continue
+            covered = sum((pymupdf.Rect(info["bbox"]) & page.rect).get_area()
+                          for info in page.get_image_info())
+            if covered / area >= MAIN_IMAGE_MIN_COVERAGE:
+                return True
+    return False
 
 
 def exception_code(exc: BaseException) -> str:
@@ -225,6 +253,27 @@ def _shared_image_groups(pages, marker_pages) -> list[list[int] | None] | None:
     return groups
 
 
+def _number_column_ordinals(pages, ra) -> set[int]:
+    """주소 이력 구역의 순번 칸(x < COL_NO_MAX_X)에 보이는 1~3자리 번호. 표를 찾았는지와 무관하게 모은다.
+
+    쪽마다 이력 표 끝(추출기 _table_end와 같은 정의: '이하 여백' 줄 또는 순번 칸의 '병역' 구역 머리글) 아래는
+    다른 구역이므로 세지 않는다 (11-21: 끝 뒤 구역은 확인필요 사유를 더하지 않는다). 추출기처럼 쪽마다 따로
+    자르며, 앞 쪽의 구역 머리글이 뒤 쪽 이력을 가리지 않는다.
+    """
+    from engine_v2.pipeline.layout import group_lines, normalize
+
+    seen: set[int] = set()
+    for page, result in pages:
+        lines = group_lines(normalize(result.words, page.page, page.pixel_size))
+        end = ra._table_end(lines, ra.HEADER_MAX_Y)
+        for line in lines:
+            for word in line:
+                if word.x0 < ra.COL_NO_MAX_X and ra.HEADER_MAX_Y < word.cy < end:
+                    if found := re.match(r"(\d{1,3})(?!\d)", word.text.strip()):
+                        seen.add(int(found.group(1)))
+    return seen
+
+
 def _history_end_label(ex) -> str:
     """11-26: 주소 이력 끝을 무엇으로 확인했는지 (근거 종류와 쪽 번호만, 값 없음)."""
     kind, page = getattr(ex, "history_end", "NONE"), getattr(ex, "history_end_page", None)
@@ -288,16 +337,28 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
         if len(ex.history) >= 2:
             fields["주소변동내역"] = "포함"
 
-    # 주소 이력 누락 의심 (11-18): 순번이 1부터 이어지지 않거나, 번호를 못 읽었거나, 표 머리글은 있는데
-    # 이력 줄을 0건 읽은 쪽이 있으면 전입일·주소이력건수를 '불확실'로 두고 doc_check가 확인필요로 보낸다.
-    # 번호 누락과 번호 판독 실패는 세부 사유를 나눠 남긴다.
+    # 주소 이력 누락 의심 (공통, 두 사업 같은 코드): 아래 사유가 하나라도 있으면 전입일(과 사유에 따라
+    # 주소이력건수·현주소시도·주소변동내역)을 '불확실'로 두고 doc_check가 ADDRESS_HISTORY_INCOMPLETE(확인필요)를 낸다.
+    # 신뢰도는 낮추지 않는다: 발급일 등 확정 FAIL을 보류로 바꾸지 않기 위해서다.
+    #   NUMBER_GAP        (11-18) 순번이 1..N으로 빈틈·중복 없이 이어지지 않음 (메모 줄 순번 포함)
+    #   NUMBER_UNREADABLE (11-18) 번호 없는 이력이 있어 연속성 확인 불가
+    #   EMPTY_PAGE        (11-18) 표 머리글은 찾았는데 이력 줄을 0건 읽은 쪽
+    #   NUMBER_START      (11-26) 읽은 이력 번호가 1로 시작하지 않음 (첫 쪽 표를 못 찾아 앞 이력이 빠짐)
+    #   UNREAD_ROWS       (11-26) 순번 칸에 마지막 건보다 큰 번호가 보임 (표를 못 찾은 쪽의 이력이 빠짐)
+    #   TABLE_NOT_FOUND·ROWS_UNREADABLE (11-21) 후속 쪽 표 미확인·후속 이력 판독 불완전 (추출기 history_table_issues)
+    #   END_UNCONFIRMED   (11-26) 스캔에서 마지막 건 아래 끝 표시(이하 여백·다음 구역)를 확인하지 못함
+    #   SCAN_UNVERIFIED   (11-26) 스캔 초본 완결성 자동 확인 제한 (SCAN_ABSTRACT_REVIEW_GUARD)
     if ex.detected_type == v2types.RESIDENT_ABSTRACT:
         # OCR로 읽은 쪽이 있으면 스캔(사진)본이다. 모든 쪽이 글자층일 때만 글자층 판독이다 (_pages_engine과 같은 기준).
         scanned = any(page.source.value != "text_layer" for page, _ in pages)
+        numbers = sorted(entry.no for entry in ex.history if entry.no is not None)
         uncertain = [code for code, hit in (
             ("NUMBER_GAP", getattr(ex, "history_numbers", "NA") == "GAP"),
             ("NUMBER_UNREADABLE", getattr(ex, "history_numbers", "NA") == "UNREADABLE"),
             ("EMPTY_PAGE", getattr(ex, "history_empty_page", False)),
+            ("NUMBER_START", bool(numbers) and numbers[0] != 1),
+            ("UNREAD_ROWS", bool(numbers) and any(seen > numbers[-1]
+                                                  for seen in _number_column_ordinals(pages, ra))),
             # 11-26: 마지막 건 바로 아래 단독 '이하 여백'으로 이력 끝을 확인하지 못함 (끝 이력 누락·하단 잘림 가능).
             ("END_UNCONFIRMED", scanned and bool(ex.history)
              and getattr(ex, "history_end", "NONE") not in ("BLANK_MARKER", "NEXT_SECTION")),
@@ -339,8 +400,7 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
         confidence = min(confidence, .4)
         fields["판독경고"] = "주소 이력의 순번 또는 날짜를 완전히 확인하지 못했습니다."
 
-    from .pdftext import mark_viewing_copy
-    return mark_viewing_copy(OcrResult(
+    return _business_resident_marks(OcrResult(
         detected_doc_type=detected,
         confidence=round(confidence, 2),
         image_quality=_quality([p for p, _ in pages]),
@@ -352,6 +412,12 @@ def _from_resident(ex, pages, ra, v2types) -> OcrResult:
         classification_confidence=ex.type_confidence,
         classification_evidence=ex.classification_evidence,
     ), "\n".join(r.text for _, r in pages))
+
+
+def _business_resident_marks(result: OcrResult, text: str) -> OcrResult:
+    """사업별 초본 표시 (공통 _from_resident 밖). 두배적금: 인쇄된 '열람용' 표시를 담당자 확인으로 남긴다 (11-18 S3)."""
+    from .pdftext import mark_viewing_copy
+    return mark_viewing_copy(result, text)
 
 
 def ensure_nhis_required_fields(result: OcrResult) -> OcrResult:
@@ -959,6 +1025,8 @@ class LocalOcr:
         지금까지와 같이 다음 계층에 넘긴다. 다시 읽은 결과에서는 또 대체하지 않는다.
         """
         if path.suffix.lower() != ".pdf" or engine == "off" or code not in RETRY_CODES:
+            return None
+        if code in TEXT_RETRY_CODES and not page_has_cover_image(path):
             return None
         run_ocr = _import_v2()[3]
         page_images = render_pages(path)

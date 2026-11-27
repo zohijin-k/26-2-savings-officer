@@ -79,6 +79,13 @@ MAX_PAGE_WORKERS = _env_count('OWN_OCR_PAGE_WORKERS', 4)
 #: read two-page scans 35% slower than intra 2 x 2 (same code, 4 interleaved rounds, round means apart),
 #: so two pages now use the 3+-page sessions and preload holds 5 sessions again.
 TWO_PAGE_INTRA_THREADS = 2
+#: 11-27: onnxruntime CPU 메모리 arena 사용 여부. arena는 키운 메모리를 세션이 살아 있는 동안 운영체제에 돌려주지
+#: 않는다. 인식 입력(글줄) 너비가 제각각이라 문서를 읽을수록 세션마다 커지고 크기도 실행마다 달라진다.
+#: 끄면 추론마다 필요한 만큼만 잡고 놓는다. 판독 결과(상자·글자·신뢰도)는 같다.
+#: 실측(8코어 M2, 서버처럼 미리 불러온 프로세스, 반복 측정의 중앙값): 문서 18건을 이어 읽는 프로세스의 최대 메모리
+#: 2.29GB(arena 켬) → 2.05GB, 300dpi 혼합 20쪽 2.25GB → 2.01GB, 시간은 같다. 본문 그림을 그대로 읽는 3쪽 스캔은
+#: 첫 판독 최대가 1.40GB → 1.55GB로 오히려 높다(프로세스 최대보다는 낮다).
+CPU_MEM_ARENA = False
 _worker = threading.local()
 
 
@@ -96,6 +103,7 @@ def _load_sessions(intra_threads: int | None = None):
     options = ort.SessionOptions()
     options.intra_op_num_threads = INTRA_OP_THREADS if intra_threads is None else intra_threads
     options.inter_op_num_threads = 1
+    options.enable_cpu_mem_arena = CPU_MEM_ARENA
     det, rec = [ort.InferenceSession(str(MODEL_DIR / name), sess_options=options,
                                     providers=['CPUExecutionProvider']) for name in ('det.onnx', 'rec.onnx')]
     chars = (MODEL_DIR / 'korean_dict.txt').read_text(encoding='utf-8').splitlines() + [' ']

@@ -186,6 +186,15 @@ def _real_own_reader() -> bool:
     return False
 
 
+#: 동시 판독에서 작업 하나당 미리 준비해 두는 쪽 수(판독 중 1 + 대기 1). 11-27: 모든 쪽을 한꺼번에 맡기지 않는다.
+PAGE_LOOKAHEAD = 2
+
+
+def _page_input(image):
+    """쪽 입력 ``(png, size)``. 인자 없는 함수면 지금 불러 그 쪽 그림을 만든다(늦은 렌더링)."""
+    return image() if callable(image) else image
+
+
 def run_ocr_pages(engine: str, images, run=None):
     """여러 쪽을 읽는다. 쪽 순서대로 '인자 없는 읽기 함수'를 하나씩 내준다.
 
@@ -195,19 +204,31 @@ def run_ocr_pages(engine: str, images, run=None):
       코어). 결과는 쪽 순서 그대로이고 쪽 하나의 결과는 순차로 읽을 때와 같다.
     - 그 밖(1쪽, 다른 엔진, 시험·측정 도구가 바꿔 끼운 run이나 판독기)은 지금처럼 순차로,
       읽기 함수를 부를 때 그 쪽을 읽는다. 호출 순서·중간 종료·예외 위치가 그대로다.
+    ``images``: 쪽마다 ``(png, size)`` 또는 그것을 만들어 주는 인자 없는 함수(11-27 늦은 렌더링).
+      함수는 그 쪽을 읽을 차례에, 호출하는 쪽의 스레드에서만 부른다(PDF 라이브러리는 스레드 안전하지 않다).
+      동시 판독은 작업 수 × PAGE_LOOKAHEAD 쪽까지만 미리 만들어 맡기고, 앞 쪽 결과를 받아 가면 다음 쪽을 맡긴다.
+      읽기가 끝난 쪽의 그림은 여기서 붙잡지 않으므로 메모리가 쪽 수에 비례해 늘지 않는다.
     ``run``: 호출하는 쪽이 쓰던 한 쪽 함수(기본: 이 모듈의 run_ocr).
+    시간 한도(11-27, limits.MAX_OCR_SECONDS): 다음 쪽을 내주기 전에 지금까지 걸린 시간을 확인해, 넘었으면
+    OcrWorkloadExceeded("SECONDS")를 낸다. 호출하는 쪽은 이미 받은 쪽 결과로 판정하지 않고 문서 전체를 담당자
+    확인으로 보낸다(일부 판독 금지). 읽는 중인 쪽은 끝까지 읽고, 시작하지 않은 쪽은 읽지 않는다.
     """
+    from .. import limits
+
     run = run_ocr if run is None else run
     images = list(images)
+    started = time.monotonic()
     workers = 1
     if engine == "own" and len(images) > 1 and run is _RUN_OCR and _real_own_reader():
         from . import own
         workers = own.prepare_page_workers(len(images))
     if workers == 1:
-        for png, size in images:
-            yield lambda png=png, size=size: run(engine, png, size)
+        for image in images:
+            limits.check_elapsed(started)
+            yield lambda image=image: run(engine, *_page_input(image))
         return
 
+    from collections import deque
     from concurrent.futures import ThreadPoolExecutor
     from queue import SimpleQueue
     from . import own
@@ -219,10 +240,23 @@ def run_ocr_pages(engine: str, images, run=None):
     intra = own.page_intra_threads(len(images))
     pool = ThreadPoolExecutor(workers, thread_name_prefix="own-page",
                               initializer=lambda: own.bind_page_worker(slots.get(), intra))
+    waiting = iter(images)
+    pending = deque()
+
+    def submit_ahead():
+        while len(pending) < workers * PAGE_LOOKAHEAD:
+            image = next(waiting, None)
+            if image is None:
+                return
+            png, size = _page_input(image)
+            pending.append(pool.submit(run, engine, png, size))
+
     try:
-        futures = [pool.submit(run, engine, png, size) for png, size in images]
-        for future in futures:
-            yield future.result
+        submit_ahead()
+        while pending:
+            limits.check_elapsed(started)
+            yield pending.popleft().result
+            submit_ahead()
     finally:
         # 호출하는 쪽이 중간에 그만두면 아직 시작하지 않은 쪽은 읽지 않는다.
         pool.shutdown(wait=True, cancel_futures=True)

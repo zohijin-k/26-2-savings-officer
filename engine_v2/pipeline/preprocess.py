@@ -20,6 +20,8 @@ from enum import Enum
 from pathlib import Path
 
 import pymupdf
+from . import limits
+from .limits import OcrWorkload, check_page_images, release_page_cache
 from .privacy import mask_rrn
 
 TEXT_LAYER_MIN_CHARS = 50      # 이 이상이면 텍스트 레이어 신뢰
@@ -86,7 +88,9 @@ def _classify_aux(bbox, page_w, page_h) -> AuxRole:
     return AuxRole.OTHER
 
 
-def _process_pdf_page(doc: pymupdf.Document, i: int) -> PageImage:
+def _process_pdf_page(doc: pymupdf.Document, i: int, workload: OcrWorkload | None = None) -> PageImage:
+    """``workload``: 문서의 누적 OCR 작업량(11-27). 그림을 꺼내거나 렌더링하기 전에 그 쪽의 화소 수를 더해
+    한도(limits)를 넘으면 OcrWorkloadExceeded를 낸다. 글자층 쪽은 세지 않는다."""
     page = doc[i]
     pw, ph = page.rect.width, page.rect.height
     result = PageImage(page=i, source=PageSource.RENDER, page_size_pt=(pw, ph))
@@ -99,6 +103,8 @@ def _process_pdf_page(doc: pymupdf.Document, i: int) -> PageImage:
         return result
 
     # 2) 본문 이미지 찾기
+    if workload is not None:
+        check_page_images(page)  # 11-27: 아래 xrefs=True는 쪽의 모든 그림을 펼친다. 그 전에 크기만 읽어 확인한다.
     infos = page.get_image_info(xrefs=True)
     main = None
     for info in infos:
@@ -119,6 +125,8 @@ def _process_pdf_page(doc: pymupdf.Document, i: int) -> PageImage:
             ))
 
     if main is not None:
+        if workload is not None:
+            workload.add(main["width"], main["height"])
         pix = pymupdf.Pixmap(doc, main["xref"])
         if pix.alpha or pix.n - pix.alpha != 3:
             pix = pymupdf.Pixmap(pymupdf.csRGB, pix)  # RGB로 통일
@@ -129,6 +137,8 @@ def _process_pdf_page(doc: pymupdf.Document, i: int) -> PageImage:
         result.dpi = pix.width / ((main["bbox"][2] - main["bbox"][0]) / 72)
     else:
         # 3) 렌더링 폴백
+        if workload is not None:
+            workload.add(pw * RENDER_DPI / 72, ph * RENDER_DPI / 72)
         pix = page.get_pixmap(dpi=RENDER_DPI)
         result.source = PageSource.RENDER
         result.png = pix.tobytes("png")
@@ -136,6 +146,8 @@ def _process_pdf_page(doc: pymupdf.Document, i: int) -> PageImage:
         result.dpi = RENDER_DPI
         result.warnings.append("본문 이미지를 찾지 못해 페이지 전체 렌더링 (바코드 등 포함 가능)")
 
+    del pix
+    release_page_cache()  # 11-27: 쪽마다 디코딩한 그림이 MuPDF 전역 캐시에 쌓이지 않게 한다.
     if result.dpi and result.dpi < MIN_OCR_DPI:
         result.warnings.append(f"low_resolution: {result.dpi:.0f}dpi")
     return result
@@ -153,23 +165,71 @@ def _mark_shared_images(doc: pymupdf.Document, pages: list[PageImage]) -> None:
     for page in pages:
         if page.image_xref is not None and counts[page.image_xref] > 1:
             import hashlib
+            rect = doc[page.page].rect  # 11-27: 큰 용지 쪽은 72dpi 렌더도 한도를 넘을 수 있다(본문 그림이 작아도).
+            limits.check_page_size(rect.width * SHARED_RENDER_DPI / 72, rect.height * SHARED_RENDER_DPI / 72)
             pix = doc[page.page].get_pixmap(dpi=SHARED_RENDER_DPI)
             page.render_digest = hashlib.sha256(pix.samples).hexdigest()
+
+
+def _image_file_size(path: Path) -> tuple[int, int]:
+    """그림 파일의 (너비, 높이) 화소. 머리 정보만 읽고 화소는 펼치지 않는다. 못 읽으면 (0, 0) — 뒤의 판독이 오류를 낸다."""
+    from PIL import Image
+
+    try:
+        with Image.open(path) as image:
+            return image.size
+    except Image.DecompressionBombError:
+        return limits.MAX_PAGE_PIXELS + 1, 1  # PIL이 열기를 거부하는 크기(약 1.8억 화소 초과): 한도 초과로 센다.
+    except Exception:  # noqa: BLE001 - PIL이 못 여는 형식: MuPDF의 그림 머리 정보로 한 번 더 본다.
+        try:
+            with pymupdf.open(path) as document:
+                info = max(document[0].get_image_info(), key=lambda item: item["width"] * item["height"])
+                return info["width"], info["height"]
+        except Exception:  # noqa: BLE001
+            return 0, 0
+
+
+def _check_workload_before_decoding(doc: pymupdf.Document) -> None:
+    """11-27: 그림을 하나도 펼치지 않고 문서 전체의 OCR 작업량을 먼저 어림해 한도를 넘으면 OcrWorkloadExceeded를 낸다.
+
+    쪽마다 글자 수와 그림 머리 정보만 읽는다. 쪽을 처리하면서 세는 것만으로는 한도를 넘는 쪽에 이르기 전의 쪽들을
+    이미 펼친 뒤라(31쪽 스캔이면 30쪽을 디코딩·PNG 인코딩) 보호가 되지 않는다. 본문 그림 판정(xref 유무)은 여기서 알 수
+    없어 면적 기준만 쓰는 어림이며, 정확한 집계는 쪽 처리(_process_pdf_page)가 한 번 더 한다.
+    """
+    workload = OcrWorkload()
+    for page in doc:
+        if len(mask_rrn(page.get_text("text")).strip()) >= TEXT_LAYER_MIN_CHARS:
+            continue
+        check_page_images(page)
+        pw, ph = page.rect.width, page.rect.height
+        covering = [info for info in page.get_image_info() if pw * ph > 0 and
+                    (info["bbox"][2] - info["bbox"][0]) * (info["bbox"][3] - info["bbox"][1]) / (pw * ph)
+                    >= MAIN_IMAGE_MIN_COVERAGE]
+        if covering:
+            main = max(covering, key=lambda info: info["width"] * info["height"])
+            workload.add(main["width"], main["height"])
+        else:
+            workload.add(pw * RENDER_DPI / 72, ph * RENDER_DPI / 72)
 
 
 def preprocess(file_path: str | Path) -> list[PageImage]:
     path = Path(file_path)
     suffix = path.suffix.lower()
 
+    # 11-27: OCR로 읽을 쪽 수·화소 수가 한도(limits)를 넘으면 그림을 펼치기 전에 OcrWorkloadExceeded를 낸다.
+    # 일부 쪽만 돌려주지 않는다 — 호출하는 판독 계층이 문서 전체를 담당자 확인으로 보낸다.
+    workload = OcrWorkload()
     if suffix == ".pdf":
-        doc = pymupdf.open(path)
-        if doc.needs_pass:
-            raise ValueError("암호가 걸린 PDF")
-        pages = [_process_pdf_page(doc, i) for i in range(doc.page_count)]
-        _mark_shared_images(doc, pages)
+        with pymupdf.open(path) as doc:
+            if doc.needs_pass:
+                raise ValueError("암호가 걸린 PDF")
+            _check_workload_before_decoding(doc)
+            pages = [_process_pdf_page(doc, i, workload) for i in range(doc.page_count)]
+            _mark_shared_images(doc, pages)
         return pages
 
     if suffix in {".png", ".jpg", ".jpeg", ".heic", ".webp", ".bmp", ".tif", ".tiff"}:
+        workload.add(*_image_file_size(path))
         pix = pymupdf.Pixmap(str(path))
         if pix.alpha or pix.n - pix.alpha != 3:
             pix = pymupdf.Pixmap(pymupdf.csRGB, pix)

@@ -23,6 +23,7 @@ from .extractors import jbai_text
 from .extractors.resident_abstract import kst_today
 from .pipeline.ocr import OcrResult, OcrWord, run_ocr, run_ocr_pages
 from .pipeline.field_safety import remove_header_only_fields
+from .pipeline.limits import OcrWorkloadExceeded
 from .pipeline.preprocess import PageImage, PageSource, preprocess
 from .rules.registry import RULES, RuleContext
 from .schemas.models import (ApplicationInput, ApplicationResult, CheckResult, CheckStatus,
@@ -171,6 +172,11 @@ def evaluate_document(doc: DocumentInput, pages: list[tuple[PageImage, OcrResult
 
 
 def _load_pages(doc: DocumentInput, ocr_engine: str, *, allow_page_errors: bool = False) -> list[tuple[PageImage, OcrResult]] | str:
+    """모든 쪽을 읽는다(글자층 쪽은 글자층 단어, 그 밖은 OCR). 읽지 못하면 사유 문자열.
+
+    11-27: OCR 작업량 한도 초과(pipeline.limits.OcrWorkloadExceeded)는 사유 문자열로 바꾸지 않고 그대로 낸다 —
+    문자열은 호출하는 쪽에서 '파일을 열 수 없음'(부적합)이나 다음 판독 계층(첫 쪽 글자층)으로 이어지기 때문이다.
+    """
     try:
         pages = []
         pdf = None
@@ -242,7 +248,19 @@ def run(app: ApplicationInput, ocr_engine: str | None = None, today: date | None
                     review_reasons=[message],
                 ))
             continue
-        pages = _load_pages(d, ocr_engine)
+        try:
+            pages = _load_pages(d, ocr_engine)
+        except OcrWorkloadExceeded as limit:
+            # 11-27: 작업량 한도를 넘은 서류는 읽지 않는다 → 담당자 확인 (일부만 읽은 판정도, '열 수 없음' 부적합도 아니다).
+            message = f"자동 판독 작업량 한도 초과({limit.code}): 읽지 않음"
+            docs.append(DocumentResult(
+                doc_id=d.doc_id, declared_type=d.declared_type, detected_type=DocType.UNKNOWN,
+                type_confidence=0.0, verdict=Verdict.NEEDS_REVIEW,
+                checks=[CheckResult(rule_id="ocr.workload", rule_type="ocr", status=CheckStatus.UNKNOWN,
+                                    applicant_message=REVIEW_MSG, reviewer_message=message)],
+                review_reasons=[message],
+            ))
+            continue
         if isinstance(pages, str):
             docs.append(DocumentResult(doc_id=d.doc_id, declared_type=d.declared_type, detected_type=DocType.UNKNOWN,
                                        type_confidence=0.0, verdict=Verdict.UNSUITABLE,

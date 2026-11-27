@@ -71,7 +71,34 @@ RETRY_CODES = (
     "TEXT_RECLASS_NONE",        # 글자층 길: 모든 쪽 다시 판별도 실패 (숨은 글자층 포함)
     "TEXT_RECLASS_DISCARD",     # 글자층 길: 모든 쪽 다시 판별 결과가 이 계층 담당 밖이라 버려짐
 )
+#: 글자층 길 사유. 숨은 글자층·짧은 글자층 뒤의 그림을 읽으려는 대체 판독이므로 쪽을 덮는 그림이 있는
+#: PDF만 다시 읽는다(page_has_cover_image). 그림 없는 글자층 PDF는 렌더링해도 같은 글자층이 보일 뿐인데
+#: 모든 쪽을 300dpi OCR하면 10쪽 무관 글자 PDF가 0.1초에서 32초가 된다(11-27 실측).
+TEXT_RETRY_CODES = ("TEXT_RECLASS_NONE", "TEXT_RECLASS_DISCARD")
 _CLASS_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+
+
+def page_has_cover_image(path: Path) -> bool:
+    """그림(래스터, 인라인 포함)이 쪽 면적의 MAIN_IMAGE_MIN_COVERAGE 이상을 덮는 쪽이 하나라도 있는가.
+
+    preprocess가 본문 그림으로 보는 기준과 같은 비율이다. 여러 조각 그림은 면적을 더한다(겹침은
+    넉넉하게 세어 대체 판독 쪽으로 기운다). 암호 PDF는 False.
+    """
+    import pymupdf
+    from engine_v2.pipeline.preprocess import MAIN_IMAGE_MIN_COVERAGE
+
+    with pymupdf.open(path) as document:
+        if document.needs_pass:
+            return False
+        for page in document:
+            area = page.rect.width * page.rect.height
+            if area <= 0:
+                continue
+            covered = sum((pymupdf.Rect(info["bbox"]) & page.rect).get_area()
+                          for info in page.get_image_info())
+            if covered / area >= MAIN_IMAGE_MIN_COVERAGE:
+                return True
+    return False
 
 
 def exception_code(exc: BaseException) -> str:
@@ -998,6 +1025,8 @@ class LocalOcr:
         지금까지와 같이 다음 계층에 넘긴다. 다시 읽은 결과에서는 또 대체하지 않는다.
         """
         if path.suffix.lower() != ".pdf" or engine == "off" or code not in RETRY_CODES:
+            return None
+        if code in TEXT_RETRY_CODES and not page_has_cover_image(path):
             return None
         run_ocr = _import_v2()[3]
         page_images = render_pages(path)

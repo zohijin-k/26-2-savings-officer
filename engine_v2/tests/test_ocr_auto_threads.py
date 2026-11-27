@@ -139,10 +139,10 @@ def test_preload_loads_the_single_and_every_page_session(monkeypatch, loads):
     monkeypatch.setenv('ENGINE_V2_OCR', 'own')
     monkeypatch.setattr(own, 'AUTO_THREADS', True)
     assert localocr.preload_own() == 'LOADED'
-    assert sorted(loaded) == [2, 2, 2, 2, 4, 4]  # + the two-page slot 1 (slot 0 is the single session)
+    assert sorted(loaded) == [2, 2, 2, 2, 4]  # single + four intra-2 page sessions (two pages use them too)
     _read(1)
     _read(4)
-    assert sorted(loaded) == [2, 2, 2, 2, 4, 4]  # nothing is loaded on a later request
+    assert sorted(loaded) == [2, 2, 2, 2, 4]  # nothing is loaded on a later request
 
 
 def test_doc_timing_records_auto_and_the_values_used(monkeypatch, tmp_path, capsys):
@@ -166,30 +166,32 @@ def test_doc_timing_records_auto_and_the_values_used(monkeypatch, tmp_path, caps
     capsys.readouterr()
 
 
-# ---------------------------------------------------------------- 11-19 T4b: two pages read with intra 4 x 2
+# ------------------------------------- 11-19 T4b two-page threads; 11-27: intra 2 x 2 (TWO_PAGE_INTRA_THREADS = 2)
+# On the 8-core M2 (4P+4E) intra 4 x 2 read two-page scans 35% slower than intra 2 x 2, so two pages
+# share the 3+-page intra-2 sessions again. The knob and its cache keys stay.
 
 
-def test_two_pages_use_two_intra_4_page_sessions_concurrently(monkeypatch, loads):
+def test_two_pages_use_two_intra_2_page_sessions_concurrently(monkeypatch, loads):
     loaded, used = loads
     monkeypatch.setattr(own, 'AUTO_THREADS', True)
+    assert own.TWO_PAGE_INTRA_THREADS == own.INTRA_OP_THREADS == 2
     _read(2)
-    # slot 0 is the single intra-4 session (det-0), slot 1 one more intra-4 page session (det-1)
-    assert loaded == [4, 4]
+    # two intra-2 page sessions (slot 0 is its own page session, not the intra-4 single one)
+    assert loaded == [2, 2]
     # (a pool thread that is already idle may take the second page too: subset, as for 3 pages)
-    assert len(used) == 2 and {det for det, _ in used} <= {'det-0-i4', 'det-1-i4'}
+    assert len(used) == 2 and {det for det, _ in used} <= {'det-0-i2', 'det-1-i2'}
     assert threading.get_ident() not in {thread for _, thread in used}
-    assert own.page_sessions(0, 4) is own.sessions()
     _read(3)
-    assert loaded == [4, 4, 2, 2, 2]  # 3+ pages keep intra-2 page sessions, never the intra-4 ones
-    assert {det for det, _ in used[2:]} <= {'det-2-i2', 'det-3-i2', 'det-4-i2'}
+    assert loaded == [2, 2, 2]  # 3+ pages reuse the same intra-2 page sessions
     _read(1)
     _read(2)
-    assert loaded == [4, 4, 2, 2, 2]  # one page and two pages reuse what is loaded
-    assert [det for det, _ in used[5:6]] == ['det-0-i4']  # the one-page read is on the single session
+    assert loaded == [2, 2, 2, 4]  # one page loads the single intra-4 session once; two pages reuse
+    assert [det for det, _ in used[5:6]] == ['det-3-i4']  # the one-page read is on the single session
+    assert own.page_sessions(0, 2) is not own.sessions()
     assert own.page_workers(2) * own.page_intra_threads(2) <= 8
 
 
-@pytest.mark.parametrize('cores, intra, workers', [(1, 2, 1), (2, 2, 1), (4, 2, 2), (6, 2, 2), (8, 4, 2), (16, 4, 2)])
+@pytest.mark.parametrize('cores, intra, workers', [(1, 2, 1), (2, 2, 1), (4, 2, 2), (6, 2, 2), (8, 2, 2), (16, 2, 2)])
 def test_two_page_threads_stay_within_the_cores(monkeypatch, cores, intra, workers):
     monkeypatch.setattr(own, 'AUTO_THREADS', True)
     monkeypatch.setattr(own.os, 'cpu_count', lambda: cores)
@@ -228,13 +230,13 @@ def test_preload_also_loads_the_two_page_sessions(monkeypatch, loads):
     monkeypatch.setenv('ENGINE_V2_OCR', 'own')
     monkeypatch.setattr(own, 'AUTO_THREADS', True)
     assert localocr.preload_own() == 'LOADED'
-    assert sorted(loaded) == [2, 2, 2, 2, 4, 4]  # single (= two-page slot 0) + four intra-2 + two-page slot 1
+    assert sorted(loaded) == [2, 2, 2, 2, 4]  # single + four intra-2 (the two-page sessions are among them)
     for pages in (1, 2, 3, 4, 7):
         _read(pages)
-    assert sorted(loaded) == [2, 2, 2, 2, 4, 4]  # nothing is loaded on a later request
+    assert sorted(loaded) == [2, 2, 2, 2, 4]  # nothing is loaded on a later request
 
 
-def test_doc_timing_records_two_pages_as_intra_4_x_2(monkeypatch, tmp_path, capsys, loads):
+def test_doc_timing_records_two_pages_as_intra_2_x_2(monkeypatch, tmp_path, capsys, loads):
     import json
     import pymupdf
     from engine_v2.tests.test_doc_timing import _image_page, text_pdf
@@ -255,8 +257,8 @@ def test_doc_timing_records_two_pages_as_intra_4_x_2(monkeypatch, tmp_path, caps
     assert tool.main(['--root', str(root), '--out', str(out), '--warmup', '0']) == 0
     meta = json.loads((out / 'run.json').read_text())
     summary = (out / 'summary_brief.txt').read_text().splitlines()
-    assert meta['ocr_threads_used'] == [[2, 3, 1], [4, 1, 1], [4, 2, 1]]
-    assert 'OCR_THREADS_USED 4 2 1' in summary and 'OCR_THREADS_USED 4 1 1' in summary
+    assert meta['ocr_threads_used'] == [[2, 2, 1], [2, 3, 1], [4, 1, 1]]
+    assert 'OCR_THREADS_USED 2 2 1' in summary and 'OCR_THREADS_USED 4 1 1' in summary
     assert 'OCR_THREADS_USED 2 3 1' in summary
     assert 'OCR_THREADS_MODE auto 4 2 4' in summary  # mode line unchanged
     capsys.readouterr()

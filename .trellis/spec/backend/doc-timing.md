@@ -72,6 +72,10 @@ verdict, on the own engine. Never change operating code to make it measurable.
   auto only when the page threads equal `single_intra_threads()`, i.e. two pages), so auto preload
   holds 6 sessions on 8+ cores (single intra 4, four intra 2, one more intra 4); doc_timing does
   not exclude a shared slot 0 twice.
+  11-27: `TWO_PAGE_INTRA_THREADS` is 2 (was 4). Same code, 4 interleaved rounds on the 8-core M2 (4P+4E):
+  intra 4 x 2 read two-page scans in 2.35 s vs 1.73 s for intra 2 x 2 (round means apart), so two pages
+  use the intra-2 page sessions (slot 0 unshared), preload holds 5 sessions, and doc_timing counts a
+  two-page document as `2 2`. The knob and the `(slot, intra_threads)` cache keys stay.
   Setting either variable turns auto off: every session uses `INTRA_OP_THREADS` and page slot 0
   shares `sessions()`, exactly as before. Server preload loads the single and every page session, including the two-page ones
   (`prepare_page_workers(MAX_PAGE_WORKERS)` then `prepare_page_workers(2)`).

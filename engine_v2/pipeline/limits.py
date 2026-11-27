@@ -89,15 +89,22 @@ def check_elapsed(started: float) -> None:
         raise OcrWorkloadExceeded("SECONDS")
 
 
-def check_page_images(page) -> None:
+def check_page_images(page, *, resources: bool = False) -> None:
     """쪽에 들어 있는 그림 가운데 화소 수가 한도를 넘는 것이 있으면 OcrWorkloadExceeded("PAGE_PIXELS").
 
     그림의 머리 정보(너비·높이)만 읽는다. 이 쪽을 OCR하려면 그 그림을 펼쳐야 하므로(본문 그림 찾기의
     ``get_image_info(xrefs=True)``와 렌더링 모두 그림을 디코딩한다: 20KB 파일의 1.44억 화소 그림 +127MB),
     화면에 작게 놓인 그림이라도 한도를 넘으면 그 문서는 읽지 않는다.
+
+    ``resources=True``: 쪽에 그리지 않았어도 쪽 자원 목록에 올라 있는 그림까지 본다. ``get_image_info(xrefs=True)``는
+    자원 목록의 모든 그림을 펼쳐 해시를 구하므로(그리지 않은 1.44억 화소 그림도), 그 호출 앞에서는 이렇게 확인한다.
+    렌더링은 그리지 않은 그림을 펼치지 않으므로 렌더링 앞에서는 그린 그림만 본다.
     """
-    for info in page.get_image_info():
-        if int(info.get("width") or 0) * int(info.get("height") or 0) > MAX_PAGE_PIXELS:
+    sizes = [(info.get("width"), info.get("height")) for info in page.get_image_info()]
+    if resources:
+        sizes += [(item[2], item[3]) for item in page.get_images(full=True)]
+    for width, height in sizes:
+        if int(width or 0) * int(height or 0) > MAX_PAGE_PIXELS:
             raise OcrWorkloadExceeded("PAGE_PIXELS")
 
 

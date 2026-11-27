@@ -104,7 +104,8 @@ def _process_pdf_page(doc: pymupdf.Document, i: int, workload: OcrWorkload | Non
 
     # 2) 본문 이미지 찾기
     if workload is not None:
-        check_page_images(page)  # 11-27: 아래 xrefs=True는 쪽의 모든 그림을 펼친다. 그 전에 크기만 읽어 확인한다.
+        # 11-27: 아래 xrefs=True는 쪽 자원 목록의 모든 그림을 펼친다(그리지 않은 그림 포함). 그 전에 크기만 읽어 확인한다.
+        check_page_images(page, resources=True)
     infos = page.get_image_info(xrefs=True)
     main = None
     for info in infos:
@@ -193,23 +194,29 @@ def _check_workload_before_decoding(doc: pymupdf.Document) -> None:
     """11-27: 그림을 하나도 펼치지 않고 문서 전체의 OCR 작업량을 먼저 어림해 한도를 넘으면 OcrWorkloadExceeded를 낸다.
 
     쪽마다 글자 수와 그림 머리 정보만 읽는다. 쪽을 처리하면서 세는 것만으로는 한도를 넘는 쪽에 이르기 전의 쪽들을
-    이미 펼친 뒤라(31쪽 스캔이면 30쪽을 디코딩·PNG 인코딩) 보호가 되지 않는다. 본문 그림 판정(xref 유무)은 여기서 알 수
-    없어 면적 기준만 쓰는 어림이며, 정확한 집계는 쪽 처리(_process_pdf_page)가 한 번 더 한다.
+    이미 펼친 뒤라(31쪽 스캔이면 30쪽을 디코딩·PNG 인코딩) 보호가 되지 않는다. 쪽 처리와 같은 기준으로 센다: 쪽을 덮는
+    그림 가운데 자원 목록에 있는(xref가 있는) 가장 큰 그림의 화소, 없으면(인라인 그림뿐이면) 300dpi 렌더 화소.
+    정확한 집계는 쪽 처리(_process_pdf_page)가 한 번 더 한다.
     """
     workload = OcrWorkload()
     for page in doc:
         if len(mask_rrn(page.get_text("text")).strip()) >= TEXT_LAYER_MIN_CHARS:
             continue
-        check_page_images(page)
+        check_page_images(page, resources=True)
         pw, ph = page.rect.width, page.rect.height
+        rendered = (pw * RENDER_DPI / 72, ph * RENDER_DPI / 72)
         covering = [info for info in page.get_image_info() if pw * ph > 0 and
                     (info["bbox"][2] - info["bbox"][0]) * (info["bbox"][3] - info["bbox"][1]) / (pw * ph)
                     >= MAIN_IMAGE_MIN_COVERAGE]
+        # 쪽 처리는 xref가 있는 그림만 본문 그림으로 꺼내고, 인라인 그림뿐이면 쪽을 렌더링한다. 여기서는 자원 목록에
+        # 같은 크기의 그림이 있는지로 xref 유무를 가린다(크기만 읽음).
+        stored = {(item[2], item[3]) for item in page.get_images(full=True)}
+        covering = [info for info in covering if (info["width"], info["height"]) in stored]
         if covering:
             main = max(covering, key=lambda info: info["width"] * info["height"])
             workload.add(main["width"], main["height"])
         else:
-            workload.add(pw * RENDER_DPI / 72, ph * RENDER_DPI / 72)
+            workload.add(*rendered)
 
 
 def preprocess(file_path: str | Path) -> list[PageImage]:

@@ -258,6 +258,25 @@ def test_page_limit_is_checked_before_any_page_image_is_decoded(tmp_path, monkey
     assert error.value.code == "PAGES"
 
 
+def test_huge_picture_in_the_page_resources_but_not_drawn_is_refused_before_decoding(tmp_path, monkeypatch):
+    """Finding the main picture (get_image_info(xrefs=True)) decodes every picture in the page's resources,
+    drawn or not (second independent review, 11-28)."""
+    with pymupdf.open() as document:
+        page = document.new_page(width=595, height=842)
+        page.insert_image(pymupdf.Rect(0, 0, 10, 10), stream=_png((8000, 8000), "L"))   # 64 MP
+        hidden = page.get_contents()[-1]
+        page.insert_image(RECT, stream=_png())
+        document.update_stream(hidden, b" ")                                            # no longer drawn
+        document.save(tmp_path / "FAKE-undrawn.pdf", deflate=True)
+    with pymupdf.open(tmp_path / "FAKE-undrawn.pdf") as document:
+        assert [(i["width"], i["height"]) for i in document[0].get_image_info()] == [(1240, 1754)]
+        assert (8000, 8000) in [(item[2], item[3]) for item in document[0].get_images(full=True)]
+    monkeypatch.setattr(v2preprocess.pymupdf, "Pixmap", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    with pytest.raises(limits.OcrWorkloadExceeded) as error:
+        v2preprocess.preprocess(tmp_path / "FAKE-undrawn.pdf")
+    assert error.value.code == "PAGE_PIXELS"
+
+
 def test_shared_image_digest_is_not_rendered_for_a_huge_page(tmp_path, monkeypatch):
     """Two 14400 x 14400 pt pages drawing one small picture: the 72 dpi digest render would be 207 MP each."""
     with pymupdf.open() as document:

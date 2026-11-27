@@ -15,7 +15,7 @@
   "engine_v2/pipeline/layout.py": "527ac76acb3027383a17494e47072bd3273fa3951e6fc850ab1acc0658052e5a",
   "engine_v2/pipeline/limits.py": "e5a4e4245629e272e70696a691b0182a17dfcc7b7c504bb0e67d3ee38a3b8cab",
   "engine_v2/pipeline/ocr/__init__.py": "02565ef2dc009893a67ca372db8e6587daf6888c1b6f496f20baa9456defbbfd",
-  "engine_v2/pipeline/ocr/own.py": "13d8edf4fe324bb450291d5941d0fb210e2edcbc00046ebb6918300186070ff1",
+  "engine_v2/pipeline/ocr/own.py": "3bad923986915b5bc693bbc9bb435cc5d60e66b3b59ed575f2915b5b9d97d079",
   "engine_v2/pipeline/perspective.py": "6ddd741ca94030749e38c4ef4286c82e58ba1f10e2e2fd20d8a584e9c532fdf9",
   "engine_v2/pipeline/preprocess.py": "08543f363ad810a2e4e553db6decea25305787aa5b88da90dd4d7c8633a465f7",
   "engine_v2/pipeline/privacy.py": "cd0c3644de42759639d83922422f2c7c879d74696a34648c6370abd7dbfa8da8",

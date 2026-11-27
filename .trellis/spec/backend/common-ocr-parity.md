@@ -45,5 +45,10 @@
   OCR 입력 그림 자체는 바꾸지 않는다.
 - 300dpi 대체 판독(11-18 O1): 1차 경로가 종류를 정하지 못한 PDF만 화면과 같은 합성 렌더로 한 번 더 읽고, 종류를 찾았을
   때만 그 결과와 `RENDER_RETRY:<코드>`를 남긴다. 글자층 길 사유(`TEXT_RECLASS_NONE`·`TEXT_RECLASS_DISCARD`)는
-  쪽 면적 90% 이상을 그림이 덮는 쪽이 있을 때만 다시 읽는다(`page_has_cover_image`, 11-27). 그림 없는 글자층 PDF를
-  모든 쪽 OCR하던 비용(10쪽 0.1초 → 32초)을 막는다. 그림 길 사유는 그대로.
+  쪽 면적 90% 이상을 그림이 덮는 쪽이 있거나(`page_has_cover_image`, 11-27) 보이지 않게 그린 글자(숨은 글자층,
+  `page_has_hidden_text`, 11-27 혼합 PDF 검증)가 있을 때만 다시 읽는다. 그림 없는 글자층 PDF를 모든 쪽 OCR하던 비용
+  (10쪽 0.1초 → 32초)을 막되, 그림이 쪽보다 작은 숨은 글자층 스캔(87%·60%)의 회복은 유지한다. 그림 길 사유는 그대로.
+  90% 기준은 다시 읽을지(비용)만 정하며 PASS 근거로 쓰지 않는다.
+- 글자층 초본 판독 경계(11-27, `resident-scan-completeness.md` '글자층·그림 혼합 PDF'): 첫 쪽 글자층이 초본이어도 그림·숨은
+  글자·보이는 글자 없는 쪽이 하나라도 있으면(`raster_content_pages`, 면적 기준 없음) 모든 쪽을 300dpi 렌더 OCR로 읽고
+  (`RENDER_RETRY:TEXT_RASTER_CONTENT`), 그림 없는 글자층 초본에는 모든 쪽 쪽표기를 붙인다(`_with_text_page_markers`).

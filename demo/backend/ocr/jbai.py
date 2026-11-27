@@ -311,7 +311,7 @@ class JbaiOcr:
         if detected in (DocType.NHIS_PAYMENT, DocType.NHIS_ACQUISITION_LOSS):
             result = _from_nhis(extracted, pages, v2types, evidence, detected)
         else:
-            result = _from_resident(extracted, pages, v2.resident_abstract, v2types)
+            result = _from_resident(extracted, pages, v2.resident_abstract, v2types, detected)
             result.detected_doc_type = detected
             result.classification_evidence = evidence
             result.classification_confidence = 0.95

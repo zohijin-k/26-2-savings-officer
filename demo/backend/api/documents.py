@@ -185,6 +185,50 @@ def set_doc_context(application_id: int, body: DocContextRequest) -> dict[str, A
         return _checklist_response(app)
 
 
+#: 업로드 본문을 옮겨 적는 조각 크기.
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+async def _receive_upload(file: UploadFile) -> Path:
+    """업로드 본문을 조각 단위로 신청 저장소 **밖**의 임시 파일에 받는다 (11-27 자원 보호).
+
+    전에는 `await file.read()`로 파일 전체를 메모리에 올렸다(크기 제한 없는 계약은 그대로 둔다: 프런트는 20MB부터
+    '시간이 더 걸릴 수 있다'고만 알린다). 본문을 기다리는 동안 신청이 제출될 수 있으므로 저장소에는 아직 아무것도 만들지
+    않는다 — 호출하는 쪽이 초안 상태를 다시 확인한 뒤 `_place_upload`로 옮긴다(제출된 신청의 저장소 불변).
+    """
+    import os
+    import tempfile
+
+    descriptor, name = tempfile.mkstemp(prefix="jeonbuk-upload-")
+    staged = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as out:
+            while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
+                out.write(chunk)
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
+    return staged
+
+
+def _place_upload(staged: Path, path: Path) -> None:
+    """임시 파일을 저장 위치로 옮겨 적고 임시 파일을 지운다 (기다림 없음: 초안 확인과 저장 사이에 다른 요청이 끼지 않는다)."""
+    import shutil
+
+    try:
+        with staged.open("rb") as source, path.open("wb") as out:
+            shutil.copyfileobj(source, out, _UPLOAD_CHUNK_BYTES)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+async def _store_upload(file: UploadFile, path: Path) -> None:
+    """업로드 파일을 조각 단위로 `path`에 바로 옮겨 적는다 (저장 위치를 이미 만든 흐름용)."""
+    with path.open("wb") as out:
+        while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
+            out.write(chunk)
+
+
 def _safe_name(name: str) -> str:
     cleaned = _UNSAFE.sub("_", Path(name).name).strip()
     return cleaned or "upload"
@@ -336,11 +380,15 @@ async def upload_document(
     declared = _parse_date(declared_issue_date)
     # Keep the original basename for the fixture/reader contract, but stage
     # each version in a unique directory so existing bytes are never overwritten.
-    content = await file.read()
-    _require_draft(application_id)
-    dest_dir = DOCUMENTS / app.application_no / req.slot_key / uuid4().hex
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    path = dest_dir / _safe_name(file.filename or "upload")
+    staged = await _receive_upload(file)
+    try:
+        _require_draft(application_id)
+        dest_dir = DOCUMENTS / app.application_no / req.slot_key / uuid4().hex
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        path = dest_dir / _safe_name(file.filename or "upload")
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
 
     def receipt_amount_loader() -> int | None:
         parts = req.slot_key.split("_")
@@ -356,7 +404,7 @@ async def upload_document(
         return item.receipt_amount if item is not None else None
 
     try:
-        path.write_bytes(content)
+        _place_upload(staged, path)
         prepared_inputs = app.model_dump()
         with get_session() as session:
             prepared_items = [item.model_dump() for item in session.exec(
@@ -423,7 +471,7 @@ async def _upload_merged(
     base = DOCUMENTS / app.application_no / "_merged"
     base.mkdir(parents=True, exist_ok=True)
     source = base / _safe_name(file.filename or "merged.pdf")
-    source.write_bytes(await file.read())
+    await _store_upload(file, source)
 
     pages = split_pdf_pages(str(source), base, source.stem)
     if not pages:

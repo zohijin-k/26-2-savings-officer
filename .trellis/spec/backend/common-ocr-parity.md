@@ -7,6 +7,7 @@
 
 - 파일 전체: `engine_v2/pipeline/**`(PDF 렌더링·글자층·전처리·공유 그림 표시·PP-OCRv5 ONNX 검출·인식·스레드 배분·
   짧은 글자 상자 방향 보정·쪽 동시 읽기), `engine_v2/extractors/resident_abstract.py`·`address_dates.py`(초본 구조 추출),
+  `engine_v2/pipeline/limits.py`(11-27 OCR 작업량 한도, `ocr-resource-limits.md`),
   `engine_v2/tools/fetch_own_models.py`(모델 출처·SHA-256 고정), 백엔드 OCR 계층 `demo/backend/ocr/__init__.py`·`base.py`·
   `file_evidence.py`·`fixture.py`·`jbai.py`·`upstage.py`.
 - 섞인 파일의 공통 블록: `localocr.py`(엔진 선택, 모델 미리 불러오기 `preload_own`, 300dpi 대체 판독 `render_pages`·
@@ -52,3 +53,8 @@
 - 글자층 초본 판독 경계(11-27, `resident-scan-completeness.md` '글자층·그림 혼합 PDF'): 첫 쪽 글자층이 초본이어도 그림·숨은
   글자·보이는 글자 없는 쪽이 하나라도 있으면(`raster_content_pages`, 면적 기준 없음) 모든 쪽을 300dpi 렌더 OCR로 읽고
   (`RENDER_RETRY:TEXT_RASTER_CONTENT`), 그림 없는 글자층 초본에는 모든 쪽 쪽표기를 붙인다(`_with_text_page_markers`).
+- 자원 보호(11-27, `ocr-resource-limits.md`): 쪽 그림은 읽을 차례에 만들고 놓는다(`render_pages` 컨텍스트 관리자,
+  `run_ocr_pages`의 늦은 쪽 입력, 작업 수 × 2쪽까지만 앞서 만듦). 쪽 그림을 만들 때마다 MuPDF 전역 캐시를 비우고, 세션은
+  CPU arena를 쓰지 않는다(`own.CPU_MEM_ARENA`). OCR 쪽 수 30·쪽당 6,000만 화소·문서 2.7억 화소·판독 180초를 넘는 문서는
+  `OcrWorkloadExceeded` → 읽은 쪽이 있어도 버리고 문서 전체를 담당자 확인으로 보낸다(`RESOURCE_LIMIT:<코드>`, Tier2로 넘기지 않음).
+  한도 안 문서의 OCR 입력과 판독 결과는 전과 같다.

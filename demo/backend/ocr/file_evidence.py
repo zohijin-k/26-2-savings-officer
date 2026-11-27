@@ -23,8 +23,11 @@ def original_image_sizes(file_path: str) -> list[dict[str, int]]:
     try:
         if path.suffix.lower() in {".png", ".jpg", ".jpeg"}:
             from PIL import Image
-            with Image.open(path) as image:
-                width, height = image.size
+            try:
+                with Image.open(path) as image:
+                    width, height = image.size
+            except Image.DecompressionBombError:
+                return []  # 11-27: PIL이 거부하는 초대형 그림. 크기 근거 없음(판독 계층이 작업량 한도로 담당자 확인에 보낸다).
             return [{"page": 0, "width": width, "height": height}]
         if path.suffix.lower() == ".pdf":
             import pymupdf
@@ -147,6 +150,11 @@ def independent_page_markers(pages):
 
 def resolution_defect(ocr) -> dict[str, int] | None:
     from ..rules.doc_types import DocType
+    from engine_v2.pipeline.limits import not_read_by_limit
+
+    if not_read_by_limit(getattr(ocr, "fallback_reason", "")):
+        # 11-27: 작업량 한도로 읽지 않은 문서다. '작은 그림이라 못 읽었다'(부적합)는 읽어 본 문서에만 내린다.
+        return None
     try:
         sizes = json.loads(ocr.fields.get("원본이미지크기", "[]"))
         identity_forms = {DocType.RESIDENT_ABSTRACT, DocType.RESIDENT_CERTIFICATE,

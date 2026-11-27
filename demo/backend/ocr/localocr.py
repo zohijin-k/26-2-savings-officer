@@ -32,6 +32,7 @@ import logging
 import os
 import re
 import sys
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
@@ -141,21 +142,43 @@ def exception_code(exc: BaseException) -> str:
     return name if _CLASS_NAME.fullmatch(name) else "OTHER"
 
 
-def render_pages(path: Path) -> list:
-    """모든 쪽을 300dpi로 렌더링한다 (engine_v2.tools.batch_assess._inspect와 같은 렌더링)."""
+@contextmanager
+def render_pages(path: Path):
+    """모든 쪽을 300dpi로 렌더링해 읽을 준비를 한다 (engine_v2.tools.batch_assess._inspect와 같은 렌더링).
+
+    ``(쪽 목록, 쪽 그림을 만드는 함수 목록)``을 내준다. 11-27 자원 보호: 쪽 그림은 미리 만들지 않고, 그 쪽을 읽을
+    차례에 함수가 만들어 ``(png, 화소 크기)``로 돌려준다(run_ocr_pages가 작업 수만큼만 앞서 부른다). 그림은 쪽
+    목록에 보관하지 않으므로 메모리가 쪽 수에 비례해 늘지 않는다 — 전에는 모든 쪽의 Pixmap·PNG를 먼저 만들어 두었다
+    (20쪽 +425MB). 쪽 목록의 화소 크기는 그 쪽 그림을 만들 때 채워진다. 암호 PDF는 빈 목록.
+
+    쪽 수·쪽 크기가 한도(engine_v2.pipeline.limits)를 넘으면 한 쪽도 렌더링하기 전에 OcrWorkloadExceeded를 낸다.
+    """
     import pymupdf
+    from engine_v2.pipeline.limits import OcrWorkload, check_page_images, release_page_cache
     from engine_v2.pipeline.preprocess import PageImage, PageSource
 
-    pages = []
     with pymupdf.open(path) as document:
         if document.needs_pass:
-            return []
+            yield [], []
+            return
+        workload = OcrWorkload()
+        pages = []
         for index, page in enumerate(document):
-            pix = page.get_pixmap(dpi=RENDER_RETRY_DPI, colorspace=pymupdf.csRGB, alpha=False)
-            pages.append(PageImage(index, PageSource.RENDER, (page.rect.width, page.rect.height),
-                                   png=pix.tobytes("png"), pixel_size=(pix.width, pix.height),
-                                   dpi=RENDER_RETRY_DPI))
-    return pages
+            workload.add(page.rect.width * RENDER_RETRY_DPI / 72, page.rect.height * RENDER_RETRY_DPI / 72)
+            check_page_images(page)  # 렌더링은 쪽의 그림을 펼친다: 그림 크기도 미리 확인한다.
+            pages.append(PageImage(index, PageSource.RENDER, (page.rect.width, page.rect.height), dpi=RENDER_RETRY_DPI))
+
+        def loader(image):
+            def load():
+                pix = document[image.page].get_pixmap(dpi=RENDER_RETRY_DPI, colorspace=pymupdf.csRGB, alpha=False)
+                image.pixel_size = (pix.width, pix.height)
+                png = pix.tobytes("png")
+                del pix
+                release_page_cache()
+                return png, image.pixel_size
+            return load
+
+        yield pages, [loader(image) for image in pages]
 
 
 def engine_decision() -> tuple[str, str]:
@@ -225,10 +248,14 @@ def _import_v2():
     return resident_abstract, nhis_payment, nhis_acquisition_loss, run_ocr, PageSource, preprocess, V2DocType, DocumentInput, _load_pages, insurance_4
 
 
-def _read_pages(run_ocr, engine: str, page_images):
-    """쪽마다 읽기 함수를 쪽 순서대로 낸다. 여러 쪽 own은 동시에 읽는다(engine_v2 run_ocr_pages)."""
+def _read_pages(run_ocr, engine: str, page_images, loaders=None):
+    """쪽마다 읽기 함수를 쪽 순서대로 낸다. 여러 쪽 own은 동시에 읽는다(engine_v2 run_ocr_pages).
+
+    ``loaders``: render_pages가 준 쪽 그림 함수 목록(11-27 늦은 렌더링). 없으면 쪽이 들고 있는 png를 읽는다.
+    """
     from engine_v2.pipeline.ocr import run_ocr_pages
-    return run_ocr_pages(engine, [(p.png, p.pixel_size) for p in page_images], run=run_ocr)
+    images = loaders if loaders is not None else [(p.png, p.pixel_size) for p in page_images]
+    return run_ocr_pages(engine, images, run=run_ocr)
 
 
 def _quality(pages) -> float:
@@ -966,13 +993,55 @@ def _with_text_page_markers(classified: OcrResult, path: Path) -> OcrResult | No
     return classified
 
 
-def _abstract_review_result(classified: OcrResult, reason: str) -> OcrResult:
+def workload_message(code: str) -> str:
+    """11-27 자원 보호: 작업량 한도를 넘어 자동 판독하지 않은 문서에 남기는 담당자용 문구 (한도 값은 limits에서)."""
+    from engine_v2.pipeline import limits
+
+    reason = {
+        "PAGES": f"OCR로 읽어야 할 쪽이 {limits.MAX_OCR_PAGES}쪽을 넘어 자동으로 읽지 않았습니다.",
+        "PAGE_PIXELS": f"쪽 그림이 {limits.MAX_PAGE_PIXELS // 10_000:,}만 화소를 넘어 자동으로 읽지 않았습니다.",
+        "DOCUMENT_PIXELS": (f"문서의 쪽 그림 합계가 {limits.MAX_DOCUMENT_PIXELS / 100_000_000:g}억 화소를 넘어 "
+                            "자동으로 읽지 않았습니다."),
+        "SECONDS": f"자동 판독이 {limits.MAX_OCR_SECONDS}초 안에 끝나지 않아 중단했습니다.",
+    }.get(code, "자동 판독 작업량 한도를 넘어 자동으로 읽지 않았습니다.")
+    return f"{reason} 일부만 읽은 결과는 쓰지 않으며 담당자가 원본 전체를 확인합니다."
+
+
+def _workload_review_result(exc, path: Path) -> OcrResult:
+    """11-27: 작업량 한도(engine_v2.pipeline.limits)를 넘은 문서의 담당자 확인 결과.
+
+    자동 판독 실패(read_document의 '판독실패' 결과)와 같은 모양이라 뒤의 판정이 그대로 담당자 확인으로 보낸다:
+    서류 종류 미판별·신뢰도 0 → 자동 적합도, 읽지 않은 내용에 근거한 부적합도 없다. LocalOcr.read가 None 대신 이 결과를
+    돌려주므로 다음 계층(첫 쪽 글자층만 읽는 Tier2)으로 넘어가지 않는다.
+    """
+    page_count = 1
+    if path.suffix.lower() == ".pdf":
+        try:
+            import pymupdf
+
+            with pymupdf.open(path) as document:
+                page_count = max(1, document.page_count)
+        except Exception:  # noqa: BLE001 - 쪽 수는 담당자 화면 참고값이다
+            pass
+    return OcrResult(
+        detected_doc_type=None,
+        confidence=0.0,
+        image_quality=1.0,  # 판독을 하지 않았을 뿐 화질 측정이 아니다 (원본 해상도 판정은 file_evidence가 따로 한다).
+        fields={"판독실패": workload_message(exc.code)},
+        page_count=page_count,
+        tier="none",
+        engine="none",
+        fallback_reason=f"RESOURCE_LIMIT:{exc.code}",
+    )
+
+
+def _abstract_review_result(classified: OcrResult, reason: str, message: str = "") -> OcrResult:
     """11-27: 글자층 초본을 끝까지 읽지 못했을 때의 담당자 확인 결과. 첫 쪽 글자층(Tier2) 판독으로 되돌아가지 않는다."""
     return OcrResult(
         detected_doc_type=DocType.RESIDENT_ABSTRACT,
         confidence=0.0,
         image_quality=1.0,
-        fields={"판독실패": "초본 전체를 자동으로 읽지 못해 담당자가 원본 전체를 확인합니다."},
+        fields={"판독실패": message or "초본 전체를 자동으로 읽지 못해 담당자가 원본 전체를 확인합니다."},
         page_count=classified.page_count,
         tier=NAME,
         engine="none",
@@ -1003,7 +1072,15 @@ class LocalOcr:
         engine, reason = engine_decision()
         if reason:
             _logger.warning("%s", reason)
-        result = self._read(file_path, engine)
+        from engine_v2.pipeline.limits import OcrWorkloadExceeded
+
+        try:
+            result = self._read(file_path, engine)
+        except OcrWorkloadExceeded as exc:
+            # 11-27: 한도를 넘은 문서는 읽지 않는다. 예외를 밖으로 내면 read_document가 다음 계층(첫 쪽 글자층만 읽는
+            # Tier2)으로 넘기므로 여기서 담당자 확인 결과로 바꾼다.
+            _logger.warning("OCR 작업량 한도 초과로 자동 판독하지 않음: %s", exc.code)
+            result = _workload_review_result(exc, Path(file_path))
         if result is not None and not result.engine:
             result.engine = engine
         return result
@@ -1142,15 +1219,20 @@ class LocalOcr:
         if code in TEXT_RETRY_CODES and not (page_has_cover_image(path) or page_has_hidden_text(path)):
             return None
         run_ocr = _import_v2()[3]
-        page_images = render_pages(path)
-        if not page_images:
-            return None
-        pages = []
-        for page, reader in zip(page_images, _read_pages(run_ocr, engine, page_images)):
-            read = reader()
-            if read.error:
+        # 11-27: 쪽 그림은 읽을 차례에 만들고 읽은 뒤 놓는다(render_pages). 문서는 모든 쪽을 읽을 때까지 열어 둔다.
+        with render_pages(path) as (page_images, loaders):
+            if not page_images:
                 return None
-            pages.append((page, read))
+            pages = []
+            reads = _read_pages(run_ocr, engine, page_images, loaders)
+            try:
+                for page, reader in zip(page_images, reads):
+                    read = reader()
+                    if read.error:
+                        return None
+                    pages.append((page, read))
+            finally:
+                getattr(reads, "close", lambda: None)()  # 중간에 그만두면 시작하지 않은 쪽은 만들지도 읽지도 않는다.
         result = self._from_ocr_pages(pages, page_images, path, engine, retry=False)
         if result is None or result.detected_doc_type is None:
             return None
@@ -1164,8 +1246,13 @@ class LocalOcr:
         (쪽표기·순번·발급일 등 다른 검증도 모든 쪽에 대해 돈다). 읽지 못하면(OCR 없음·오류·초본이 아닌 결과)
         다음 계층(첫 쪽 글자층만 읽는 Tier2)에 넘기지 않고 담당자 확인 결과를 돌려준다.
         """
+        from engine_v2.pipeline.limits import OcrWorkloadExceeded
+
         try:
             result = self._render_retry(path, engine, "TEXT_RASTER_CONTENT")
+        except OcrWorkloadExceeded as exc:  # 11-27: 한도 초과 → 한 쪽도 읽지 않고 담당자 확인 (사유를 따로 남긴다)
+            return _abstract_review_result(classified, f"TEXT_RASTER_CONTENT:RESOURCE_LIMIT_{exc.code}",
+                                           workload_message(exc.code))
         except Exception as exc:  # noqa: BLE001 - 어떤 오류도 Tier2의 첫 쪽 판독으로 이어지면 안 된다
             return _abstract_review_result(classified, f"TEXT_RASTER_CONTENT:{exception_code(exc)}")
         if result is None:  # OCR 없음·OCR 오류·서식 판별 실패
@@ -1189,8 +1276,14 @@ class LocalOcr:
             code = "IMAGE_UNCLASSIFIED" if text.strip() else "IMAGE_OCR_EMPTY"
             retry_error = None
             if retry:
+                from engine_v2.pipeline.limits import OcrWorkloadExceeded
+
                 try:
                     recovered = self._render_retry(path, engine, code)
+                except OcrWorkloadExceeded:
+                    # 11-27: 다시 읽기가 작업량 한도를 넘는다 → 다시 읽지 않는다. 1차 판독은 모든 쪽을 읽은 결과이므로
+                    # 지금까지 '다시 읽어도 서식을 못 찾았을 때'와 똑같이 처리한다(읽지 않은 문서로 표시하지 않는다).
+                    recovered = None
                 except Exception as exc:  # noqa: BLE001 - 사유만 남기고 1차 결과를 유지한다
                     recovered, retry_error = None, exc
                 if recovered is not None:

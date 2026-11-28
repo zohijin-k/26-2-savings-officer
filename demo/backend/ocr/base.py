@@ -113,6 +113,23 @@ class OcrAdapter(Protocol):
     def read(self, file_path: str, expected: DocType | None) -> OcrResult | None: ...
 
 
+#: 11-28 이전에는 열지 못한 파일의 사유에 라이브러리 예외 문장(저장 경로 포함)을 그대로 붙여 저장했다.
+_LEGACY_OPEN_ERROR = ("파일을 열 수 없습니다: ", "이미지를 열 수 없습니다: ")
+
+
+def without_open_error_text(fields: dict) -> dict:
+    """담당자 응답용: 11-28 이전에 저장된 `판독실패` 사유에서 예외 문장(서버 저장 경로)을 뺀다. 다른 값은 그대로다.
+
+    새로 저장하는 사유에는 경로가 없다(pdftext). 이미 저장된 행은 고치지 않고 응답할 때만 가린다.
+    """
+    reason = fields.get("판독실패")
+    if isinstance(reason, str):
+        for prefix in _LEGACY_OPEN_ERROR:
+            if reason.startswith(prefix):
+                return {**fields, "판독실패": prefix[:-2] + "."}
+    return fields
+
+
 def unreadable(reason: str, *, tier: str) -> OcrResult:
     """파일을 열지 못했을 때의 결과. 엔진이 UNREADABLE_FILE로 잡는다."""
     return OcrResult(

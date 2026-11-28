@@ -155,7 +155,7 @@ def render_pages(path: Path):
     """
     import pymupdf
     from engine_v2.pipeline.limits import OcrWorkload, check_page_images, release_page_cache
-    from engine_v2.pipeline.preprocess import PageImage, PageSource
+    from engine_v2.pipeline.preprocess import PageImage, PageSource, encode_png
 
     with pymupdf.open(path) as document:
         if document.needs_pass:
@@ -172,7 +172,7 @@ def render_pages(path: Path):
             def load():
                 pix = document[image.page].get_pixmap(dpi=RENDER_RETRY_DPI, colorspace=pymupdf.csRGB, alpha=False)
                 image.pixel_size = (pix.width, pix.height)
-                png = pix.tobytes("png")
+                png = encode_png(pix)  # 11-28: GIL을 놓는 인코더(화소는 같다)
                 del pix
                 release_page_cache()
                 return png, image.pixel_size

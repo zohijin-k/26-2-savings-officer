@@ -364,7 +364,8 @@ def _read_pdf(path: Path) -> OcrResult | None:
     try:
         doc = fitz.open(path)
     except Exception as e:  # noqa: BLE001
-        return unreadable(f"파일을 열 수 없습니다: {e}", tier=NAME)
+        # 예외 문장에는 연 파일의 전체 경로가 들어 있다(저장소 위치·신청번호). 종류 이름만 남긴다.
+        return unreadable(f"파일을 열 수 없습니다 ({type(e).__name__}).", tier=NAME)
 
     with doc:
         if doc.needs_pass:
@@ -402,7 +403,7 @@ def _read_image(path: Path) -> OcrResult | None:
             width, height = im.size
             exif = im.getexif()
     except Exception as e:  # noqa: BLE001
-        return unreadable(f"이미지를 열 수 없습니다: {e}", tier=NAME)
+        return unreadable(f"이미지를 열 수 없습니다 ({type(e).__name__}).", tier=NAME)
 
     # EXIF 0x010F Make / 0x0110 Model — 카메라로 찍었으면 보통 채워져 있다.
     has_camera = bool(exif.get(0x010F) or exif.get(0x0110))

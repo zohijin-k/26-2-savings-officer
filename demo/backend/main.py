@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api import applications, criteria, documents, files, forms, officer, review, subsidy
 from .applicant_access import ApplicantAccess
+from . import ocr_gate
 from .engine_adapter import apply_runtime_overrides
 from .models import init_db
 from .ocr.localocr import preload_own
@@ -43,6 +44,8 @@ async def lifespan(app: FastAPI):
     finally:
         if worker is not None:
             worker.stop()
+        # 11-28: 정리 단계. 정상 종료에서는 요청이 모두 끝난 뒤라 남은 판독이 없고, 요청이 취소된 종료에서는 남은 대기 건을 버린다.
+        ocr_gate.shutdown()
 
 
 app = FastAPI(

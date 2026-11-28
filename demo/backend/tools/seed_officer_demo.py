@@ -234,12 +234,16 @@ def _create(scenario, samples, storage, allocated):
     from ..ocr.fixture import synthetic_fixture_ocr
     # 올리는 파일은 _samples()가 합성 고지 문구를 확인한 생성기 샘플뿐이다. 그 업로드 동안만
     # 합성 fixture 판독을 켠다. 서버·실제 업로드 경로에서는 꺼져 있다.
+    # 이 도구는 seed()의 쓰기 예약 하나로 전체를 묶는 단일 스레드 프로세스다: 판독을 판독 스레드로 넘기지 않고
+    # 전처럼 이 스레드에서 읽는다(예약 연결은 이 스레드의 것이다).
+    from .. import ocr_gate
     with synthetic_fixture_ocr():
-        for slot, filename in SAMPLE_FILES.items():
-            if scenario == "needs-review" and slot == "resident_abstract":
-                filename = REVIEW_SAMPLE
-            upload = UploadFile(filename=filename, file=io.BytesIO(samples[filename]))
-            asyncio.run(documents.upload_document(aid, upload, slot, "2026-03-05"))
+        with ocr_gate.inline_reads():
+            for slot, filename in SAMPLE_FILES.items():
+                if scenario == "needs-review" and slot == "resident_abstract":
+                    filename = REVIEW_SAMPLE
+                upload = UploadFile(filename=filename, file=io.BytesIO(samples[filename]))
+                asyncio.run(documents.upload_document(aid, upload, slot, "2026-03-05"))
     _complete_work(aid)
     review.submit(aid)
     return aid

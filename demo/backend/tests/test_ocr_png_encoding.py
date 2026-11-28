@@ -76,3 +76,60 @@ def test_scan_page_and_photo_inputs_decode_to_the_original_bitmap(tmp_path):
         (page,) = v2preprocess.preprocess(tmp_path / name)
         assert page.pixel_size == (620, 877)
         assert _decoded(page.png) == ("RGB", (620, 877), source.tobytes())
+
+
+def _both(pix):
+    cv2 = pytest.importorskip("cv2")
+    np = pytest.importorskip("numpy")
+    ours, reference = v2preprocess.encode_png(pix), pix.tobytes("png")
+    decoded = [cv2.imdecode(np.frombuffer(png, dtype=np.uint8), cv2.IMREAD_COLOR) for png in (ours, reference)]
+    return ours != reference, np.array_equal(decoded[0], decoded[1]), decoded[0].shape
+
+
+def test_rendered_page_pixmap_is_pixel_identical(tmp_path):
+    """300dpi 쪽 렌더링(글자·선·그림이 섞인 쪽)의 Pixmap도 같은 화소로 인코딩된다."""
+    with pymupdf.open() as document:
+        page = document.new_page(width=595, height=842)
+        page.insert_text((40, 60), "SYNTHETIC 가상 문서 0123456789", fontname="korea", fontsize=14)
+        page.draw_line((30, 100), (560, 130), color=(.2, .4, .8), width=.7)
+        buffer = io.BytesIO()
+        _noisy((120, 80)).save(buffer, "PNG")
+        page.insert_image(pymupdf.Rect(40, 150, 280, 310), stream=buffer.getvalue())
+        pix = page.get_pixmap(dpi=300, colorspace=pymupdf.csRGB, alpha=False)
+        used_opencv, identical, shape = _both(pix)
+    assert used_opencv and identical and shape == (pix.height, pix.width, 3)
+
+
+def test_jpeg_scan_embedded_in_a_pdf_is_pixel_identical(tmp_path):
+    """스캐너가 만드는 JPEG 본문 그림(DCT)을 꺼낸 Pixmap."""
+    buffer = io.BytesIO()
+    _noisy((310, 438)).save(buffer, "JPEG", quality=80)
+    with pymupdf.open() as document:
+        page = document.new_page(width=595, height=842)
+        page.insert_image(page.rect, stream=buffer.getvalue())
+        xref = page.get_images(full=True)[0][0]
+        pix = pymupdf.Pixmap(document, xref)
+        used_opencv, identical, shape = _both(pix)
+    assert used_opencv and identical and shape == (438, 310, 3)
+
+
+def test_three_component_non_rgb_image_is_left_to_mupdf_exactly_as_before(tmp_path):
+    """성분이 셋이지만 RGB가 아닌 그림(Lab): 화소를 RGB로 잘못 읽지 않는다. 전처럼 MuPDF가 처리한다(PNG로 못 쓰면 오류)."""
+    buffer = io.BytesIO()
+    _noisy((40, 30)).save(buffer, "PNG")
+    with pymupdf.open() as document:
+        page = document.new_page(width=595, height=842)
+        page.insert_image(page.rect, stream=buffer.getvalue())
+        xref = page.get_images(full=True)[0][0]
+        document.xref_set_key(xref, "ColorSpace", "[/Lab << /WhitePoint [0.9505 1 1.089] /Range [-128 127 -128 127] >>]")
+        document.save(tmp_path / "FAKE-lab.pdf")
+    with pymupdf.open(tmp_path / "FAKE-lab.pdf") as document:
+        pix = pymupdf.Pixmap(document, document[0].get_images(full=True)[0][0])
+        assert pix.n == 3 and not pix.alpha and not v2preprocess._is_plain_rgb(pix)
+        try:
+            reference = pix.tobytes("png")
+        except Exception as exc:  # noqa: BLE001 - MuPDF가 거절하면 우리도 같은 오류여야 한다
+            with pytest.raises(type(exc)):
+                v2preprocess.encode_png(pix)
+        else:
+            assert v2preprocess.encode_png(pix) == reference

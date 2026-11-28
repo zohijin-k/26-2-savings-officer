@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
     finally:
         if worker is not None:
             worker.stop()
-        # 11-28: 차례를 기다리던 판독은 버린다. 요청 처리가 끝난 뒤라 정상 종료에서는 남은 판독이 없다.
+        # 11-28: 정리 단계. 정상 종료에서는 요청이 모두 끝난 뒤라 남은 판독이 없고, 요청이 취소된 종료에서는 남은 대기 건을 버린다.
         ocr_gate.shutdown()
 
 

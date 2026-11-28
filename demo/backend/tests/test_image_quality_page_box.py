@@ -229,4 +229,4 @@ def test_quality_reason_points_at_the_smallest_bitmap_page(tmp_path, monkeypatch
     finding = _quality_finding(check)
     assert ocr.image_quality == .5 and finding is not None
     if QUALITY_IS_FAIL:
-        assert "4장 중 가장 작은 것: 4쪽 827×1170px" in finding.detail
+        assert "4장 중 가장 작은 것은 4쪽 827×1170px" in finding.detail

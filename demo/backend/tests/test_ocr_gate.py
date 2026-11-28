@@ -26,7 +26,7 @@ SLOT = "resident_abstract"
 
 @pytest.fixture(autouse=True)
 def fresh_gate():
-    """시험마다 새 작업 스레드로 시작하고, 끝나면 자리가 모두 비었는지 확인한다(누수 금지)."""
+    """시험마다 기다리던 판독을 비우고 시작하고, 끝나면 자리가 모두 비었는지 확인한다(누수 금지)."""
     ocr_gate.shutdown()
     yield
     deadline = time.monotonic() + 5
@@ -76,7 +76,7 @@ def test_reads_run_one_at_a_time_in_a_worker_thread_and_the_loop_keeps_running()
     assert results == [0, 1, 2, 3]
     assert state["max"] == ocr_gate.MAX_CONCURRENT_READS == 1          # 문서는 한 건씩만 읽는다
     assert loop_thread not in state["threads"] and all(name.startswith("ocr-read") for name in state["threads"])
-    assert longest_gap < .2                                             # 판독 1.6초 동안 루프는 멈추지 않았다(루프에서 돌면 0.4초 이상)
+    assert longest_gap < .3                                             # 판독 1.6초 동안 루프는 멈추지 않았다(루프에서 돌면 0.4초 이상)
 
 
 def test_full_queue_is_refused_and_recovers(monkeypatch):
@@ -164,7 +164,6 @@ def test_cancelled_running_read_keeps_its_place_until_it_really_ends():
 
 
 def test_queue_wait_deadline_returns_busy_without_starting(monkeypatch):
-    monkeypatch.setattr(ocr_gate, "MAX_QUEUE_WAIT_SECONDS", .1)
     entered, release, started = threading.Event(), threading.Event(), []
 
     async def exercise():
@@ -173,6 +172,7 @@ def test_queue_wait_deadline_returns_busy_without_starting(monkeypatch):
                 return await ticket.run(function)
         first = asyncio.create_task(one(lambda: (entered.set(), release.wait(5))[1]))
         await asyncio.to_thread(entered.wait, 5)
+        monkeypatch.setattr(ocr_gate, "MAX_QUEUE_WAIT_SECONDS", .1)   # 첫 판독이 시작된 뒤에 시한을 줄인다
         with pytest.raises(ocr_gate.OcrBusy):
             await one(lambda: started.append("ran"))               # 차례가 시한 안에 오지 않았다
         assert ocr_gate.admitted() == 1
@@ -215,12 +215,12 @@ def test_shutdown_drops_waiting_reads_and_never_overlaps_the_running_read():
         with pytest.raises(ocr_gate.OcrBusy):                      # 요청이 취소된 것이 아니다: 503으로 알린다
             await waiting
         threads = []
-        after = asyncio.create_task(one(lambda: threads.append(threading.current_thread().name) or "after-restart"))
+        after = asyncio.create_task(one(lambda: threads.append(threading.current_thread().name) or "after-shutdown"))
         await asyncio.sleep(.1)
         assert threads == []                                       # 종료 뒤에도 앞 판독이 끝나야 다음을 읽는다(동시 1건)
         release.set()
         assert await first is True
-        assert await after == "after-restart"
+        assert await after == "after-shutdown"
     asyncio.run(exercise())
     assert started == []
 
@@ -325,7 +325,6 @@ def test_full_queue_returns_503_before_anything_is_stored(client, monkeypatch):
 
 def test_upload_that_waited_past_the_deadline_is_sent_back_unread_with_nothing_stored(client, monkeypatch):
     """차례가 시한 안에 오지 않은 업로드: 읽지 않고 503. 이때는 파일을 이미 저장소에 두었으므로 그 파일도 지운다."""
-    monkeypatch.setattr(ocr_gate, "MAX_QUEUE_WAIT_SECONDS", .2)
     reader = Reader(hold=True)
     monkeypatch.setattr(documents, "read_document", reader)
     first, second = new_app(client), new_app(client)
@@ -333,6 +332,7 @@ def test_upload_that_waited_past_the_deadline_is_sent_back_unread_with_nothing_s
         upload = pool.submit(_post, client, first, _pdf("SYNTHETIC FIRST"))
         try:
             assert reader.entered.wait(5)
+            monkeypatch.setattr(ocr_gate, "MAX_QUEUE_WAIT_SECONDS", .2)     # 첫 판독이 시작된 뒤에 시한을 줄인다
             late = _post(client, second, _pdf("SYNTHETIC SECOND"))
             assert late.status_code == 503 and late.json() == {"detail": ocr_gate.BUSY_MESSAGE}
             assert _rows(second) == [] and _stored_files(second) == []

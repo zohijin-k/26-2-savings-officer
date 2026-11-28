@@ -88,15 +88,26 @@ def _classify_aux(bbox, page_w, page_h) -> AuxRole:
     return AuxRole.OTHER
 
 
+def _is_plain_rgb(pix: pymupdf.Pixmap) -> bool:
+    """알파 없는 8비트 RGB Pixmap인가. 성분이 셋이어도 RGB가 아닌 색공간(Lab, 3색 분판 등)은 아니다."""
+    if pix.alpha or pix.n != 3 or pix.colorspace is None:
+        return False
+    try:
+        return bool(pymupdf.mupdf.fz_colorspace_is_rgb(pix.colorspace.this))
+    except Exception:  # noqa: BLE001 - 바인딩이 달라져도 기본 RGB는 가려낸다
+        return pix.colorspace.name == "DeviceRGB"
+
+
 def encode_png(pix: pymupdf.Pixmap) -> bytes:
     """RGB Pixmap → OCR 입력 PNG. 화소는 MuPDF 인코더(``pix.tobytes("png")``)와 같다(무손실, 시험으로 고정).
 
     11-28: OpenCV가 있으면 OpenCV로 인코딩한다. MuPDF 인코더는 GIL을 쥔 채 돌아, 판독을 작업 스레드로 옮긴 뒤에도 그
-    동안 서버의 다른 요청이 멈춘다(잡음 있는 300dpi 스캔 한 쪽 1.1~1.5초, 30쪽이면 연달아 30번). OpenCV는 GIL을 놓고
+    동안 서버의 다른 요청이 멈춘다(잡음 있는 300dpi 스캔 한 쪽 약 1.1초, 30쪽이면 연달아 30번). OpenCV는 GIL을 놓고
     돌며 같은 쪽을 약 0.12초에 만든다(압축 단계가 낮아 바이트는 커진다: 잡음 쪽 4.3MB → 6.3MB, 깨끗한 쪽 0.1 → 0.2MB).
-    OpenCV·numpy가 없는 환경(OCR 엔진을 쓰지 않는 서버·CI)과 RGB 8비트가 아닌 Pixmap은 전처럼 MuPDF로 인코딩한다.
+    그 밖의 경우는 전과 똑같이 MuPDF에 맡긴다(결과도 오류도 그대로): OpenCV·numpy가 없는 환경(OCR 엔진을 쓰지 않는
+    서버), 알파·회색·RGB가 아닌 색공간의 Pixmap(MuPDF가 PNG로 쓰지 못하는 Lab 등은 전처럼 오류).
     """
-    if pix.alpha or pix.n != 3:
+    if not _is_plain_rgb(pix):
         return pix.tobytes("png")
     try:
         import cv2

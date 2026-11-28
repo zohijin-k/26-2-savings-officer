@@ -1,3 +1,5 @@
 -r ../../demo/backend/requirements.txt
 pytest==9.2.0
 numpy==2.5.4
+# 11-28: OCR 입력 PNG 인코더(OpenCV 경로)를 CI에서도 돌린다 (engine_v2/requirements.txt와 같은 패키지).
+opencv-python-headless==4.14.0.94

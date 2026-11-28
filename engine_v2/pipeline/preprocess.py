@@ -88,6 +88,27 @@ def _classify_aux(bbox, page_w, page_h) -> AuxRole:
     return AuxRole.OTHER
 
 
+def encode_png(pix: pymupdf.Pixmap) -> bytes:
+    """RGB Pixmap → OCR 입력 PNG. 화소는 MuPDF 인코더(``pix.tobytes("png")``)와 같다(무손실, 시험으로 고정).
+
+    11-28: OpenCV가 있으면 OpenCV로 인코딩한다. MuPDF 인코더는 GIL을 쥔 채 돌아, 판독을 작업 스레드로 옮긴 뒤에도 그
+    동안 서버의 다른 요청이 멈춘다(잡음 있는 300dpi 스캔 한 쪽 1.1~1.5초, 30쪽이면 연달아 30번). OpenCV는 GIL을 놓고
+    돌며 같은 쪽을 약 0.12초에 만든다(압축 단계가 낮아 바이트는 커진다: 잡음 쪽 4.3MB → 6.3MB, 깨끗한 쪽 0.1 → 0.2MB).
+    OpenCV·numpy가 없는 환경(OCR 엔진을 쓰지 않는 서버·CI)과 RGB 8비트가 아닌 Pixmap은 전처럼 MuPDF로 인코딩한다.
+    """
+    if pix.alpha or pix.n != 3:
+        return pix.tobytes("png")
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return pix.tobytes("png")
+    rows = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape(pix.height, pix.stride)
+    rgb = np.ascontiguousarray(rows[:, :pix.width * 3]).reshape(pix.height, pix.width, 3)
+    encoded, data = cv2.imencode(".png", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+    return data.tobytes() if encoded else pix.tobytes("png")
+
+
 def _process_pdf_page(doc: pymupdf.Document, i: int, workload: OcrWorkload | None = None) -> PageImage:
     """``workload``: 문서의 누적 OCR 작업량(11-27). 그림을 꺼내거나 렌더링하기 전에 그 쪽의 화소 수를 더해
     한도(limits)를 넘으면 OcrWorkloadExceeded를 낸다. 글자층 쪽은 세지 않는다."""
@@ -133,7 +154,7 @@ def _process_pdf_page(doc: pymupdf.Document, i: int, workload: OcrWorkload | Non
             pix = pymupdf.Pixmap(pymupdf.csRGB, pix)  # RGB로 통일
         result.source = PageSource.EMBEDDED
         result.image_xref = main["xref"]
-        result.png = pix.tobytes("png")
+        result.png = encode_png(pix)
         result.pixel_size = (pix.width, pix.height)
         result.dpi = pix.width / ((main["bbox"][2] - main["bbox"][0]) / 72)
     else:
@@ -142,7 +163,7 @@ def _process_pdf_page(doc: pymupdf.Document, i: int, workload: OcrWorkload | Non
             workload.add(pw * RENDER_DPI / 72, ph * RENDER_DPI / 72)
         pix = page.get_pixmap(dpi=RENDER_DPI)
         result.source = PageSource.RENDER
-        result.png = pix.tobytes("png")
+        result.png = encode_png(pix)
         result.pixel_size = (pix.width, pix.height)
         result.dpi = RENDER_DPI
         result.warnings.append("본문 이미지를 찾지 못해 페이지 전체 렌더링 (바코드 등 포함 가능)")
@@ -243,7 +264,7 @@ def preprocess(file_path: str | Path) -> list[PageImage]:
         # 사진은 물리 크기를 모르므로 A4 가정으로 pt 좌표계를 둔다
         return [PageImage(
             page=0, source=PageSource.UPLOAD, page_size_pt=(595.0, 842.0),
-            png=pix.tobytes("png"), pixel_size=(pix.width, pix.height),
+            png=encode_png(pix), pixel_size=(pix.width, pix.height),
             dpi=None, warnings=["사진 업로드: 기울기·원근 보정 필요할 수 있음"],
         )]
 

@@ -38,6 +38,7 @@ COMMON_GLOBS = (
     'demo/backend/ocr/fixture.py',
     'demo/backend/ocr/jbai.py',
     'demo/backend/ocr/upstage.py',
+    'demo/backend/ocr_gate.py',  # 11-28: 판독 실행 게이트(작업 스레드·동시 1건·대기 상한)도 두 백엔드가 같아야 한다
 )
 
 #: Mixed files: every top-level block is common except the business-specific ones named here.

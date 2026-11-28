@@ -20,6 +20,8 @@ from sqlmodel import select
 
 from ..models import transactional_write, async_session_transaction, stage_file_deletion
 from ..application_writes import serialized_application_write
+from .. import ocr_gate
+from ..models import _session_bind
 from ..upload_assessment import assess_nhis_identity, assess_upload
 from ..models import UNASSIGNED_SLOT, Application, Document, SubsidyItem, get_session, session_transaction, STATUS_DRAFT
 from ..ocr import read_document, split_pdf_pages
@@ -378,6 +380,27 @@ async def upload_document(
 
     _require_draft(application_id)
     declared = _parse_date(declared_issue_date)
+    # 11-28: 판독 자리를 먼저 잡는다. 판독 대기열이 가득하면 본문을 옮기거나 저장소에 쓰기 전에 503으로 거절한다.
+    with ocr_gate.reserve() as reading:
+        return await _assess_and_save(application_id, app, checklist, req, file, declared, reading)
+
+
+def _discard_upload(path: Path, dest_dir: Path) -> None:
+    """저장하지 못한 업로드의 파일과 그 판(版) 폴더를 지운다."""
+    path.unlink(missing_ok=True)
+    dest_dir.rmdir()
+
+
+async def _assess_and_save(
+    application_id: int,
+    app: Application,
+    checklist: list[DocRequirement],
+    req: DocRequirement,
+    file: UploadFile,
+    declared: date | None,
+    reading: ocr_gate.OcrTicket,
+) -> dict[str, Any]:
+    """본문을 받아 저장소에 두고, 판독·판정(작업 스레드)한 뒤 초안 상태를 다시 확인해 한 번에 저장한다."""
     # Keep the original basename for the fixture/reader contract, but stage
     # each version in a unique directory so existing bytes are never overwritten.
     staged = await _receive_upload(file)
@@ -410,7 +433,12 @@ async def upload_document(
             prepared_items = [item.model_dump() for item in session.exec(
                 select(SubsidyItem).where(SubsidyItem.application_id == application_id)
                 .order_by(SubsidyItem.id)).all()]
-        ocr, result = assess_upload(
+        # 11-28: 판독·판정은 이벤트 루프가 아니라 판독 작업 스레드에서 돈다(ocr_gate: 프로세스당 한 건씩, 대기 상한).
+        # 기다리는 동안 다른 요청이 처리되므로, 아래에서 초안 상태와 입력값을 지금까지처럼 다시 확인한 뒤 저장한다.
+        if _session_bind.get() is not None:
+            raise RuntimeError("document reads must be dispatched outside the SQLite writer reservation")
+        ocr, result = await reading.run(
+            assess_upload,
             path, req,
             identity=identity_of(app.identity_json),
             declared=declared,
@@ -449,8 +477,8 @@ async def upload_document(
                 row = next((d for d in _list_documents(application_id) if d.id == row.id), row)
             return _document_dict(row)
     except BaseException:
-        path.unlink(missing_ok=True)
-        dest_dir.rmdir()
+        # 취소된 요청의 판독이 아직 작업 스레드에서 돌고 있으면 그 판독이 끝난 뒤에 지운다(읽는 중인 파일을 지우지 않는다).
+        reading.after_read(lambda: _discard_upload(path, dest_dir))
         raise
 
 

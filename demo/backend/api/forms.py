@@ -20,6 +20,7 @@ import unicodedata
 from urllib.parse import quote
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 
@@ -164,7 +165,8 @@ async def upload_signature_scan(application_id: int, file: UploadFile = File(...
     if len(raw) > SIGNATURE_SCAN_MAX_BYTES:
         raise HTTPException(413, "서명 이미지는 10MB 이하로 올려 주세요.")
     try:
-        processed = process_signature_scan(raw)
+        # 11-28: 그림 처리(최대 2천만 화소, 실측 0.1~0.3초)는 이벤트 루프가 아니라 스레드풀에서 한다.
+        processed = await run_in_threadpool(process_signature_scan, raw)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     async with async_session_transaction():

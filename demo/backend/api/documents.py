@@ -435,7 +435,8 @@ async def _assess_and_save(
                 .order_by(SubsidyItem.id)).all()]
         # 11-28: 판독·판정은 이벤트 루프가 아니라 판독 작업 스레드에서 돈다(ocr_gate: 프로세스당 한 건씩, 대기 상한).
         # 기다리는 동안 다른 요청이 처리되므로, 아래에서 초안 상태와 입력값을 지금까지처럼 다시 확인한 뒤 저장한다.
-        if _session_bind.get() is not None:
+        # 쓰기 예약을 쥔 채 읽는 것은 ocr_gate.inline_reads()를 켠 단일 스레드 명령줄 도구(합성 시드)뿐이다.
+        if _session_bind.get() is not None and not ocr_gate.reads_inline():
             raise RuntimeError("document reads must be dispatched outside the SQLite writer reservation")
         ocr, result = await reading.run(
             assess_upload,

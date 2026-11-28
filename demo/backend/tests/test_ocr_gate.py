@@ -359,6 +359,41 @@ def test_read_is_never_dispatched_inside_the_database_writer_reservation(client,
     assert _rows(aid) == [] and _stored_files(aid) == []
 
 
+def test_command_line_tool_reads_inline_inside_its_own_writer_reservation(client, monkeypatch):
+    """합성 시드 같은 단일 스레드 도구는 쓰기 예약 안에서 업로드한다: 판독은 그 스레드에서 바로 돌고 저장된다."""
+    aid = new_app(client)
+    reader = Reader()
+    monkeypatch.setattr(documents, "read_document", reader)
+    main_thread = threading.current_thread().name
+
+    with models.session_transaction():
+        with ocr_gate.inline_reads():
+            import io
+            from starlette.datastructures import UploadFile
+            upload = UploadFile(io.BytesIO(_pdf("SYNTHETIC TOOL")), filename="FAKE.pdf")
+            asyncio.run(documents.upload_document(aid, upload, SLOT, None))
+        assert not ocr_gate.reads_inline()                      # 도구 구간을 나오면 꺼진다
+    assert len(_rows(aid)) == 1 and len(_stored_files(aid)) == 1
+    assert reader.threads == [main_thread]                       # 판독 스레드로 넘기지 않았다
+    assert reader.contexts == [False]                            # 도구의 쓰기 예약 안에서 읽었다
+    assert ocr_gate.admitted() == 0                              # 자리를 돌려놓았다
+
+
+def test_inline_read_releases_its_seat_and_runs_cleanup_when_the_read_fails():
+    cleaned = []
+
+    def broken():
+        raise ValueError("SYNTHETIC")
+
+    async def scenario():
+        with ocr_gate.inline_reads(), ocr_gate.reserve() as ticket:
+            with pytest.raises(ValueError):
+                await ticket.run(broken)
+            ticket.after_read(lambda: cleaned.append(threading.current_thread().name))
+    asyncio.run(scenario())
+    assert cleaned == [threading.current_thread().name] and ocr_gate.admitted() == 0
+
+
 def test_concurrent_uploads_of_different_applicants_keep_their_own_file_and_result(client, monkeypatch):
     reader = Reader()
     monkeypatch.setattr(documents, "read_document", reader)

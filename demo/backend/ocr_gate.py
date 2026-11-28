@@ -22,6 +22,9 @@
 
 판독 함수는 요청의 contextvars(신청 쓰기 잠금 표시 등)를 복사한 문맥에서 돈다. DB 쓰기 예약(BEGIN IMMEDIATE) 안에서
 부르지 않는다 — 판독은 지금처럼 예약 밖에서 끝내고 저장만 예약 안에서 한다.
+
+예외는 서버가 아닌 **단일 스레드 명령줄 도구**뿐이다(`inline_reads()`): 여러 업로드를 쓰기 예약 하나로 묶는 합성 시드
+도구는 예약 연결이 그 스레드의 것이라 판독을 다른 스레드로 넘길 수 없으므로, 전처럼 호출한 스레드에서 바로 읽는다.
 """
 from __future__ import annotations
 
@@ -134,6 +137,30 @@ class _Gate:
 
 _gate = _Gate()
 
+#: 이 문맥에서 맡긴 판독을 작업 스레드로 보내지 않고 호출한 스레드에서 바로 돈다(`inline_reads`).
+_inline = contextvars.ContextVar("ocr_gate_inline_reads", default=False)
+
+
+@contextmanager
+def inline_reads():
+    """서버가 아닌 단일 스레드 명령줄 도구 전용: 이 안에서 맡긴 판독은 호출한 스레드에서 바로 돈다.
+
+    DB 쓰기 예약(BEGIN IMMEDIATE)을 쥔 채 업로드 여러 건을 한 거래로 묶는 도구(합성 시드)가 쓴다. 예약 연결은 그
+    스레드의 것이므로 판독(올린 서류 목록 조회 포함)을 다른 스레드로 넘기면 안 된다. 그 도구 프로세스에는 함께 처리할
+    다른 요청이 없으므로 멈출 이벤트 루프도 없다. **요청 처리 경로(서버)에서는 쓰지 않는다** — 쓰면 판독 동안 그
+    프로세스의 다른 요청이 다시 멈춘다.
+    """
+    token = _inline.set(True)
+    try:
+        yield
+    finally:
+        _inline.reset(token)
+
+
+def reads_inline() -> bool:
+    """지금 문맥이 `inline_reads()` 안인가."""
+    return _inline.get()
+
 
 class OcrTicket:
     """판독 자리 하나. `reserve()`로 받고, `run`으로 판독 한 번을 작업 스레드에서 돌린다."""
@@ -158,6 +185,11 @@ class OcrTicket:
             if self._used or self._closed:
                 raise RuntimeError("an OCR ticket runs one read")
             self._used = self._in_flight = True
+        if _inline.get():  # 명령줄 도구(inline_reads): 작업 스레드로 넘기지 않고 지금 이 스레드에서 읽는다.
+            try:
+                return function(*args, **kwargs)
+            finally:
+                self._done(None)
         context = contextvars.copy_context()
         try:
             future = self._gate.submit(lambda: context.run(function, *args, **kwargs))

@@ -237,12 +237,13 @@ def _create(scenario, samples, storage, allocated):
     # 이 도구는 seed()의 쓰기 예약 하나로 전체를 묶는 단일 스레드 프로세스다: 판독을 판독 스레드로 넘기지 않고
     # 전처럼 이 스레드에서 읽는다(예약 연결은 이 스레드의 것이다).
     from .. import ocr_gate
-    with synthetic_fixture_ocr(), ocr_gate.inline_reads():
-        for slot, filename in SAMPLE_FILES.items():
-            if scenario == "needs-review" and slot == "resident_abstract":
-                filename = REVIEW_SAMPLE
-            upload = UploadFile(filename=filename, file=io.BytesIO(samples[filename]))
-            asyncio.run(documents.upload_document(aid, upload, slot, "2026-03-05"))
+    with synthetic_fixture_ocr():
+        with ocr_gate.inline_reads():
+            for slot, filename in SAMPLE_FILES.items():
+                if scenario == "needs-review" and slot == "resident_abstract":
+                    filename = REVIEW_SAMPLE
+                upload = UploadFile(filename=filename, file=io.BytesIO(samples[filename]))
+                asyncio.run(documents.upload_document(aid, upload, slot, "2026-03-05"))
     _complete_work(aid)
     review.submit(aid)
     return aid

@@ -1,7 +1,7 @@
 {
  "files": {
   "demo/backend/ocr/__init__.py": "466dd3ffa3f288eb00eafc5547426ffdef61eb92e0b0f1076635a2227c71db34",
-  "demo/backend/ocr/base.py": "9e9d032a503b13b94bd8aeb18a4118bb0e392d42d38fcbeea84b9c00b5a066d5",
+  "demo/backend/ocr/base.py": "398adc5ef410b555c2692978347d261f0e580d012cad0fb44b048d83acd79fc8",
   "demo/backend/ocr/file_evidence.py": "c594554dd0aca45ce92b1cd19ebc5d983a4714ce04974022d5324d11a7a2c710",
   "demo/backend/ocr/fixture.py": "773ba7fb1846146f716338fe0da8c2de4d1f470d54fda621a470172164396c58",
   "demo/backend/ocr/jbai.py": "6a124a180e8aa50fcdbf1274b94c6c6770a617ab3661c66c7089f24d1bcd0f6b",

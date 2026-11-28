@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import select
 from engine_v2.pipeline.privacy import mask_data
 
+from ..ocr.base import without_open_error_text
 from ..models import transactional_write
 from ..review_revision import update_review, require_revision, MAX_EXPECTED_REVISION
 from pydantic import StrictInt
@@ -665,6 +666,8 @@ def _document_view(d: Document, labels: dict[str, str]) -> dict[str, Any]:
     `file_url`은 인라인 스트리밍 주소다. 다운로드 주소는 존재하지 않는다 (R4.1).
     """
     ocr = mask_data(d.ocr_json or {})
+    # 11-28 이전에 저장된 '열 수 없는 파일' 사유에는 서버 저장 경로가 들어 있다: 응답에서는 뺀다.
+    ocr["fields"] = without_open_error_text(ocr.get("fields") or {})
     file_name = d.file_path.replace("\\", "/").rsplit("/", 1)[-1]
     return {
         "document_id": d.id,

@@ -52,6 +52,8 @@ Apply when changing upload certainty, mixed-document PDF handling, daily-work re
 | NEEDS_REVIEW without FAIL | Applicant sees UPLOADED without internal guidance |
 | Missing severity on historical finding + NEEDS_REVIEW | Known allowlist code keeps historical FAIL default; unknown/message-only entries are hidden |
 
+**Unopenable-file reason carries no path (11-28)**: the stored `판독실패` reason of a file that could not be opened is `파일을 열 수 없습니다 (<exception class>).` / `이미지를 열 수 없습니다 (<exception class>).`. The library's exception text is never stored: it contains the full server storage path (storage root, application number, account name) and was returned to officers in `extracted` and kept in the DB. Applicants never received it (`APPLICANT_VISIBLE_FIELDS`). Test: `test_unreadable_reason_privacy.py`.
+
 ## 5. Good / base / bad cases
 
 Good: body-recognized four-page daily duplicate, matching verified identity, complete monthly rows, independent period; all consumers share work assessment. Base: normal source dimensions and complete forms retain their previous result; explicit issue-date cutoff remains inclusive. Bad: infer missing months from an absent map, infer centuries, trust low-confidence date/title glyphs, or let extra pages pollute single-form checks.

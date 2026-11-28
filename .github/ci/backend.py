@@ -2,7 +2,7 @@
 from pathlib import Path
 import os, subprocess, sys
 root = Path.cwd()
-shared = ["db_write_failures", "db_write_transactions", "submitted_document_immutability", "applicant_telemetry_privacy", "resident_number_privacy", "common_ocr_parity", "ocr_resource_guard", "ocr_gate", "image_quality_page_box", "ocr_png_encoding"]
+shared = ["db_write_failures", "db_write_transactions", "submitted_document_immutability", "applicant_telemetry_privacy", "resident_number_privacy", "common_ocr_parity", "ocr_resource_guard", "ocr_gate", "image_quality_page_box", "ocr_png_encoding", "unreadable_reason_privacy"]
 names = shared + (['security_access', 'generic_access', 'generic_officer', 'generic_submitted_documents', 'auto_upload_policy', 'ocr_gate_bypass'] if (root / 'demo/backend/api/generic_officer.py').exists() else ['access_control', 'officer_forms_access', 'auto_upload_rejection', 'applicant_submission_policy'])
 revision = root / 'demo/backend/tests/test_review_revision.py'
 if os.environ.get('REQUIRE_CAS') == 'true' and not revision.is_file():
